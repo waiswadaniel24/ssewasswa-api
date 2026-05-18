@@ -171,7 +171,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 2. DONOR DASHBOARD
   // =============================================
-  app.get('/my-donations', requireAuth, ah(async (req, res) => {
+  app.get('/my-donations/simple', requireAuth, ah(async (req, res) => {
     const email = req.session.user.email;
     const t = req.session.user.tenant_id;
 
@@ -244,7 +244,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       ON CONFLICT (tenant_id, user_email) DO UPDATE SET display_name = $3, is_anonymous = $4`,
       [t, email, display_name || req.session.user.name, !!is_anonymous]);
     await audit(req.session.user.email, 'donor_profile_updated', 'Updated donor profile for ' + email, t);
-    res.redirect('/my-donations');
+    res.redirect('/my-donations/simple');
   }));
 
   // =============================================
@@ -304,19 +304,19 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#ec4899)"><h1>Manage Payouts</h1><p>Process withdrawal requests</p></div>
       <div class="card">
         ${payouts.length ? '<table><tr><th>Campaign</th><th>Amount</th><th>Method</th><th>Phone/Account</th><th>Status</th><th>Date</th><th>Actions</th></tr>' +
-          payouts.map(p => '<tr><td>' + esc(p.campaign_title) + '</td><td style="font-weight:700">UGX ' + (parseInt(p.amount)||0).toLocaleString() + '</td><td>' + esc(p.method) + '</td><td>' + esc(p.phone || p.account_number || '-') + '</td><td><span class="tag" style="background:' + (p.status==='completed'?'#d1fae5;color:#065f46':p.status==='pending'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b') + '">' + esc(p.status) + '</span></td><td>' + new Date(p.created_at).toLocaleDateString() + '</td><td>' + (p.status==='pending'?'<a href="/admin/payouts/'+p.id+'/approve" class="btn btn-sm btn-green">Approve</a> <a href="/admin/payouts/'+p.id+'/reject" class="btn btn-sm btn-red">Reject</a>':p.status==='approved'?'<a href="/admin/payouts/'+p.id+'/complete" class="btn btn-sm btn-green">Mark Complete</a>':'') + '</td></tr>').join('') + '</table>' : '<p class="muted" style="text-align:center;padding:40px">No payout requests yet.</p>'}
+          payouts.map(p => '<tr><td>' + esc(p.campaign_title) + '</td><td style="font-weight:700">UGX ' + (parseInt(p.amount)||0).toLocaleString() + '</td><td>' + esc(p.method) + '</td><td>' + esc(p.phone || p.account_number || '-') + '</td><td><span class="tag" style="background:' + (p.status==='completed'?'#d1fae5;color:#065f46':p.status==='pending'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b') + '">' + esc(p.status) + '</span></td><td>' + new Date(p.created_at).toLocaleDateString() + '</td><td>' + (p.status==='pending'?'<form method="POST" action="/admin/payouts/'+p.id+'/approve" style="display:inline"><button type="submit" class="btn btn-sm btn-green">Approve</button></form> <form method="POST" action="/admin/payouts/'+p.id+'/reject" style="display:inline"><button type="submit" class="btn btn-sm btn-red">Reject</button></form>':p.status==='approved'?'<form method="POST" action="/admin/payouts/'+p.id+'/complete" style="display:inline"><button type="submit" class="btn btn-sm btn-green">Mark Complete</button></form>':'') + '</td></tr>').join('') + '</table>' : '<p class="muted" style="text-align:center;padding:40px">No payout requests yet.</p>'}
       </div>
     `, req.session.user));
   }));
 
-  app.get('/admin/payouts/:id/approve', requireAuth, ah(async (req, res) => {
+  app.post('/admin/payouts/:id/approve', requireAuth, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     await pool.query("UPDATE campaign_payouts SET status='approved', processed_at=NOW() WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
     await audit(req.session.user.email, 'payout_approved', 'Approved payout #' + req.params.id, t);
     res.redirect('/admin/payouts');
   }));
 
-  app.get('/admin/payouts/:id/complete', requireAuth, ah(async (req, res) => {
+  app.post('/admin/payouts/:id/complete', requireAuth, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const payout = (await pool.query('SELECT * FROM campaign_payouts WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
     if (!payout) return res.status(404).send('Not found');
@@ -329,7 +329,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     res.redirect('/admin/payouts');
   }));
 
-  app.get('/admin/payouts/:id/reject', requireAuth, ah(async (req, res) => {
+  app.post('/admin/payouts/:id/reject', requireAuth, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     await pool.query("UPDATE campaign_payouts SET status='rejected', processed_at=NOW() WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
     await audit(req.session.user.email, 'payout_rejected', 'Rejected payout #' + req.params.id, t);
@@ -339,7 +339,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 4. DONOR WALL / RECOGNITION
   // =============================================
-  app.get('/campaigns/:id/donors', ah(async (req, res) => {
+  app.get('/campaigns/:id/donors-list', ah(async (req, res) => {
     const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1 AND fc.is_public=true', [req.params.id])).rows[0];
     if (!c) return res.status(404).send('Not found');
 
@@ -388,7 +388,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 5. QR CODES FOR CAMPAIGNS
   // =============================================
-  app.get('/campaigns/:id/qr', ah(async (req, res) => {
+  app.get('/campaigns/:id/qr-simple', ah(async (req, res) => {
     const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
     if (!c) return res.status(404).send('Not found');
     const campaignUrl = BASE_URL + '/discover/' + c.id;
@@ -449,13 +449,13 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       <div class="card">
         <h2>Active Transactions</h2>
         ${transactions.length ? '<table><tr><th>Campaign</th><th>Investor</th><th>Amount</th><th>Type</th><th>Status</th><th>Date</th><th>Action</th></tr>' +
-          transactions.map(tx => '<tr><td>' + esc(tx.campaign_title) + '</td><td>' + esc(tx.investor_name || tx.investor_email) + '</td><td style="font-weight:700">UGX ' + (parseInt(tx.amount)||0).toLocaleString() + '</td><td><span class="tag">' + esc(tx.transaction_type) + '</span></td><td><span class="tag" style="background:' + (tx.status==='completed'?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e') + '">' + esc(tx.status) + '</span></td><td>' + new Date(tx.created_at).toLocaleDateString() + '</td><td><a href="/admin/refunds/' + tx.id + '/process" class="btn btn-sm btn-red" onclick="return confirm(\'Process refund for this transaction?\')">Refund</a></td></tr>').join('') + '</table>' : '<p class="muted">No active transactions to refund.</p>'}
+          transactions.map(tx => '<tr><td>' + esc(tx.campaign_title) + '</td><td>' + esc(tx.investor_name || tx.investor_email) + '</td><td style="font-weight:700">UGX ' + (parseInt(tx.amount)||0).toLocaleString() + '</td><td><span class="tag">' + esc(tx.transaction_type) + '</span></td><td><span class="tag" style="background:' + (tx.status==='completed'?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e') + '">' + esc(tx.status) + '</span></td><td>' + new Date(tx.created_at).toLocaleDateString() + '</td><td><form method="POST" action="/admin/refunds/' + tx.id + '/process" style="display:inline"><button type="submit" class="btn btn-sm btn-red" onclick="return confirm(\'Process refund for this transaction?\')">Refund</button></form></td></tr>').join('') + '</table>' : '<p class="muted">No active transactions to refund.</p>'}
       </div>
       ${refunded.length > 0 ? '<div class="card" style="margin-top:20px"><h2>Refund History</h2><table><tr><th>Campaign</th><th>Amount</th><th>Refunded</th></tr>' + refunded.map(tx => '<tr><td>' + esc(tx.campaign_title) + '</td><td>UGX ' + (parseInt(tx.amount)||0).toLocaleString() + '</td><td>' + new Date(tx.created_at).toLocaleDateString() + '</td></tr>').join('') + '</table></div>' : ''}
     `, req.session.user));
   }));
 
-  app.get('/admin/refunds/:id/process', requireAuth, ah(async (req, res) => {
+  app.post('/admin/refunds/:id/process', requireAuth, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const tx = (await pool.query('SELECT * FROM investment_transactions WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
     if (!tx) return res.status(404).send('Not found');
@@ -480,7 +480,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 7. CAMPAIGN EMBED WIDGET
   // =============================================
-  app.get('/campaigns/:id/embed', ah(async (req, res) => {
+  app.get('/campaigns/:id/embed-simple', ah(async (req, res) => {
     const c = (await pool.query('SELECT fc.*, t.name as org_name, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id AND tenant_id=fc.tenant_id) as raised FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
     if (!c) return res.status(404).send('Not found');
     const pct = c.target > 0 ? Math.min(100, Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100)) : 0;
@@ -542,7 +542,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         <p class="muted" style="margin-bottom:20px">When a sponsor matches donations, every donation is multiplied — doubling or tripling the impact!</p>
         <a href="/fundraising/${c.id}/matching/new" class="btn btn-green" style="margin-bottom:20px">+ Add Matching Sponsor</a>
         ${matches.length > 0 ? '<table><tr><th>Sponsor</th><th>Match Ratio</th><th>Max Amount</th><th>Matched So Far</th><th>Status</th><th>Actions</th></tr>' +
-          matches.map(m => '<tr><td><strong>' + esc(m.sponsor_name) + '</strong>' + (m.sponsor_email ? '<br><span class="muted">' + esc(m.sponsor_email) + '</span>' : '') + '</td><td>' + m.match_ratio + 'x</td><td>UGX ' + (parseInt(m.max_amount)||0).toLocaleString() + '</td><td>UGX ' + (parseInt(m.matched_so_far)||0).toLocaleString() + '</td><td><span class="tag" style="background:' + (m.status==='active'?'#d1fae5;color:#065f46':m.status==='completed'?'#dbeafe;color:#1e40af':'#fef3c7;color:#92400e') + '">' + esc(m.status) + '</span></td><td>' + (m.status==='active'?'<a href="/fundraising/matching/'+m.id+'/pause" class="btn btn-sm">Pause</a>':'') + (m.status==='paused'?'<a href="/fundraising/matching/'+m.id+'/resume" class="btn btn-sm btn-green">Resume</a>':'') + '</td></tr>').join('') + '</table>' : '<p class="muted">No matching sponsors yet. Add a sponsor to double the impact of every donation!</p>'}
+          matches.map(m => '<tr><td><strong>' + esc(m.sponsor_name) + '</strong>' + (m.sponsor_email ? '<br><span class="muted">' + esc(m.sponsor_email) + '</span>' : '') + '</td><td>' + m.match_ratio + 'x</td><td>UGX ' + (parseInt(m.max_amount)||0).toLocaleString() + '</td><td>UGX ' + (parseInt(m.matched_so_far)||0).toLocaleString() + '</td><td><span class="tag" style="background:' + (m.status==='active'?'#d1fae5;color:#065f46':m.status==='completed'?'#dbeafe;color:#1e40af':'#fef3c7;color:#92400e') + '">' + esc(m.status) + '</span></td><td>' + (m.status==='active'?'<form method="POST" action="/fundraising/matching/'+m.id+'/pause" style="display:inline"><button type="submit" class="btn btn-sm">Pause</button></form>':'') + (m.status==='paused'?'<form method="POST" action="/fundraising/matching/'+m.id+'/resume" style="display:inline"><button type="submit" class="btn btn-sm btn-green">Resume</button></form>':'') + '</td></tr>').join('') + '</table>' : '<p class="muted">No matching sponsors yet. Add a sponsor to double the impact of every donation!</p>'}
       </div>
     `, req.session.user));
   }));
@@ -580,14 +580,14 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     res.redirect('/fundraising/' + req.params.id + '/matching');
   }));
 
-  app.get('/fundraising/matching/:id/pause', requireAuth, ah(async (req, res) => {
+  app.post('/fundraising/matching/:id/pause', requireAuth, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     await pool.query("UPDATE matching_donations SET status='paused' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
     await audit(req.session.user.email, 'matching_donation_paused', 'Paused matching donation #' + req.params.id, t);
     res.redirect('back');
   }));
 
-  app.get('/fundraising/matching/:id/resume', requireAuth, ah(async (req, res) => {
+  app.post('/fundraising/matching/:id/resume', requireAuth, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     await pool.query("UPDATE matching_donations SET status='active' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
     await audit(req.session.user.email, 'matching_donation_resumed', 'Resumed matching donation #' + req.params.id, t);
@@ -601,15 +601,14 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const t = req.session.user.tenant_id;
     const { comment } = req.body;
     if (!comment || !comment.trim()) return res.redirect('back');
-    const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+    const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
     if (!c) return res.status(404).send('Not found');
-    const tenantId = c.tenant_id;
     await pool.query('INSERT INTO campaign_comments(tenant_id,campaign_id,user_email,user_name,comment) VALUES($1,$2,$3,$4,$5)',
-      [tenantId, req.params.id, req.session.user.email, req.session.user.name || 'Anonymous', comment.trim()]);
+      [t, req.params.id, req.session.user.email, req.session.user.name || 'Anonymous', comment.trim()]);
     res.redirect('back');
   }));
 
-  app.get('/campaigns/:id/comments', ah(async (req, res) => {
+  app.get('/api/campaigns/:id/comments', ah(async (req, res) => {
     const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
     if (!c) return res.status(404).send('Not found');
     const comments = (await pool.query('SELECT * FROM campaign_comments WHERE campaign_id=$1 AND tenant_id=$2 AND is_public=true ORDER BY created_at DESC LIMIT 100', [c.id, c.tenant_id])).rows;
@@ -663,7 +662,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button onclick="window.print()" class="btn btn-green">Print Receipt</button>
-          <a href="/my-donations" class="btn btn-sm">Back to My Donations</a>
+          <a href="/my-donations/simple" class="btn btn-sm">Back to My Donations</a>
           <a href="/discover/${donation.campaign_id}" class="btn btn-sm">View Campaign</a>
         </div>
       </div>
@@ -674,7 +673,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 11. DEADLINE REMINDERS (cron-like check)
   // =============================================
-  app.get('/api/cron/deadline-reminders', ah(async (req, res) => {
+  app.post('/api/cron/deadline-reminders', requireAuth, ah(async (req, res) => {
     try {
       // Find campaigns expiring in 3 days, 1 day, and today
       const reminders = [

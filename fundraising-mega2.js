@@ -408,6 +408,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     await pool.query('UPDATE campaign_ab_tests SET conversion_rate = CASE WHEN views > 0 THEN (donations::NUMERIC / views::NUMERIC) * 100 ELSE 0 END WHERE id=$1 AND tenant_id=$2', [testId, t]);
 
     const updated = (await pool.query('SELECT * FROM campaign_ab_tests WHERE id=$1 AND tenant_id=$2', [testId, t])).rows[0];
+    await audit(req, 'ab_test_tracked', 'ab_tests', req.params.id);
     res.json(updated);
   }));
 
@@ -723,33 +724,41 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // API: Fulfill wishlist item
   app.post('/api/wishlists/:id/fulfill', ah(async (req, res) => {
     const t = req.session.user.tenant_id;
-    const wishlistId = parseInt(req.params.id);
+    const itemId = parseInt(req.params.id);
     const { donor_name, amount } = req.body;
 
     if (!donor_name) return res.status(400).json({ error: 'donor_name is required' });
 
-    const item = (await pool.query('SELECT * FROM donation_wishlists WHERE id=$1 AND tenant_id=$2', [wishlistId, t])).rows[0];
-    if (!item) return res.status(404).json({ error: 'Wishlist item not found' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const itemRes = await client.query('SELECT * FROM donation_wishlists WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [itemId, t]);
+      if (!itemRes.rows[0]) { await client.query('ROLLBACK'); client.release(); return res.status(404).json({ error: 'Wishlist item not found' }); }
+      const item = itemRes.rows[0];
+      const fulfillAmount = parseInt(amount) || item.estimated_cost;
+      const qty = 1;
+      const result = await client.query(
+        'INSERT INTO wishlist_fulfillments (tenant_id, wishlist_id, donor_name, amount) VALUES ($1,$2,$3,$4) RETURNING *',
+        [t, itemId, esc(donor_name), fulfillAmount]
+      );
+      await client.query('UPDATE donation_wishlists SET quantity_fulfilled=quantity_fulfilled+$1 WHERE id=$2 AND tenant_id=$3', [qty, itemId, t]);
+      const isFullyFulfilled = (item.quantity_fulfilled + qty) >= item.quantity_needed;
+      await client.query('COMMIT');
+      client.release();
 
-    const fulfillAmount = parseInt(amount) || item.estimated_cost;
+      if (donor_name && sendEmail) {
+        try {
+          sendEmail(donor_name, 'Thank You for Fulfilling a Wish!', '<div style="font-family:sans-serif;max-width:600px;margin:0 auto"><div style="background:linear-gradient(135deg,#059669,#10b981);padding:30px;border-radius:12px 12px 0 0;text-align:center;color:white"><h1>Thank You!</h1></div><div style="padding:30px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px"><p>Thank you for fulfilling the wish: <strong>' + esc(item.item_name) + '</strong>.</p><p>Your generosity of <strong>UGX ' + fulfillAmount.toLocaleString() + '</strong> makes a real difference!</p></div></div>');
+        } catch(e) {}
+      }
 
-    const result = await pool.query(
-      'INSERT INTO wishlist_fulfillments (tenant_id, wishlist_id, donor_name, amount) VALUES ($1,$2,$3,$4) RETURNING *',
-      [t, wishlistId, esc(donor_name), fulfillAmount]
-    );
-
-    // Update quantity fulfilled
-    const newFulfilled = item.quantity_fulfilled + 1;
-    const isFullyFulfilled = newFulfilled >= item.quantity_needed;
-    await pool.query('UPDATE donation_wishlists SET quantity_fulfilled=$1 WHERE id=$2 AND tenant_id=$3', [newFulfilled, wishlistId, t]);
-
-    if (donor_name && sendEmail) {
-      try {
-        sendEmail(donor_name, 'Thank You for Fulfilling a Wish!', '<div style="font-family:sans-serif;max-width:600px;margin:0 auto"><div style="background:linear-gradient(135deg,#059669,#10b981);padding:30px;border-radius:12px 12px 0 0;text-align:center;color:white"><h1>Thank You!</h1></div><div style="padding:30px;background:white;border:1px solid #e2e8f0;border-radius:0 0 12px 12px"><p>Thank you for fulfilling the wish: <strong>' + esc(item.item_name) + '</strong>.</p><p>Your generosity of <strong>UGX ' + fulfillAmount.toLocaleString() + '</strong> makes a real difference!</p></div></div>');
-      } catch(e) {}
+      await audit(req, 'wishlist_fulfilled', 'campaign_wishlists', req.params.id);
+      res.json({ fulfillment: result.rows[0], item_fully_fulfilled: isFullyFulfilled });
+    } catch(e) {
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+      throw e;
     }
-
-    res.json({ fulfillment: result.rows[0], item_fully_fulfilled: isFullyFulfilled });
   }));
 
   // API: Delete wishlist item
@@ -921,32 +930,39 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const matcherId = parseInt(req.params.matcherId);
     const { donor_email, donation_id, original_amount } = req.body;
 
-    const matcher = (await pool.query('SELECT * FROM corporate_matchers WHERE id=$1 AND tenant_id=$2 AND is_active=true', [matcherId, t])).rows[0];
-    if (!matcher) return res.status(404).json({ error: 'Corporate matcher not found or inactive' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const matcherRes = await client.query('SELECT * FROM corporate_matchers WHERE id=$1 AND tenant_id=$2 AND is_active=true FOR UPDATE', [matcherId, t]);
+      if (!matcherRes.rows[0]) { await client.query('ROLLBACK'); client.release(); return res.status(404).json({ error: 'Corporate matcher not found or inactive' }); }
+      const matcher = matcherRes.rows[0];
+      const origAmount = parseInt(original_amount) || 0;
+      const matchAmount = Math.min(Math.round(origAmount * parseFloat(matcher.match_ratio)), matcher.max_annual_match - matcher.current_year_matched);
+      if (matchAmount <= 0) { await client.query('ROLLBACK'); client.release(); return res.status(400).json({ error: 'No matching funds remaining this year' }); }
 
-    const origAmount = parseInt(original_amount) || 0;
-    const matchAmount = Math.min(Math.round(origAmount * parseFloat(matcher.match_ratio)), matcher.max_annual_match - matcher.current_year_matched);
+      const result = await client.query(
+        'INSERT INTO corporate_match_claims (tenant_id, matcher_id, donor_email, donation_id, original_amount, matched_amount, status) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+        [t, matcherId, esc(donor_email || ''), donation_id || null, origAmount, matchAmount, 'pending']
+      );
+      await client.query('UPDATE corporate_matchers SET current_year_matched = current_year_matched + $1 WHERE id=$2 AND tenant_id=$3', [matchAmount, matcherId, t]);
+      await client.query('COMMIT');
+      client.release();
 
-    if (matchAmount <= 0) return res.status(400).json({ error: 'No matching funds remaining this year' });
+      await audit(req, 'corporate_match_claimed', 'corporate_match_claims', result.rows[0].id);
 
-    const result = await pool.query(
-      'INSERT INTO corporate_match_claims (tenant_id, matcher_id, donor_email, donation_id, original_amount, matched_amount, status) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [t, matcherId, esc(donor_email || ''), donation_id || null, origAmount, matchAmount, 'pending']
-    );
+      // Notify matcher contact
+      if (matcher.contact_email) {
+        try {
+          notify(t, matcher.contact_email, 'New Match Claim', 'A new match claim of UGX ' + matchAmount.toLocaleString() + ' has been submitted by ' + (donor_email || 'a donor'), 'fundraising');
+        } catch(e) {}
+      }
 
-    // Update current year matched
-    await pool.query('UPDATE corporate_matchers SET current_year_matched = current_year_matched + $1 WHERE id=$2 AND tenant_id=$3', [matchAmount, matcherId, t]);
-
-    await audit(req.session.user.email, 'match_claim_submitted', 'Submitted match claim for ' + matcher.company_name + ': UGX ' + matchAmount);
-
-    // Notify matcher contact
-    if (matcher.contact_email) {
-      try {
-        notify(t, matcher.contact_email, 'New Match Claim', 'A new match claim of UGX ' + matchAmount.toLocaleString() + ' has been submitted by ' + (donor_email || 'a donor'), 'fundraising');
-      } catch(e) {}
+      res.json(result.rows[0]);
+    } catch(e) {
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+      throw e;
     }
-
-    res.json(result.rows[0]);
   }));
 
   // API: Update match claim status

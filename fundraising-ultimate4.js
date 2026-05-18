@@ -833,16 +833,13 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO endowment_transactions (tenant_id, endowment_id, transaction_type, amount, date, description) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [t, parseInt(req.params.id), transaction_type, amt, date || 'CURRENT_DATE', description ? esc(description) : null]
     );
-    // Update endowment current_value
-    let newCurrentValue = parseFloat(endowment.current_value);
-    if (transaction_type === 'contribution' || transaction_type === 'investment_return') {
-      newCurrentValue += amt;
-    } else if (transaction_type === 'withdrawal' || transaction_type === 'spending') {
-      newCurrentValue -= amt;
-    } else if (transaction_type === 'adjustment') {
-      newCurrentValue = amt; // adjustment sets the value directly
+    // Update endowment current_value atomically (no race condition)
+    if (transaction_type === 'adjustment') {
+      await pool.query('UPDATE endowments SET current_value=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3 RETURNING *', [amt, req.params.id, t]);
+    } else {
+      const increment = (transaction_type === 'contribution' || transaction_type === 'investment_return') ? amt : -amt;
+      await pool.query('UPDATE endowments SET current_value=current_value+$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3 RETURNING *', [increment, req.params.id, t]);
     }
-    await pool.query('UPDATE endowments SET current_value=$1 WHERE id=$2 AND tenant_id=$3', [newCurrentValue, req.params.id, t]);
     await audit(req.session.user.email, 'endowment_transaction_added', 'Added ' + transaction_type + ' to endowment #' + req.params.id);
     res.json(result.rows[0]);
   }));
@@ -910,7 +907,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     res.json(result.rows[0]);
   }));
 
-  // POST /api/currency-wallets/transfer — Transfer between wallets
+  // POST /api/currency-wallets/transfer — Transfer between wallets (with row-level locking to prevent double-spend)
   app.post('/api/currency-wallets/transfer', requireAuth, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const { from_wallet_id, to_wallet_id, amount, exchange_rate, reference } = req.body;
@@ -918,31 +915,54 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (from_wallet_id === to_wallet_id) return res.status(400).json({ error: 'Cannot transfer to the same wallet' });
     const amt = parseFloat(amount);
     const rate = parseFloat(exchange_rate) || 1.0;
-
-    const fromWallet = (await pool.query('SELECT * FROM currency_wallets WHERE id=$1 AND tenant_id=$2', [from_wallet_id, t])).rows[0];
-    const toWallet = (await pool.query('SELECT * FROM currency_wallets WHERE id=$1 AND tenant_id=$2', [to_wallet_id, t])).rows[0];
-    if (!fromWallet) return res.status(404).json({ error: 'Source wallet not found' });
-    if (!toWallet) return res.status(404).json({ error: 'Destination wallet not found' });
-    if (parseFloat(fromWallet.balance) < amt) return res.status(400).json({ error: 'Insufficient balance in source wallet' });
-
     const convertedAmount = amt * rate;
 
-    // Debit source
-    await pool.query('UPDATE currency_wallets SET balance=balance-$1 WHERE id=$2 AND tenant_id=$3', [amt, from_wallet_id, t]);
-    await pool.query(
-      'INSERT INTO currency_transactions (tenant_id, wallet_id, type, amount, exchange_rate, reference) VALUES ($1,$2,$3,$4,$5,$6)',
-      [t, from_wallet_id, 'transfer_out', amt, rate, reference ? esc(reference) : 'Transfer to ' + toWallet.currency]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    // Credit destination
-    await pool.query('UPDATE currency_wallets SET balance=balance+$1 WHERE id=$2 AND tenant_id=$3', [convertedAmount, to_wallet_id, t]);
-    await pool.query(
-      'INSERT INTO currency_transactions (tenant_id, wallet_id, type, amount, exchange_rate, reference) VALUES ($1,$2,$3,$4,$5,$6)',
-      [t, to_wallet_id, 'transfer_in', convertedAmount, rate, reference ? esc(reference) : 'Transfer from ' + fromWallet.currency]
-    );
+      // Lock source wallet row
+      const fromResult = await client.query('SELECT * FROM currency_wallets WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [from_wallet_id, t]);
+      if (fromResult.rows.length === 0 || parseFloat(fromResult.rows[0].balance) < amt) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Insufficient balance' });
+      }
+      const fromWallet = fromResult.rows[0];
 
-    await audit(req.session.user.email, 'currency_transfer', 'Transferred ' + amt + ' ' + fromWallet.currency + ' to ' + convertedAmount + ' ' + toWallet.currency);
-    res.json({ success: true, from: fromWallet.currency, to: toWallet.currency, amount: amt, converted: convertedAmount, rate });
+      // Lock destination wallet row
+      const toResult = await client.query('SELECT * FROM currency_wallets WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [to_wallet_id, t]);
+      if (toResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(404).json({ error: 'Destination wallet not found' });
+      }
+      const toWallet = toResult.rows[0];
+
+      // Debit source
+      await client.query('UPDATE currency_wallets SET balance=balance-$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3', [amt, from_wallet_id, t]);
+      await client.query(
+        'INSERT INTO currency_transactions (tenant_id, wallet_id, type, amount, exchange_rate, reference) VALUES ($1,$2,$3,$4,$5,$6)',
+        [t, from_wallet_id, 'transfer_out', amt, rate, reference ? esc(reference) : 'Transfer to ' + toWallet.currency]
+      );
+
+      // Credit destination
+      await client.query('UPDATE currency_wallets SET balance=balance+$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3', [convertedAmount, to_wallet_id, t]);
+      await client.query(
+        'INSERT INTO currency_transactions (tenant_id, wallet_id, type, amount, exchange_rate, reference) VALUES ($1,$2,$3,$4,$5,$6)',
+        [t, to_wallet_id, 'transfer_in', convertedAmount, rate, reference ? esc(reference) : 'Transfer from ' + fromWallet.currency]
+      );
+
+      await client.query('COMMIT');
+      client.release();
+
+      await audit(req.session.user.email, 'currency_transfer', 'Transferred ' + amt + ' ' + fromWallet.currency + ' to ' + convertedAmount + ' ' + toWallet.currency);
+      res.json({ success: true, from: fromWallet.currency, to: toWallet.currency, amount: amt, converted: convertedAmount, rate });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+      return res.status(500).json({ error: e.message });
+    }
   }));
 
   // ================================================================

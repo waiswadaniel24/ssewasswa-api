@@ -202,13 +202,25 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.get('/api/ticket-purchases', requireAuth, ah(async (req, res) => { const r = await pool.query('SELECT p.*, t.tier_name, t.event_name FROM ticket_purchases p JOIN ticket_tiers t ON p.tier_id=t.id WHERE p.tenant_id=$1 ORDER BY p.created_at DESC LIMIT 50', [req.session.user.tenant_id]); res.json(r.rows); }));
   app.post('/api/ticket-purchases', requireAuth, ah(async (req, res) => {
     const { tier_id, buyer_name, buyer_email, buyer_phone, quantity, payment_method } = req.body;
-    const tier = await pool.query('SELECT * FROM ticket_tiers WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, tier_id]);
-    if (!tier.rows.length) return res.status(404).json({ error: 'Tier not found' });
-    const qty = quantity || 1; const total = qty * parseFloat(tier.rows[0].price);
-    const qr = 'TKT-' + Math.random().toString(36).substring(2,10);
-    const r = await pool.query('INSERT INTO ticket_purchases (tenant_id,tier_id,buyer_name,buyer_email,buyer_phone,quantity,total_amount,payment_method,qr_code) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *', [req.session.user.tenant_id, tier_id, esc(buyer_name||''), esc(buyer_email||''), esc(buyer_phone||''), qty, total, esc(payment_method||'online'), qr]);
-    await pool.query('UPDATE ticket_tiers SET quantity_sold=quantity_sold+$1 WHERE id=$2 AND tenant_id=$3', [qty, tier_id, req.session.user.tenant_id]);
-    await audit(req, 'create', 'ticket_purchases', r.rows[0].id); res.json(r.rows[0]);
+    const qty = quantity || 1;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const tier = await client.query('SELECT * FROM ticket_tiers WHERE tenant_id=$1 AND id=$2 FOR UPDATE', [req.session.user.tenant_id, tier_id]);
+      if (!tier.rows.length) { await client.query('ROLLBACK'); client.release(); return res.status(404).json({ error: 'Tier not found' }); }
+      if (parseFloat(tier.rows[0].quantity_sold) + qty > parseFloat(tier.rows[0].quantity_available)) { await client.query('ROLLBACK'); client.release(); return res.status(400).json({ error: 'Not enough tickets available' }); }
+      const total = qty * parseFloat(tier.rows[0].price);
+      const qr = 'TKT-' + Math.random().toString(36).substring(2,10);
+      const r = await client.query('INSERT INTO ticket_purchases (tenant_id,tier_id,buyer_name,buyer_email,buyer_phone,quantity,total_amount,payment_method,qr_code) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *', [req.session.user.tenant_id, tier_id, esc(buyer_name||''), esc(buyer_email||''), esc(buyer_phone||''), qty, total, esc(payment_method||'online'), qr]);
+      await client.query('UPDATE ticket_tiers SET quantity_sold=quantity_sold+$1 WHERE id=$2 AND tenant_id=$3', [qty, tier_id, req.session.user.tenant_id]);
+      await client.query('COMMIT');
+      client.release();
+      await audit(req, 'create', 'ticket_purchases', r.rows[0].id); res.json(r.rows[0]);
+    } catch(e) {
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+      return res.status(500).json({ error: e.message });
+    }
   }));
   app.post('/api/ticket-purchases/:id/checkin', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE ticket_purchases SET checked_in=true, checked_in_at=NOW() WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
@@ -229,21 +241,42 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.post('/api/auction-items/:id/bid', requireAuth, ah(async (req, res) => {
     const { bidder_name, bidder_email, amount } = req.body;
     if (!amount) return res.status(400).json({ error: 'amount required' });
-    const item = await pool.query('SELECT * FROM auction_items WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    if (!item.rows.length) return res.status(404).json({ error: 'Item not found' });
-    if (parseFloat(amount) <= parseFloat(item.rows[0].current_bid)) return res.status(400).json({ error: 'Bid must exceed current bid' });
-    await pool.query('UPDATE auction_bids SET is_winning=false WHERE item_id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
-    const r = await pool.query('INSERT INTO auction_bids (tenant_id,item_id,bidder_name,bidder_email,amount,is_winning) VALUES ($1,$2,$3,$4,$5,true) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(bidder_name||''), esc(bidder_email||''), amount]);
-    await pool.query('UPDATE auction_items SET current_bid=$1 WHERE id=$2 AND tenant_id=$3', [amount, req.params.id, req.session.user.tenant_id]);
-    await audit(req, 'create', 'auction_bids', r.rows[0].id); res.json(r.rows[0]);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const item = await client.query('SELECT * FROM auction_items WHERE tenant_id=$1 AND id=$2 FOR UPDATE', [req.session.user.tenant_id, req.params.id]);
+      if (!item.rows.length) { await client.query('ROLLBACK'); client.release(); return res.status(404).json({ error: 'Item not found' }); }
+      if (parseFloat(amount) <= parseFloat(item.rows[0].current_bid)) { await client.query('ROLLBACK'); client.release(); return res.status(400).json({ error: 'Bid must exceed current bid' }); }
+      await client.query('UPDATE auction_bids SET is_winning=false WHERE item_id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+      const r = await client.query('INSERT INTO auction_bids (tenant_id,item_id,bidder_name,bidder_email,amount,is_winning) VALUES ($1,$2,$3,$4,$5,true) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(bidder_name||''), esc(bidder_email||''), amount]);
+      await client.query('UPDATE auction_items SET current_bid=$1 WHERE id=$2 AND tenant_id=$3', [amount, req.params.id, req.session.user.tenant_id]);
+      await client.query('COMMIT');
+      client.release();
+      await audit(req, 'create', 'auction_bids', r.rows[0].id); res.json(r.rows[0]);
+    } catch(e) {
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+      return res.status(500).json({ error: e.message });
+    }
   }));
   app.get('/api/auction-items/:id/bids', requireAuth, ah(async (req, res) => { const r = await pool.query('SELECT * FROM auction_bids WHERE tenant_id=$1 AND item_id=$2 ORDER BY amount DESC', [req.session.user.tenant_id, req.params.id]); res.json(r.rows); }));
   app.post('/api/auction-items/:id/buy-now', requireAuth, ah(async (req, res) => {
     const { bidder_name, bidder_email } = req.body;
-    const item = await pool.query('SELECT * FROM auction_items WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    if (!item.rows.length || !item.rows[0].buy_now_price) return res.status(400).json({ error: 'Buy now not available' });
-    await pool.query('UPDATE auction_items SET current_bid=buy_now_price, status=$1, winner_id=NULL WHERE id=$2 AND tenant_id=$3', ['sold', req.params.id, req.session.user.tenant_id]);
-    await audit(req, 'update', 'auction_items', req.params.id); res.json({ message: 'Item purchased!', price: item.rows[0].buy_now_price });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const item = await client.query('SELECT * FROM auction_items WHERE tenant_id=$1 AND id=$2 FOR UPDATE', [req.session.user.tenant_id, req.params.id]);
+      if (!item.rows.length || !item.rows[0].buy_now_price) { await client.query('ROLLBACK'); client.release(); return res.status(400).json({ error: 'Buy now not available' }); }
+      if (item.rows[0].status !== 'open' && item.rows[0].status !== 'active') { await client.query('ROLLBACK'); client.release(); return res.status(400).json({ error: 'Item no longer available for purchase' }); }
+      await client.query('UPDATE auction_items SET current_bid=buy_now_price, status=$1, winner_id=NULL WHERE id=$2 AND tenant_id=$3', ['sold', req.params.id, req.session.user.tenant_id]);
+      await client.query('COMMIT');
+      client.release();
+      await audit(req, 'update', 'auction_items', req.params.id); res.json({ message: 'Item purchased!', price: item.rows[0].buy_now_price });
+    } catch(e) {
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+      return res.status(500).json({ error: e.message });
+    }
   }));
   app.post('/api/auction-items/:id/close', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE auction_items SET status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', ['closed', req.session.user.tenant_id, req.params.id]);
@@ -264,9 +297,22 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.get('/api/sponsorship-purchases', requireAuth, ah(async (req, res) => { const r = await pool.query('SELECT p.*, pkg.package_name, pkg.event_name FROM sponsorship_purchases p JOIN sponsorship_packages pkg ON p.package_id=pkg.id WHERE p.tenant_id=$1 ORDER BY p.created_at DESC', [req.session.user.tenant_id]); res.json(r.rows); }));
   app.post('/api/sponsorship-purchases', requireAuth, ah(async (req, res) => {
     const { package_id, sponsor_name, sponsor_email, sponsor_phone, company, amount, payment_method } = req.body;
-    const r = await pool.query('INSERT INTO sponsorship_purchases (tenant_id,package_id,sponsor_name,sponsor_email,sponsor_phone,company,amount,payment_status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *', [req.session.user.tenant_id, package_id, esc(sponsor_name||''), esc(sponsor_email||''), esc(sponsor_phone||''), esc(company||''), amount||0, 'pending']);
-    await pool.query('UPDATE sponsorship_packages SET quantity_sold=quantity_sold+1 WHERE id=$1 AND tenant_id=$2', [package_id, req.session.user.tenant_id]);
-    await audit(req, 'create', 'sponsorship_purchases', r.rows[0].id); res.json(r.rows[0]);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const pkg = await client.query('SELECT * FROM sponsorship_packages WHERE tenant_id=$1 AND id=$2 FOR UPDATE', [req.session.user.tenant_id, package_id]);
+      if (!pkg.rows.length) { await client.query('ROLLBACK'); client.release(); return res.status(404).json({ error: 'Package not found' }); }
+      if (parseFloat(pkg.rows[0].quantity_sold) + 1 > parseFloat(pkg.rows[0].quantity_available)) { await client.query('ROLLBACK'); client.release(); return res.status(400).json({ error: 'No sponsorship packages available' }); }
+      const r = await client.query('INSERT INTO sponsorship_purchases (tenant_id,package_id,sponsor_name,sponsor_email,sponsor_phone,company,amount,payment_status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *', [req.session.user.tenant_id, package_id, esc(sponsor_name||''), esc(sponsor_email||''), esc(sponsor_phone||''), esc(company||''), amount||0, 'pending']);
+      await client.query('UPDATE sponsorship_packages SET quantity_sold=quantity_sold+1 WHERE id=$1 AND tenant_id=$2', [package_id, req.session.user.tenant_id]);
+      await client.query('COMMIT');
+      client.release();
+      await audit(req, 'create', 'sponsorship_purchases', r.rows[0].id); res.json(r.rows[0]);
+    } catch(e) {
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+      return res.status(500).json({ error: e.message });
+    }
   }));
   app.put('/api/sponsorship-purchases/:id/fulfill', requireAuth, ah(async (req, res) => { const r = await pool.query('UPDATE sponsorship_purchases SET fulfillment_status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', ['fulfilled', req.session.user.tenant_id, req.params.id]); await audit(req, 'update', 'sponsorship_purchases', req.params.id); res.json(r.rows[0]); }));
   app.get('/sponsorships', requireAuth, ah(async (req, res) => { renderPage(req, res, 'Sponsorships', '<div class="max-w-6xl mx-auto p-6"><h1 class="text-2xl font-bold mb-6">Sponsorship Management</h1><p>API: /api/sponsorship-packages, /api/sponsorship-purchases</p></div>'); }));
@@ -284,12 +330,22 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.post('/api/daf/:id/grants', requireAuth, ah(async (req, res) => {
     const { grant_to, purpose, amount } = req.body;
     if (!grant_to || !amount) return res.status(400).json({ error: 'grant_to and amount required' });
-    const fund = await pool.query('SELECT * FROM donor_advised_funds WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    if (!fund.rows.length) return res.status(404).json({ error: 'Fund not found' });
-    if (parseFloat(amount) > parseFloat(fund.rows[0].current_balance)) return res.status(400).json({ error: 'Insufficient balance' });
-    const r = await pool.query('INSERT INTO daf_grants (tenant_id,fund_id,grant_to,purpose,amount) VALUES ($1,$2,$3,$4,$5) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(grant_to), esc(purpose||''), amount]);
-    await pool.query('UPDATE donor_advised_funds SET current_balance=current_balance-$1, total_granted=total_granted+$1 WHERE id=$2 AND tenant_id=$3', [amount, req.params.id, req.session.user.tenant_id]);
-    await audit(req, 'create', 'daf_grants', r.rows[0].id); res.json(r.rows[0]);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const fund = await client.query('SELECT * FROM donor_advised_funds WHERE tenant_id=$1 AND id=$2 FOR UPDATE', [req.session.user.tenant_id, req.params.id]);
+      if (!fund.rows.length) { await client.query('ROLLBACK'); client.release(); return res.status(404).json({ error: 'Fund not found' }); }
+      if (parseFloat(amount) > parseFloat(fund.rows[0].current_balance)) { await client.query('ROLLBACK'); client.release(); return res.status(400).json({ error: 'Insufficient balance' }); }
+      const r = await client.query('INSERT INTO daf_grants (tenant_id,fund_id,grant_to,purpose,amount) VALUES ($1,$2,$3,$4,$5) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(grant_to), esc(purpose||''), amount]);
+      await client.query('UPDATE donor_advised_funds SET current_balance=current_balance-$1, total_granted=total_granted+$1 WHERE id=$2 AND tenant_id=$3', [amount, req.params.id, req.session.user.tenant_id]);
+      await client.query('COMMIT');
+      client.release();
+      await audit(req, 'create', 'daf_grants', r.rows[0].id); res.json(r.rows[0]);
+    } catch(e) {
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+      return res.status(500).json({ error: e.message });
+    }
   }));
   app.put('/api/daf/grants/:id/approve', requireAuth, ah(async (req, res) => { const r = await pool.query('UPDATE daf_grants SET status=$1, granted_at=NOW() WHERE tenant_id=$2 AND id=$3 RETURNING *', ['approved', req.session.user.tenant_id, req.params.id]); await audit(req, 'update', 'daf_grants', req.params.id); res.json(r.rows[0]); }));
   app.put('/api/daf/grants/:id/reject', requireAuth, ah(async (req, res) => { const r = await pool.query('UPDATE daf_grants SET status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', ['rejected', req.session.user.tenant_id, req.params.id]); await audit(req, 'update', 'daf_grants', req.params.id); res.json(r.rows[0]); }));

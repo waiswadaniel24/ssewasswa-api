@@ -564,13 +564,13 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
   // Track view (public, no auth)
   app.post('/api/landing-pages/:id/track-view', ah(async (req, res) => {
-    await pool.query('UPDATE landing_pages SET view_count=view_count+1 WHERE id=$1 AND tenant_id=(SELECT tenant_id FROM landing_pages WHERE id=$1)', [req.params.id]);
+    await pool.query('UPDATE landing_pages SET view_count=view_count+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, req.body.tenant_id]);
     res.json({ ok: true });
   }));
 
   // Track conversion (public, no auth)
   app.post('/api/landing-pages/:id/track-conversion', ah(async (req, res) => {
-    await pool.query('UPDATE landing_pages SET conversion_count=conversion_count+1 WHERE id=$1 AND tenant_id=(SELECT tenant_id FROM landing_pages WHERE id=$1)', [req.params.id]);
+    await pool.query('UPDATE landing_pages SET conversion_count=conversion_count+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, req.body.tenant_id]);
     res.json({ ok: true });
   }));
 
@@ -578,7 +578,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.get('/api/landing-pages/slug/:slug', ah(async (req, res) => {
     const r = await pool.query('SELECT * FROM landing_pages WHERE slug=$1 AND is_published=true', [req.params.slug]);
     if (!r.rows.length) return res.status(404).json({ error: 'Page not found' });
-    await pool.query('UPDATE landing_pages SET view_count=view_count+1 WHERE id=$1', [r.rows[0].id]);
+    await pool.query('UPDATE landing_pages SET view_count=view_count+1 WHERE id=$1 AND tenant_id=$2', [r.rows[0].id, r.rows[0].tenant_id]);
     res.json(r.rows[0]);
   }));
 
@@ -752,7 +752,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
   // Webhook (public, no auth)
   app.post('/api/payment-gateways/webhook/:gatewayId', ah(async (req, res) => {
-    const gw = await pool.query('SELECT * FROM payment_gateways WHERE id=$1 AND is_active=true', [req.params.gatewayId]);
+    const gw = await pool.query('SELECT * FROM payment_gateways WHERE id=$1 AND is_active=true AND tenant_id=$2', [req.params.gatewayId, req.body.tenant_id]);
     if (!gw.rows.length) return res.status(404).json({ error: 'Gateway not found' });
     const { external_tx_id, donor_name, donor_email, amount, currency, status, payment_method, metadata, campaign_id } = req.body;
     const feePct = parseFloat(gw.rows[0].fee_percentage) || 0;
@@ -1007,7 +1007,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   }));
 
   // Segments
-  app.get('/api/donor-segments', requireAuth, ah(async (req, res) => {
+  app.get('/api/donor-renewal-segments', requireAuth, ah(async (req, res) => {
     const r = await pool.query('SELECT * FROM donor_renewal_segments WHERE tenant_id=$1 ORDER BY segment_name', [req.session.user.tenant_id]);
     res.json(r.rows);
   }));

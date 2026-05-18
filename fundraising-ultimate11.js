@@ -609,9 +609,9 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     res.json({ ok: true, sent_to: sent });
   }));
   app.get('/api/impact-reports/public/:id', ah(async (req, res) => {
-    const report = await pool.query('SELECT * FROM donation_impact_reports WHERE id=$1 AND is_published=true', [req.params.id]);
+    const report = await pool.query('SELECT * FROM donation_impact_reports WHERE id=$1 AND is_published=true AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
     if (!report.rows.length) return res.status(404).json({ error: 'Report not found' });
-    const sections = await pool.query('SELECT * FROM impact_report_sections WHERE report_id=$1 ORDER BY sort_order', [req.params.id]);
+    const sections = await pool.query('SELECT * FROM impact_report_sections WHERE report_id=$1 AND tenant_id=$2 ORDER BY sort_order', [req.params.id, req.session.user.tenant_id]);
     await pool.query('UPDATE donation_impact_reports SET view_count=view_count+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
     res.json({ report: report.rows[0], sections: sections.rows });
   }));
