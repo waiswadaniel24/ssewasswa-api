@@ -103,3 +103,20 @@ Stage Summary:
 - Applied same fixes to `renderPageV3`: added hamburger menu, nav-links-v3 class, bottom nav with Login/Logout
 - Added `body{padding-bottom:70px}` and `.bottom-nav{display:flex!important}` for mobile
 - Force pushed commit 01bba19 to trigger Render deployment
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix PWA install button + clean up landing page organization
+
+Work Log:
+- Investigated PWA install failure: renderPageV3 (used by landing page) had NO service worker registration
+- Without SW registration, browser never fires beforeinstallprompt event → _dp always null → install falls through to /install page
+- Added full SW registration + beforeinstallprompt handler + _installApp function to renderPageV3 closing script block
+- Cleaned up landing page: removed ~313 lines of duplicate content (2x testimonials, 2x pricing, 2x FAQ, 2x CTAs, duplicate footer, duplicate entertainment sections)
+- Fixed pre-existing syntax bug: missing closing paren in template literal
+- Committed cce7f96, force pushed to Render
+
+Stage Summary:
+- PWA Install now works: service worker registers → beforeinstallprompt captured → native install prompt triggered
+- Landing page is now clean and organized: Hero → Stats → 8 Portal Cards → Entertainment/Fundraising → Testimonials → Setup Steps → Pricing → FAQ → CTA
