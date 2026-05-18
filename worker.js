@@ -292,7 +292,7 @@ async function processDigests() {
       // Gather digest content
       const [newUsers, recentActivity, upcomingEvents, stats] = await Promise.all([
         pool.query(`SELECT email, name, created_at FROM users WHERE tenant_id = $1 AND created_at > NOW() - INTERVAL '7 days' ORDER BY created_at DESC LIMIT 10`, [sched.tenant_id]),
-        pool.query(`SELECT action, user_email, details, created_at FROM audit_log WHERE tenant_id = $1 AND created_at > NOW() - INTERVAL '7 days' ORDER BY created_at DESC LIMIT 15`, [sched.tenant_id]).catch(() => ({ rows: [] })),
+        pool.query(`SELECT action, user_email, details, created_at FROM audit_logs WHERE tenant_id = $1 AND created_at > NOW() - INTERVAL '7 days' ORDER BY created_at DESC LIMIT 15`, [sched.tenant_id]).catch(() => ({ rows: [] })),
         pool.query(`SELECT title, start_date FROM events WHERE tenant_id = $1 AND start_date >= CURRENT_DATE ORDER BY start_date ASC LIMIT 5`, [sched.tenant_id]).catch(() => ({ rows: [] })),
         pool.query(`
           SELECT
