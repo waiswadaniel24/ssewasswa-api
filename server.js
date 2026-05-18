@@ -37644,6 +37644,289 @@ try {
   console.log('[WS] WebSocket server initialized');
 } catch (e) { console.warn('[WS] Failed to initialize WebSocket:', e.message); }
 
+// ============================================================
+// MASTER AUTOMATION ENGINE (v1.0) — All scheduled jobs in one place
+// ============================================================
+console.log('[Automation] Initializing master automation engine...');
+
+// --- 1. EMAIL QUEUE PROCESSOR (every 30s) ---
+// Critical: emails queued via queueEmail() were NEVER sent because worker.js doesn't run on Render
+const processEmailQueue = async () => {
+  try {
+    const transporter = getEmailTransporter();
+    if (!transporter) return;
+    const pending = (await pool.query("SELECT * FROM email_queue WHERE status='queued' AND attempts < 3 ORDER BY created_at ASC LIMIT 10")).rows;
+    if (pending.length === 0) return;
+    console.log(`[AutoEmail] Processing ${pending.length} queued email(s)`);
+    for (const email of pending) {
+      try {
+        await transporter.sendMail({ from: process.env.GMAIL_USER, to: email.to_email, subject: email.subject, html: email.html ? email.body : undefined, text: email.html ? undefined : email.body });
+        await pool.query("UPDATE email_queue SET status='sent', sent_at=NOW() WHERE id=$1", [email.id]);
+      } catch (e) {
+        const newAttempts = (email.attempts || 0) + 1;
+        const newStatus = newAttempts >= 3 ? 'failed' : 'queued';
+        await pool.query("UPDATE email_queue SET attempts=$1, error=$2, status=$3 WHERE id=$4", [newAttempts, e.message, newStatus, email.id]);
+      }
+    }
+  } catch (e) { console.warn('[AutoEmail] Queue processor error:', e.message); }
+};
+
+// --- 2. FEE REMINDER AUTOMATION (every hour) ---
+const processFeeReminders = async () => {
+  try {
+    // Ensure fee_reminder_settings table exists
+    await pool.query(`CREATE TABLE IF NOT EXISTS fee_reminder_settings (
+      id SERIAL PRIMARY KEY, tenant_id INTEGER UNIQUE,
+      auto_notify BOOLEAN DEFAULT false, frequency TEXT DEFAULT 'weekly',
+      days_before INTEGER DEFAULT 7, enabled_channels TEXT[] DEFAULT '{sms,email}',
+      last_run TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS trigger_type TEXT`);
+
+    const tenants = (await pool.query(`
+      SELECT DISTINCT t.id, t.name, frs.frequency, frs.days_before, frs.enabled_channels, frs.last_run
+      FROM tenants t
+      JOIN fee_reminder_settings frs ON frs.tenant_id = t.id
+      WHERE t.approved = true AND t.banned = false AND frs.auto_notify = true
+    `)).rows;
+
+    for (const tenant of tenants) {
+      if (tenant.last_run) {
+        const elapsed = Date.now() - new Date(tenant.last_run).getTime();
+        const intervalMs = { daily: 86400000, weekly: 604800000, monthly: 2592000000 };
+        if (elapsed < (intervalMs[tenant.frequency] || 604800000)) continue;
+      }
+
+      const fees = (await pool.query(`
+        SELECT f.*, s.name as student_name, s.admission_no, s.guardian_phone, s.parent_email
+        FROM fees f JOIN students s ON f.student_id = s.id
+        WHERE f.tenant_id = $1 AND (f.amount - COALESCE(f.paid,0)) > 0
+        ORDER BY f.amount - COALESCE(f.paid,0) DESC LIMIT 50
+      `, [tenant.id])).rows;
+      if (fees.length === 0) continue;
+
+      const channels = tenant.enabled_channels || ['sms', 'email'];
+      let smsCount = 0, emailCount = 0;
+
+      for (const fee of fees) {
+        const balance = (parseInt(fee.amount) || 0) - (parseInt(fee.paid) || 0);
+        if (balance <= 0) continue;
+        const balanceStr = balance.toLocaleString();
+
+        if (channels.includes('sms') && fee.guardian_phone) {
+          await pool.query(`INSERT INTO sms_logs(tenant_id,phone,message,status,trigger_type) VALUES($1,$2,$3,'queued','fee_reminder_auto')`,
+            [tenant.id, fee.guardian_phone, `Fee reminder: ${fee.student_name} has an outstanding balance of UGX ${balanceStr}. Please clear the balance. - Comfort Zone`]);
+          smsCount++;
+        }
+        if (channels.includes('email') && fee.parent_email) {
+          queueEmail(tenant.id, fee.parent_email, `Fee Balance Reminder - ${fee.student_name}`,
+            `<p>Dear Parent/Guardian,</p><p><strong>${fee.student_name}</strong> (Adm#: ${fee.admission_no || 'N/A'}) has an outstanding fee balance of <strong>UGX ${balanceStr}</strong>.</p><p>Please clear the balance at your earliest convenience.</p><p>Thank you,<br>Comfort Zone</p>`);
+          emailCount++;
+        }
+      }
+
+      await pool.query('UPDATE fee_reminder_settings SET last_run=NOW(), updated_at=NOW() WHERE tenant_id=$1', [tenant.id]);
+      console.log(`[AutoFeeReminder] Tenant ${tenant.name}: ${smsCount} SMS + ${emailCount} email queued for ${fees.length} balances`);
+    }
+  } catch (e) { console.warn('[AutoFeeReminder] Error:', e.message); }
+};
+
+// --- 3. RECURRING DONATIONS AUTO-PROCESSOR (every 2 hours) ---
+const processRecurringDonations = async () => {
+  try {
+    const due = (await pool.query("SELECT * FROM recurring_donations WHERE next_date <= CURRENT_DATE AND status = 'active'")).rows;
+    if (due.length === 0) return;
+    let processed = 0, errors = 0;
+    for (const d of due) {
+      try {
+        await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)',
+          [d.campaign_id || null, d.donor_name, d.amount, d.payment_method || 'cash', 'Auto-recurring donation']);
+        let nextDate = new Date(d.next_date);
+        switch (d.schedule) {
+          case 'weekly': nextDate.setDate(nextDate.getDate() + 7); break;
+          case 'monthly': nextDate.setMonth(nextDate.getMonth() + 1); break;
+          case 'quarterly': nextDate.setMonth(nextDate.getMonth() + 3); break;
+          case 'yearly': nextDate.setFullYear(nextDate.getFullYear() + 1); break;
+          default: nextDate.setMonth(nextDate.getMonth() + 1);
+        }
+        await pool.query('UPDATE recurring_donations SET last_processed=CURRENT_DATE, next_date=$1, total_donated=total_donated+$2, donation_count=donation_count+1 WHERE id=$3',
+          [nextDate.toISOString().split('T')[0], d.amount, d.id]);
+        processed++;
+      } catch (e) { errors++; console.warn('[AutoDonation] Error for ID', d.id, ':', e.message); }
+    }
+    console.log(`[AutoDonation] Processed ${processed} recurring donations (${errors} errors)`);
+  } catch (e) { console.warn('[AutoDonation] Error:', e.message); }
+};
+
+// --- 4. SUBSCRIPTION EXPIRY CHECKER (daily) ---
+const checkSubscriptionExpiry = async () => {
+  try {
+    const expired = (await pool.query(
+      "SELECT s.*, t.name as tenant_name FROM subscriptions s JOIN tenants t ON s.tenant_id = t.id WHERE s.status = 'active' AND s.expires_at < NOW()"
+    )).rows;
+    for (const sub of expired) {
+      await pool.query("UPDATE subscriptions SET status='expired' WHERE id=$1", [sub.id]);
+      console.log(`[AutoSub] Subscription expired for tenant ${sub.tenant_name} (ID: ${sub.tenant_id})`);
+    }
+    if (expired.length > 0) console.log(`[AutoSub] Expired ${expired.length} subscription(s)`);
+  } catch (e) { console.warn('[AutoSub] Expiry check error:', e.message); }
+};
+
+// --- 5. AUTOMATED DATA CLEANUP (daily) ---
+const runDataCleanup = async () => {
+  try {
+    let totalCleaned = 0;
+    // Clean audit_logs older than 90 days
+    const r1 = await pool.query("DELETE FROM audit_logs WHERE created_at < NOW() - INTERVAL '90 days'");
+    totalCleaned += r1.rowCount || 0;
+    // Clean old email_queue records (sent/failed older than 7 days)
+    const r2 = await pool.query("DELETE FROM email_queue WHERE status IN ('sent','failed') AND created_at < NOW() - INTERVAL '7 days'");
+    totalCleaned += r2.rowCount || 0;
+    // Clean old login_attempts older than 7 days
+    const r3 = await pool.query("DELETE FROM login_attempts WHERE last_attempt < NOW() - INTERVAL '7 days'");
+    totalCleaned += r3.rowCount || 0;
+    // Clean read notifications older than 30 days
+    const r4 = await pool.query("DELETE FROM notifications WHERE read = true AND created_at < NOW() - INTERVAL '30 days'");
+    totalCleaned += r4.rowCount || 0;
+    // Clean old webhook_logs older than 30 days
+    const r5 = await pool.query("DELETE FROM webhook_logs WHERE created_at < NOW() - INTERVAL '30 days'");
+    totalCleaned += r5.rowCount || 0;
+    // Clean old sms_logs older than 30 days
+    try {
+      const r6 = await pool.query("DELETE FROM sms_logs WHERE created_at < NOW() - INTERVAL '30 days'");
+      totalCleaned += r6.rowCount || 0;
+    } catch (e) { /* sms_logs table might not exist in all deployments */ }
+    // Clean old task_execution_logs older than 60 days
+    try {
+      const r7 = await pool.query("DELETE FROM task_execution_logs WHERE started_at < NOW() - INTERVAL '60 days'");
+      totalCleaned += r7.rowCount || 0;
+    } catch (e) { /* table might not exist */ }
+    // Clean old backup_log entries older than 30 days (keep only recent backups)
+    try {
+      const r8 = await pool.query("DELETE FROM backup_log WHERE created_at < NOW() - INTERVAL '30 days'");
+      totalCleaned += r8.rowCount || 0;
+    } catch (e) { /* table might not exist */ }
+    // Clean expired sessions (PG session store)
+    try {
+      const r9 = await pool.query("DELETE FROM session WHERE expire < NOW()");
+      totalCleaned += r9.rowCount || 0;
+    } catch (e) { /* session table name varies */ }
+    if (totalCleaned > 0) console.log(`[AutoCleanup] Removed ${totalCleaned} old records`);
+  } catch (e) { console.warn('[AutoCleanup] Error:', e.message); }
+};
+
+// --- 6. SCHEDULED AUTOMATION RULES EVALUATOR (every 5 min) ---
+const runScheduledAutomations = async () => {
+  try {
+    const rules = (await pool.query("SELECT * FROM automation_rules WHERE active = true AND trigger_event = 'scheduled'")).rows;
+    if (rules.length === 0) return;
+    // Group by tenant_id to avoid re-querying same tenant
+    const tenantIds = [...new Set(rules.map(r => r.tenant_id))];
+    for (const tid of tenantIds) {
+      await evaluateAutomations(tid, 'scheduled', { automated: true, timestamp: new Date().toISOString() });
+    }
+    console.log(`[AutoRule] Evaluated ${rules.length} scheduled automation rule(s) across ${tenantIds.length} tenant(s)`);
+  } catch (e) { console.warn('[AutoRule] Error:', e.message); }
+};
+
+// --- 7. SCHEDULED SMS/EMAIL CAMPAIGNS PROCESSOR (every minute) ---
+const processScheduledCampaigns = async () => {
+  try {
+    const due = (await pool.query("SELECT * FROM sms_campaigns WHERE status = 'scheduled' AND scheduled_at <= NOW()")).rows;
+    if (due.length === 0) return;
+    for (const campaign of due) {
+      try {
+        // Update status to processing
+        await pool.query("UPDATE sms_campaigns SET status = 'processing' WHERE id = $1", [campaign.id]);
+
+        const targetMap = {
+          all_students: 'SELECT name, phone, email FROM students WHERE tenant_id=$1 AND deleted_at IS NULL',
+          all_staff: 'SELECT name, phone, email FROM staff WHERE tenant_id=$1',
+          all_parents: 'SELECT name, guardian_phone as phone, parent_email as email FROM students WHERE tenant_id=$1 AND deleted_at IS NULL',
+          all_members: 'SELECT name, phone, email FROM church_members WHERE tenant_id=$1',
+          all_customers: 'SELECT name, phone, email FROM customers WHERE tenant_id=$1'
+        };
+        const query = targetMap[campaign.target_group];
+        if (!query) { await pool.query("UPDATE sms_campaigns SET status='failed' WHERE id=$1", [campaign.id]); continue; }
+
+        const recipients = (await pool.query(query, [campaign.tenant_id])).rows;
+        let sentCount = 0;
+
+        for (const r of recipients) {
+          const msg = (campaign.message || '')
+            .replace(/{name}/g, r.name || 'Friend')
+            .replace(/{phone}/g, r.phone || '');
+          const campaignType = campaign.campaign_type || 'sms';
+
+          if ((campaignType === 'sms' || campaignType === 'both') && r.phone) {
+            await sendSMS(r.phone, msg);
+            await logSMS(campaign.tenant_id, r.phone, msg, 'campaign_auto', `campaign:${campaign.id}`);
+            sentCount++;
+          }
+          if ((campaignType === 'email' || campaignType === 'both') && r.email) {
+            queueEmail(campaign.tenant_id, r.email, campaign.subject || campaign.name, `<p>${msg.replace(/\n/g, '<br>')}</p>`);
+            sentCount++;
+          }
+        }
+
+        await pool.query("UPDATE sms_campaigns SET status='completed', sent_count=COALESCE(sent_count,0)+$1 WHERE id=$2", [sentCount, campaign.id]);
+        console.log(`[AutoCampaign] "${campaign.name}" sent to ${sentCount} recipients`);
+      } catch (e) {
+        await pool.query("UPDATE sms_campaigns SET status='failed' WHERE id=$1", [campaign.id]);
+        console.warn('[AutoCampaign] Error for campaign', campaign.id, ':', e.message);
+      }
+    }
+  } catch (e) { console.warn('[AutoCampaign] Error:', e.message); }
+};
+
+// --- 8. REPORT_HISTORY AUTO-CLEANUP (weekly) ---
+const cleanupReportHistory = async () => {
+  try {
+    const r = await pool.query("DELETE FROM report_history WHERE generated_at < NOW() - INTERVAL '90 days'");
+    if (r.rowCount > 0) console.log(`[AutoCleanup] Removed ${r.rowCount} old report history entries`);
+  } catch (e) { /* table might not exist */ }
+};
+
+// --- START ALL AUTOMATION TIMERS ---
+// Email queue: every 30 seconds (CRITICAL — queued emails were silently not sending)
+setInterval(processEmailQueue, 30000);
+setTimeout(processEmailQueue, 5000); // Run once shortly after startup
+
+// Fee reminders: every hour
+setInterval(processFeeReminders, 3600000);
+setTimeout(processFeeReminders, 60000);
+
+// Recurring donations: every 2 hours
+setInterval(processRecurringDonations, 7200000);
+setTimeout(processRecurringDonations, 120000);
+
+// Subscription expiry: every 24 hours
+setInterval(checkSubscriptionExpiry, 86400000);
+setTimeout(checkSubscriptionExpiry, 300000); // Check 5 min after startup
+
+// Data cleanup: every 24 hours
+setInterval(runDataCleanup, 86400000);
+setTimeout(runDataCleanup, 600000); // Run 10 min after startup
+
+// Scheduled automation rules: every 5 minutes
+setInterval(runScheduledAutomations, 300000);
+
+// Scheduled campaigns: every 60 seconds
+setInterval(processScheduledCampaigns, 60000);
+
+// Report history cleanup: every 7 days
+setInterval(cleanupReportHistory, 604800000);
+
+console.log('[Automation] All 8 automated jobs started successfully');
+console.log('  - Email Queue Processor: every 30s');
+console.log('  - Fee Reminders: every 1h');
+console.log('  - Recurring Donations: every 2h');
+console.log('  - Subscription Expiry: every 24h');
+console.log('  - Data Cleanup: every 24h');
+console.log('  - Scheduled Automation Rules: every 5min');
+console.log('  - Scheduled Campaigns: every 60s');
+console.log('  - Report History Cleanup: every 7d');
+
 // === START SERVER (after all routes are registered) ===
 const PORT = process.env.PORT || 3000;
 const server = require('http').createServer(app);
