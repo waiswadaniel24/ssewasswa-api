@@ -2541,12 +2541,10 @@ if ('serviceWorker' in navigator) {
 // PWA Install — Smart download link + install prompt
 var _dp=null,_isStandalone=window.matchMedia('(display-mode:standalone)').matches||window.navigator.standalone===true;
 window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();_dp=e;
-var navBtn=document.getElementById('nav-install-btn');if(navBtn)navBtn.style.display='inline-flex';
-var btmBtn=document.getElementById('install-btn');if(btmBtn)btmBtn.style.display='flex';
-var floatBtn=document.getElementById('float-install-btn');if(floatBtn)floatBtn.style.display='flex';
+console.log('[PWA] beforeinstallprompt captured');
 });
 function _installApp(){
-if(_dp){_dp.prompt();_dp.userChoice.then(function(c){if(c.outcome==='accepted'){console.log('[PWA] App installed');_hideInstallBtns()}_dp=null});}
+if(_dp){_dp.prompt();_dp.userChoice.then(function(c){if(c.outcome==='accepted'){console.log('[PWA] App installed');_hideInstallBtns()}_dp=null}).catch(function(){_dp=null;});}
 else{window.location.href='/install';}
 }
 function _hideInstallBtns(){
@@ -2554,13 +2552,15 @@ _dp=null;
 var nb=document.getElementById('nav-install-btn');if(nb)nb.style.display='none';
 var fb=document.getElementById('float-install-btn');if(fb)fb.style.display='none';
 var bb=document.getElementById('pwab');if(bb)bb.remove();
+var ib=document.getElementById('install-btn');if(ib)ib.style.display='none';
 }
 window.addEventListener('appinstalled',function(){_hideInstallBtns();});
-if(!_isStandalone){setTimeout(function(){if(_dp){var nb=document.getElementById('nav-install-btn');if(nb)nb.style.display='inline-flex';var fb=document.getElementById('float-install-btn');if(fb)fb.style.display='flex';}},2000);}
+// Show install buttons always if not in standalone mode
+if(_isStandalone){_hideInstallBtns();}
 </script>
 </head><body>
 <a href="#main" style="position:absolute;top:-100px;left:0;background:#4f46e5;color:white;padding:8px;z-index:9999" onfocus="this.style.top=\"0\"" onblur="this.style.top=\"-100px\"">Skip to main content</a>
-<div id="float-install-btn" style="display:none;position:fixed;bottom:20px;right:20px;z-index:9999;flex-direction:column;align-items:center;gap:4px">
+<div id="float-install-btn" style="position:fixed;bottom:20px;right:20px;z-index:9999;flex-direction:column;align-items:center;gap:4px">
 <a href="#" onclick="_installApp();return false" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#059669,#10b981);color:white;padding:12px 20px;border-radius:50px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(5,150,105,0.4);font-family:sans-serif;animation:pulse-glow 2s ease-in-out infinite">&#128241; Install App</a>
 <style>@keyframes pulse-glow{0%,100%{box-shadow:0 4px 20px rgba(5,150,105,0.4)}50%{box-shadow:0 4px 30px rgba(5,150,105,0.7)}}</style>
 </div>
@@ -2604,7 +2604,7 @@ if(!_isStandalone){setTimeout(function(){if(_dp){var nb=document.getElementById(
       <a href="/search">${esc(uiT('nav.search'))}</a>
       <a href="/switch-portal" style="color:#c084fc;font-weight:600" title="Switch Portal Type">&#127760; ${esc(uiT('nav.portal'))}</a>
       <a href="/settings/profile">${esc(uiT('nav.settings'))}</a>
-      <a href="/install" id="nav-install-btn" style="display:none;font-size:13px;color:#10b981;font-weight:600;background:rgba(16,185,129,0.1);padding:4px 10px;border-radius:8px;text-decoration:none;align-items:center;gap:4px">&#128241; Install</a>
+      <a href="/install" id="nav-install-btn" onclick="_installApp();return false" style="font-size:13px;color:#10b981;font-weight:600;background:rgba(16,185,129,0.1);padding:4px 10px;border-radius:8px;text-decoration:none;align-items:center;gap:4px;cursor:pointer">&#128241; Install</a>
       <a href="/parent/login" style="font-size:12px">${esc(uiT('nav.parent'))}</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
       <select onchange="fetch('/settings/language',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'${esc(csrfToken || '')}'},body:JSON.stringify({language:this.value})}).then(function(){location.reload()})" style="background:${dark ? '#334155' : '#f1f5f9'};border:1px solid ${dark ? '#475569' : '#e2e8f0'};color:${dark ? '#e2e8f0' : '#1e293b'};border-radius:6px;padding:4px 6px;font-size:12px;cursor:pointer" title="Language">
@@ -2693,8 +2693,8 @@ function markRead(id){fetch('/notifications/mark-read',{method:'POST',headers:{'
 function markAllRead(){fetch('/notifications/mark-all-read',{method:'POST'}).then(function(){toggleNotifPanel()}).then(function(){updateNotifBadge()})}
 ` : ''}
 ${user ? `
-window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();_dp=e;var b=document.getElementById('install-btn');if(b){b.style.display='flex';b.addEventListener('click',function(e){e.preventDefault();_installApp();});}
-});
+// Bottom nav install button handler
+var _ib=document.getElementById('install-btn');if(_ib&&!_isStandalone){_ib.style.display='flex';}
 ` : ''}
 </script>
 <script>
@@ -15139,7 +15139,7 @@ app.get('/install', (req, res) => {
         <h1 style="font-size:28px;margin-bottom:8px">Install Comfort Zone</h1>
         <p style="color:#64748b;font-size:16px">Use Comfort Zone like a native app on your phone or computer. No app store needed.</p>
       </div>
-      ${isStandalone ? '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:20px;text-align:center;margin-bottom:24px"><strong style="color:#166534">You already have Comfort Zone installed!</strong><p style="color:#166534;font-size:14px;margin-top:4px">You are using the app version right now.</p></div>' : '<div style="text-align:center;margin-bottom:24px"><button onclick="_installApp()" style="background:linear-gradient(135deg,#059669,#10b981);color:white;padding:16px 40px;border-radius:12px;font-weight:700;font-size:18px;border:none;cursor:pointer;box-shadow:0 4px 20px rgba(5,150,105,0.4)">&#128241; Install Now</button><p style="color:#94a3b8;font-size:12px;margin-top:8px">One-tap install for Chrome and Android users</p></div>'}
+      ${isStandalone ? '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:20px;text-align:center;margin-bottom:24px"><strong style="color:#166534">You already have Comfort Zone installed!</strong><p style="color:#166534;font-size:14px;margin-top:4px">You are using the app version right now.</p></div>' : '<div style="text-align:center;margin-bottom:24px"><button id="install-now-btn" onclick="tryPwaInstall()" style="background:linear-gradient(135deg,#059669,#10b981);color:white;padding:16px 40px;border-radius:12px;font-weight:700;font-size:18px;border:none;cursor:pointer;box-shadow:0 4px 20px rgba(5,150,105,0.4)">&#128241; Install Now</button><p style="color:#94a3b8;font-size:12px;margin-top:8px">One-tap install for Chrome and Android users</p><div id="install-fallback-msg" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;padding:16px;margin-top:16px;text-align:left"><strong style="color:#92400e">Quick Install Tip:</strong><p style="color:#92400e;font-size:14px;margin-top:4px">Your browser doesn\\'t support one-tap install. Use the step-by-step instructions below to add Comfort Zone to your home screen.</p></div></div>'}
       <div style="background:#f8fafc;border-radius:16px;padding:24px;margin-bottom:24px">
         <h2 style="font-size:18px;margin-bottom:16px">Step-by-Step Instructions</h2>
         <div style="margin-bottom:24px">
@@ -15186,6 +15186,22 @@ app.get('/install', (req, res) => {
         <a href="/" style="color:#059669;font-weight:600;text-decoration:none">Back to Home</a>
       </div>
     </div>
+    <script>
+    function tryPwaInstall(){
+      if(typeof _dp!=='undefined'&&_dp){
+        _dp.prompt();
+        _dp.userChoice.then(function(c){
+          if(c.outcome==='accepted'){console.log('[PWA] App installed');_hideInstallBtns();}
+          _dp=null;
+        }).catch(function(){_dp=null;});
+      } else {
+        var fb=document.getElementById('install-fallback-msg');
+        if(fb) fb.style.display='block';
+        var btn=document.getElementById('install-now-btn');
+        if(btn){btn.textContent='Follow instructions below';btn.style.opacity='0.6';btn.disabled=true;}
+      }
+    }
+    </script>
   `, req.session?.user || null));
 });
 

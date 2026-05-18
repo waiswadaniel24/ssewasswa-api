@@ -3152,28 +3152,56 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
 
   // Serve manifest.json with enhanced configuration
   app.get('/manifest.json', (req, res) => {
-    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Type', 'application/manifest+json');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
     res.send(JSON.stringify({
-      name: 'Comfort Platform',
-      short_name: 'Comfort',
-      description: 'All-in-One Management: School, Clinic, Church, Business - Built for Africa',
-      start_url: '/',
+      name: 'Comfort Zone - All-in-One Management Platform',
+      short_name: 'ComfortZone',
+      description: 'The Operating System for African Institutions. Manage schools, churches, clinics, businesses and organizations all in one place.',
+      start_url: '/?source=pwa',
+      scope: '/',
       display: 'standalone',
-      background_color: '#059669',
+      display_override: ['standalone', 'minimal-ui'],
+      background_color: '#ffffff',
       theme_color: '#059669',
-      orientation: 'portrait-primary',
+      orientation: 'any',
+      dir: 'ltr',
+      lang: 'en',
+      categories: ['business', 'education', 'health', 'finance', 'productivity', 'medical', 'lifestyle'],
+      prefer_related_applications: false,
       icons: [
-        { src: '/icon.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-        { src: '/icon.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+        { src: '/icon-16.png', sizes: '16x16', type: 'image/png', purpose: 'any' },
+        { src: '/icon-32.png', sizes: '32x32', type: 'image/png', purpose: 'any' },
+        { src: '/icon-48.png', sizes: '48x48', type: 'image/png', purpose: 'any' },
+        { src: '/icon-72.png', sizes: '72x72', type: 'image/png', purpose: 'any' },
+        { src: '/icon-96.png', sizes: '96x96', type: 'image/png', purpose: 'any' },
+        { src: '/icon-120.png', sizes: '120x120', type: 'image/png', purpose: 'any' },
+        { src: '/icon-152.png', sizes: '152x152', type: 'image/png', purpose: 'any' },
+        { src: '/icon-167.png', sizes: '167x167', type: 'image/png', purpose: 'any' },
+        { src: '/icon-180.png', sizes: '180x180', type: 'image/png', purpose: 'any' },
+        { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+        { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+        { src: '/icon-512-sized.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+        { src: '/icon.png', sizes: '1024x1024', type: 'image/png', purpose: 'any' }
       ],
-      categories: ['education', 'finance', 'business', 'productivity'],
+      screenshots: [
+        { src: '/og-image.png', sizes: '1200x630', type: 'image/png', form_factor: 'wide', label: 'Comfort Zone Dashboard' }
+      ],
       shortcuts: [
-        { name: 'Dashboard', url: '/dashboard', description: 'Go to Dashboard' },
-        { name: 'Entertainment', url: '/p/entertainment', description: 'Entertainment Hub' },
-        { name: 'Fundraising', url: '/p/fundraising', description: 'Fundraising Campaigns' }
+        { name: 'Dashboard', short_name: 'Dashboard', url: '/dashboard?source=pwa', icons: [{ src: '/icon-96.png', sizes: '96x96' }] },
+        { name: 'Students', short_name: 'Students', url: '/school/students?source=pwa', icons: [{ src: '/icon-96.png', sizes: '96x96' }] },
+        { name: 'Messages', short_name: 'Messages', url: '/notifications?source=pwa', icons: [{ src: '/icon-96.png', sizes: '96x96' }] },
+        { name: 'Settings', short_name: 'Settings', url: '/settings?source=pwa', icons: [{ src: '/icon-96.png', sizes: '96x96' }] }
       ],
-      screenshots: [],
-      prefer_related_applications: false
+      share_target: {
+        action: '/share',
+        method: 'POST',
+        enctype: 'multipart/form-data',
+        params: { title: 'title', text: 'text', url: 'url' }
+      },
+      edge_side_panel: { preferred_width: 400 },
+      launch_handler: { client_mode: 'auto' }
     }));
   });
 

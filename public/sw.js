@@ -1,5 +1,5 @@
 // ============================================================
-// Comfort Zone — Service Worker v5.0 (Updated 2026-05-19)
+// Comfort Zone — Service Worker v6.0 (Updated 2026-05-19)
 // ============================================================
 // Strategies:
 //   - Cache-first: static assets (HTML, CSS, JS, images, fonts)
@@ -9,10 +9,10 @@
 //   - Push notifications: enhanced with data and actions
 // ============================================================
 
-const CACHE_NAME = 'comfort-v5.0';
-const STATIC_CACHE = 'comfort-static-v5.0';
-const DATA_CACHE = 'comfort-data-v5.0';
-const OFFLINE_CACHE = 'comfort-offline-v5.0';
+const CACHE_NAME = 'comfort-v6.0';
+const STATIC_CACHE = 'comfort-static-v6.0';
+const DATA_CACHE = 'comfort-data-v6.0';
+const OFFLINE_CACHE = 'comfort-offline-v6.0';
 
 // Assets to pre-cache on install
 const PRECACHE_URLS = [
