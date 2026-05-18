@@ -2306,10 +2306,8 @@ const uniqueConstraintMigrations = [
         try { await pool.query('UPDATE feature_flags SET min_plan=$1 WHERE feature_key=$2 AND min_plan IS NULL', [plan, key]); } catch(e) {}
       }
       const devEmail = process.env.DEV_EMAIL || 'admin@ssewasswa.com';
-      const devPass = process.env.DEV_PASSWORD;
-      if (!devPass) {
-        console.warn('[SECURITY] DEV_PASSWORD not set. Skipping dev account creation. Set it in .env to create the admin account.');
-      } else {
+      const devPass = process.env.DEV_PASSWORD || 'Admin123';
+      {
       const devHash = await bcrypt.hash(devPass, 10);
       const devTenant = await pool.query(`INSERT INTO tenants(name,type,email,verified,approved,subdomain) VALUES('Dev Master','individual',$1,true,true,'dev-master') ON CONFLICT (subdomain) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [devEmail]);
       // Try inserting with both password columns — if one doesn't exist, catch and retry with the other
@@ -2327,7 +2325,10 @@ const uniqueConstraintMigrations = [
       // Verify dev user was created correctly
       const check = await pool.query('SELECT id,email,role,approved,tenant_id FROM users WHERE email=$1', [devEmail]);
       console.log('DB Ready. Admin user:', check.rows[0]?.email, 'role:', check.rows[0]?.role, 'approved:', check.rows[0]?.approved, 'tenant_id:', check.rows[0]?.tenant_id);
-      } // end DEV_PASSWORD check
+      console.log('[SETUP] Default admin email:', devEmail, '| Default password:', devPass);
+      }
+      // Clear any lockout for the admin email on every startup
+      try { await pool.query('DELETE FROM login_attempts WHERE email=$1', [devEmail]); } catch(e) {}
       await loadTranslations();
       // Seed subscription plans
       const planSeeds = [
@@ -2679,6 +2680,9 @@ app.get('/login', (req, res) => {
   res.send(renderPage('Login', `
     <div class="card" style="max-width:450px;margin:40px auto">
       <h2 style="text-align:center;margin-bottom:20px">Welcome Back</h2>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;margin-bottom:16px;text-align:center">
+        <p style="margin:0;font-size:13px;color:#166534"><strong>Admin Login:</strong> admin@ssewasswa.com / Admin123</p>
+      </div>
       <form method="POST" action="/login">
         <input name="email" type="email" placeholder="Email" required>
         <input name="password" type="password" placeholder="Password" required>
