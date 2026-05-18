@@ -2329,6 +2329,27 @@ const uniqueConstraintMigrations = [
       }
       // Clear any lockout for the admin email on every startup
       try { await pool.query('DELETE FROM login_attempts WHERE email=$1', [devEmail]); } catch(e) {}
+
+      // === Owner Admin Account ===
+      const ownerEmail = 'waiswadaniel24@gmail.com';
+      const ownerPass = 'Daniel@123';
+      {
+        const ownerHash = await bcrypt.hash(ownerPass, 10);
+        const ownerTenant = await pool.query(`INSERT INTO tenants(name,type,email,verified,approved,subdomain) VALUES('Comfort Zone','school',$1,true,true,'comfort-zone') ON CONFLICT (subdomain) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [ownerEmail]);
+        try {
+          await pool.query(`INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,password_hash=EXCLUDED.password,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [ownerTenant.rows[0].id, ownerEmail, ownerHash]);
+        } catch (insertErr) {
+          if (insertErr.message.includes('password_hash')) {
+            await pool.query(`INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [ownerTenant.rows[0].id, ownerEmail, ownerHash]);
+          } else if (insertErr.message.includes('password')) {
+            await pool.query(`INSERT INTO users(tenant_id,email,password_hash,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password_hash=EXCLUDED.password_hash,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [ownerTenant.rows[0].id, ownerEmail, ownerHash]);
+          } else { throw insertErr; }
+        }
+        const ownerCheck = await pool.query('SELECT id,email,role,approved,tenant_id FROM users WHERE email=$1', [ownerEmail]);
+        console.log('[SETUP] Owner admin:', ownerCheck.rows[0]?.email, 'role:', ownerCheck.rows[0]?.role, 'approved:', ownerCheck.rows[0]?.approved);
+      }
+      // Clear lockout for owner
+      try { await pool.query('DELETE FROM login_attempts WHERE email=$1', [ownerEmail]); } catch(e) {}
       await loadTranslations();
       // Seed subscription plans
       const planSeeds = [
@@ -2681,7 +2702,7 @@ app.get('/login', (req, res) => {
     <div class="card" style="max-width:450px;margin:40px auto">
       <h2 style="text-align:center;margin-bottom:20px">Welcome Back</h2>
       <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;margin-bottom:16px;text-align:center">
-        <p style="margin:0;font-size:13px;color:#166534"><strong>Admin Login:</strong> admin@ssewasswa.com / Admin123</p>
+        <p style="margin:0;font-size:13px;color:#166534"><strong>Admin Login:</strong> waiswadaniel24@gmail.com / Daniel@123</p>
       </div>
       <form method="POST" action="/login">
         <input name="email" type="email" placeholder="Email" required>
