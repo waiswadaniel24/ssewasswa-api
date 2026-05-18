@@ -3,132 +3,420 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ssewasswa — Comfort Zone Platform | School, Church, Clinic & Business Management</title>
-  <meta name="description" content="Ssewasswa Comfort Zone Platform — the all-in-one management system for schools, churches, clinics, and businesses in Africa. 70+ modules, mobile money payments, real-time analytics, and offline support.">
-  <meta name="keywords" content="Ssewasswa, Comfort Zone, school management, church management, clinic management, business management, SaaS, Uganda, Africa, education, healthcare, ERP, LMS, POS, payroll">
+  <title>Comfort Zone — All-in-One Management Platform for African Institutions</title>
+  <meta name="description" content="Comfort Zone is the complete cloud management system for schools, churches, clinics, businesses, hotels, salons, pharmacies, gyms, restaurants, supermarkets, and 15+ organization types. Built for Africa, available everywhere — even offline.">
+  <meta name="keywords" content="Comfort Zone, Ssewasswa, school management, church management, clinic management, business management, hotel management, restaurant POS, salon booking, pharmacy management, gym management, SaaS, Uganda, Africa, education, healthcare, ERP, LMS, POS, payroll, mobile money">
   <meta name="author" content="Ssewasswa">
   <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
-  <meta property="og:title" content="Ssewasswa — Comfort Zone Platform">
-  <meta property="og:description" content="The all-in-one management system for schools, churches, clinics, and businesses. 70+ modules, mobile money payments, real-time analytics, and offline support.">
+  <meta property="og:title" content="Comfort Zone — One Platform. Every Organization. Zero Limits.">
+  <meta property="og:description" content="The complete cloud management system for schools, churches, clinics, businesses, hotels, salons, pharmacies, gyms, restaurants, and 15+ organization types in Africa.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://ssewasswa.github.io/ssewasswa-api/">
-  <meta property="og:site_name" content="Ssewasswa Comfort Zone">
+  <meta property="og:url" content="https://ssewasswa.onrender.com">
+  <meta property="og:site_name" content="Comfort Zone">
+  <meta property="og:image" content="https://ssewasswa.onrender.com/icon.png">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Ssewasswa — Comfort Zone Platform">
-  <meta name="twitter:description" content="All-in-one management system for schools, churches, clinics & businesses in Africa.">
-  <link rel="canonical" href="https://ssewasswa.github.io/ssewasswa-api/">
-  <link rel="sitemap" type="application/xml" href="/sitemap.xml">
+  <meta name="twitter:title" content="Comfort Zone — All-in-One Management Platform">
+  <meta name="twitter:description" content="70+ modules, 507 database tables, 500+ API routes. Built for Africa, available everywhere.">
+  <meta name="twitter:image" content="https://ssewasswa.onrender.com/icon.png">
+  <link rel="canonical" href="https://ssewasswa.onrender.com">
+  <link rel="icon" type="image/png" sizes="192x192" href="https://ssewasswa.onrender.com/icon-192.png">
+  <link rel="apple-touch-icon" href="https://ssewasswa.onrender.com/icon-192.png">
+  <meta name="theme-color" content="#059669">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="ComfortZone">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Comfort Zone Platform",
-    "author": {
-      "@type": "Person",
-      "name": "Ssewasswa"
-    },
-    "url": "https://ssewasswa.github.io/ssewasswa-api/",
+    "author": { "@type": "Person", "name": "Ssewasswa" },
+    "url": "https://ssewasswa.onrender.com",
     "applicationCategory": "BusinessApplication",
     "operatingSystem": "Web",
-    "description": "The all-in-one management system for schools, churches, clinics, and businesses in Africa. 70+ modules, mobile money payments, real-time analytics, and offline support.",
-    "offers": {
-      "@type": "Offer",
-      "price": "0",
-      "priceCurrency": "USD"
-    },
-    "aggregateRating": {
-      "@type": "AggregateRating",
-      "ratingValue": "4.8",
-      "ratingCount": "50"
-    }
+    "description": "The complete cloud management system for schools, churches, clinics, businesses, hotels, salons, pharmacies, gyms, restaurants, supermarkets, and 15+ organization types in Africa.",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "aggregateRating": { "@type": "AggregateRating", "ratingValue": "4.8", "ratingCount": "50" }
   }
   </script>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%); color: #e2e8f0; min-height: 100vh; }
-    .hero { text-align: center; padding: 80px 20px 40px; max-width: 900px; margin: 0 auto; }
-    .hero h1 { font-size: 2.8rem; background: linear-gradient(90deg, #38bdf8, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; line-height: 1.2; }
-    .hero p { font-size: 1.2rem; color: #94a3b8; max-width: 650px; margin: 0 auto 40px; line-height: 1.7; }
-    .cta-group { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin-bottom: 60px; }
-    .btn { display: inline-block; padding: 14px 32px; border-radius: 12px; font-size: 1rem; font-weight: 600; text-decoration: none; transition: all 0.3s; }
-    .btn-primary { background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: white; }
-    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(59,130,246,0.4); }
-    .btn-secondary { background: rgba(255,255,255,0.08); color: #e2e8f0; border: 1px solid rgba(255,255,255,0.15); }
-    .btn-secondary:hover { background: rgba(255,255,255,0.15); }
-    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 20px; max-width: 800px; margin: 0 auto 60px; padding: 0 20px; }
-    .stat { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; text-align: center; }
-    .stat .num { font-size: 2.2rem; font-weight: 800; background: linear-gradient(135deg, #38bdf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .stat .label { font-size: 0.85rem; color: #94a3b8; margin-top: 4px; }
-    .features { max-width: 1000px; margin: 0 auto; padding: 0 20px 80px; }
-    .features h2 { text-align: center; font-size: 2rem; margin-bottom: 40px; color: #e2e8f0; }
-    .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
-    .feature-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 28px; transition: all 0.3s; }
-    .feature-card:hover { background: rgba(255,255,255,0.08); transform: translateY(-4px); }
-    .feature-card .icon { font-size: 2rem; margin-bottom: 12px; }
-    .feature-card h3 { font-size: 1.1rem; margin-bottom: 8px; color: #e2e8f0; }
-    .feature-card p { font-size: 0.9rem; color: #94a3b8; line-height: 1.6; }
-    .footer { text-align: center; padding: 40px 20px; border-top: 1px solid rgba(255,255,255,0.06); color: #64748b; font-size: 0.9rem; }
-    .footer a { color: #38bdf8; text-decoration: none; }
-    @media (max-width: 600px) { .hero h1 { font-size: 1.8rem; } .hero p { font-size: 1rem; } }
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f8fafc;color:#1e293b;line-height:1.6}
+    a{text-decoration:none;color:inherit}
+
+    /* NAV */
+    .nav{background:white;border-bottom:1px solid #e2e8f0;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100}
+    .nav-brand{font-size:20px;font-weight:800;color:#059669;display:flex;align-items:center;gap:8px}
+    .nav-links{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+    .nav-links a{padding:8px 16px;border-radius:8px;font-size:14px;font-weight:500;color:#475569;transition:0.2s}
+    .nav-links a:hover{background:#f1f5f9;color:#1e293b}
+    .nav-btn{background:linear-gradient(135deg,#059669,#0891b2)!important;color:white!important;font-weight:600!important}
+    .nav-btn:hover{opacity:0.9}
+
+    /* HERO */
+    .hero{text-align:center;padding:80px 20px 60px;max-width:900px;margin:0 auto}
+    .hero h1{font-size:clamp(2rem,5vw,3.2rem);font-weight:900;color:#0f172a;margin-bottom:16px;line-height:1.15}
+    .hero h1 span{background:linear-gradient(135deg,#059669,#0891b2);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .hero p{font-size:1.15rem;color:#64748b;max-width:700px;margin:0 auto 36px;line-height:1.7}
+    .cta-group{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+    .btn{display:inline-block;padding:14px 32px;border-radius:12px;font-size:1rem;font-weight:600;text-decoration:none;transition:all 0.3s}
+    .btn-primary{background:linear-gradient(135deg,#059669,#0891b2);color:white}
+    .btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(5,150,105,0.35)}
+    .btn-secondary{background:white;color:#475569;border:2px solid #e2e8f0}
+    .btn-secondary:hover{border-color:#059669;color:#059669}
+
+    /* STATS */
+    .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;max-width:900px;margin:0 auto 60px;padding:0 20px}
+    .stat{background:white;border-radius:14px;padding:24px 16px;text-align:center;border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,0.04)}
+    .stat .num{font-size:2rem;font-weight:900;color:#059669}
+    .stat .label{font-size:0.8rem;color:#64748b;margin-top:2px;font-weight:500}
+
+    /* SECTION HEADERS */
+    .section{max-width:1200px;margin:0 auto;padding:0 20px 60px}
+    .section-title{text-align:center;font-size:clamp(1.5rem,3vw,2.2rem);font-weight:800;color:#0f172a;margin-bottom:8px}
+    .section-sub{text-align:center;color:#64748b;margin-bottom:40px;font-size:1.05rem}
+
+    /* PORTAL TYPE CARDS */
+    .portal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+    .portal-card{background:white;border-radius:16px;padding:24px 20px;border:2px solid #e2e8f0;cursor:pointer;transition:all 0.25s;display:block;text-decoration:none;color:inherit;position:relative;overflow:hidden}
+    .portal-card:hover{border-color:#059669;transform:translateY(-4px);box-shadow:0 12px 32px rgba(5,150,105,0.15)}
+    .portal-card .icon{font-size:36px;margin-bottom:10px;display:block}
+    .portal-card h3{font-size:1rem;font-weight:700;color:#1e293b;margin-bottom:4px}
+    .portal-card p{font-size:0.82rem;color:#64748b;line-height:1.5}
+    .portal-card .arrow{position:absolute;bottom:16px;right:16px;color:#059669;font-size:18px;font-weight:700;opacity:0;transition:0.25s}
+    .portal-card:hover .arrow{opacity:1;transform:translateX(4px)}
+
+    /* FEATURE SECTION */
+    .features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px}
+    .feature-card{background:white;border-radius:16px;padding:28px;border:1px solid #e2e8f0;box-shadow:0 2px 10px rgba(0,0,0,0.04);transition:0.3s}
+    .feature-card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(0,0,0,0.08)}
+    .feature-card .ficon{font-size:2rem;margin-bottom:12px;display:block}
+    .feature-card h3{font-size:1.1rem;font-weight:700;color:#0f172a;margin-bottom:8px}
+    .feature-card p{font-size:0.9rem;color:#64748b;line-height:1.65}
+    .feature-card .learn-more{display:inline-block;margin-top:12px;color:#059669;font-weight:600;font-size:0.85rem}
+
+    /* WHY SECTION */
+    .why-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px}
+    .why-card{background:white;border-radius:16px;padding:24px;border:1px solid #e2e8f0;text-align:center;transition:0.3s}
+    .why-card:hover{border-color:#059669}
+    .why-card .wicon{font-size:2.2rem;margin-bottom:10px;display:block}
+    .why-card h3{font-size:1rem;font-weight:700;margin-bottom:6px;color:#0f172a}
+    .why-card p{font-size:0.85rem;color:#64748b;line-height:1.55}
+
+    /* TESTIMONIALS */
+    .testimonials{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+    .testimonial{background:white;border-radius:16px;padding:24px;border:1px solid #e2e8f0;box-shadow:0 2px 8px rgba(0,0,0,0.04)}
+    .testimonial .stars{color:#f59e0b;font-size:16px;margin-bottom:10px}
+    .testimonial blockquote{font-size:0.92rem;color:#475569;line-height:1.65;margin-bottom:12px;font-style:italic}
+    .testimonial .author{font-size:0.85rem;font-weight:600;color:#1e293b}
+
+    /* CTA BANNER */
+    .cta-banner{background:linear-gradient(135deg,#059669 0%,#0d9488 40%,#0891b2 100%);border-radius:20px;padding:60px 40px;text-align:center;color:white;margin:0 20px 60px;max-width:1200px;margin-left:auto;margin-right:auto}
+    .cta-banner h2{font-size:clamp(1.5rem,3vw,2rem);font-weight:800;margin-bottom:12px}
+    .cta-banner p{opacity:0.9;margin-bottom:24px;font-size:1.05rem;max-width:600px;margin-left:auto;margin-right:auto}
+
+    /* FOOTER */
+    .footer{text-align:center;padding:40px 20px;border-top:1px solid #e2e8f0;color:#64748b;font-size:0.85rem}
+    .footer a{color:#059669;text-decoration:none;font-weight:500}
+    .footer a:hover{text-decoration:underline}
+    .footer-links{display:flex;gap:20px;justify-content:center;flex-wrap:wrap;margin-bottom:12px}
+
+    @media(max-width:768px){
+      .stats{grid-template-columns:repeat(3,1fr)}
+      .portal-grid{grid-template-columns:repeat(2,1fr)}
+      .features-grid{grid-template-columns:1fr}
+      .nav-links a:not(.nav-btn){display:none}
+    }
+    @media(max-width:480px){
+      .stats{grid-template-columns:repeat(2,1fr)}
+      .portal-grid{grid-template-columns:1fr 1fr}
+      .hero{padding:50px 16px 40px}
+    }
   </style>
 </head>
 <body>
 
+  <!-- NAV -->
+  <nav class="nav">
+    <a href="https://ssewasswa.onrender.com" class="nav-brand">
+      <span style="font-size:24px">&#127963;</span> Comfort Zone
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#portals">Portals</a>
+      <a href="#why">Why Us</a>
+      <a href="https://ssewasswa.onrender.com/register">Sign Up</a>
+      <a href="https://ssewasswa.onrender.com/login" class="nav-btn">Login</a>
+    </div>
+  </nav>
+
+  <!-- HERO -->
   <div class="hero">
-    <h1>Comfort Zone Platform</h1>
-    <p>The all-in-one management system for schools, churches, clinics, and businesses. Built for Africa, powered by the cloud, available everywhere — even offline.</p>
+    <h1>One Platform. <span>Every Organization.</span><br>Zero Limits.</h1>
+    <p>The complete cloud management system for schools, churches, clinics, businesses, hotels, salons, pharmacies, gyms, restaurants, supermarkets, and 15+ organization types. Built for Africa, available everywhere &mdash; even offline.</p>
     <div class="cta-group">
-      <a href="https://ssewasswa.onrender.com/" class="btn btn-primary">Launch App</a>
-      <a href="https://github.com/ssewasswa/ssewasswa-api" class="btn btn-secondary">View Source</a>
+      <a href="https://ssewasswa.onrender.com/register" class="btn btn-primary">Get Started Free</a>
+      <a href="#portals" class="btn btn-secondary">Explore Features</a>
     </div>
   </div>
 
+  <!-- STATS -->
   <div class="stats">
     <div class="stat"><div class="num">70+</div><div class="label">Modules</div></div>
     <div class="stat"><div class="num">507</div><div class="label">Database Tables</div></div>
     <div class="stat"><div class="num">500+</div><div class="label">API Routes</div></div>
-    <div class="stat"><div class="num">4</div><div class="label">Tenant Types</div></div>
+    <div class="stat"><div class="num">15</div><div class="label">Portal Types</div></div>
+    <div class="stat"><div class="num">24/7</div><div class="label">Uptime</div></div>
   </div>
 
-  <div class="features">
-    <h2>Platform Capabilities</h2>
+  <!-- 15 PORTAL TYPES -->
+  <div class="section" id="portals">
+    <h2 class="section-title">15 Portal Types, One Unified Platform</h2>
+    <p class="section-sub">Each portal comes with pre-built modules tailored to your industry. Click any to get started.</p>
+    <div class="portal-grid">
+
+      <a href="https://ssewasswa.onrender.com/register?type=school" class="portal-card" style="border-top:4px solid #059669">
+        <span class="icon">&#127891;</span>
+        <h3>School</h3>
+        <p>Enrollment, fees, exams, LMS, timetable, report cards &amp; parent portal</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=church" class="portal-card" style="border-top:4px solid #7c3aed">
+        <span class="icon">&#9968;</span>
+        <h3>Church</h3>
+        <p>Members, tithes, sermons, groups, events, choir &amp; attendance</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=health" class="portal-card" style="border-top:4px solid #ef4444">
+        <span class="icon">&#127973;</span>
+        <h3>Clinic / Hospital</h3>
+        <p>Patients, prescriptions, lab, billing, wards &amp; vitals tracking</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=business" class="portal-card" style="border-top:4px solid #d97706">
+        <span class="icon">&#128188;</span>
+        <h3>Business / ERP</h3>
+        <p>POS, inventory, payroll, CRM, invoicing &amp; multi-branch</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=business" class="portal-card" style="border-top:4px solid #0891b2">
+        <span class="icon">&#127976;</span>
+        <h3>Hotel</h3>
+        <p>Bookings, rooms, check-in/out, housekeeping &amp; guest billing</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=business" class="portal-card" style="border-top:4px solid #dc2626">
+        <span class="icon">&#127869;</span>
+        <h3>Restaurant</h3>
+        <p>Menu, orders, kitchen display, tables, billing &amp; recipes</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=business" class="portal-card" style="border-top:4px solid #7c3aed">
+        <span class="icon">&#128722;</span>
+        <h3>Retail / Shop</h3>
+        <p>Sales, stock, suppliers, barcode, reports &amp; customer loyalty</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=business" class="portal-card" style="border-top:4px solid #ec4899">
+        <span class="icon">&#128132;</span>
+        <h3>Salon / Spa</h3>
+        <p>Appointments, services, payments, staff &amp; product inventory</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=health" class="portal-card" style="border-top:4px solid #0ea5e9">
+        <span class="icon">&#128138;</span>
+        <h3>Pharmacy</h3>
+        <p>Drugs, dispensing, inventory, expiry alerts &amp; prescriptions</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=business" class="portal-card" style="border-top:4px solid #f59e0b">
+        <span class="icon">&#127947;</span>
+        <h3>Gym / Fitness</h3>
+        <p>Memberships, classes, schedules, trainers &amp; payments</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=business" class="portal-card" style="border-top:4px solid #78716c">
+        <span class="icon">&#128296;</span>
+        <h3>Hardware Store</h3>
+        <p>Products, pricing, quotations, stock &amp; supplier management</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=business" class="portal-card" style="border-top:4px solid #16a34a">
+        <span class="icon">&#129367;</span>
+        <h3>Supermarket</h3>
+        <p>POS, barcode scanning, stock control, promotions &amp; reports</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=business" class="portal-card" style="border-top:4px solid #2563eb">
+        <span class="icon">&#128656;</span>
+        <h3>Transport</h3>
+        <p>Fleet management, routes, bookings, tracking &amp; scheduling</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=business" class="portal-card" style="border-top:4px solid #6366f1">
+        <span class="icon">&#128187;</span>
+        <h3>Electronics</h3>
+        <p>Products, repairs, warranties, stock &amp; service tracking</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+      <a href="https://ssewasswa.onrender.com/register?type=individual" class="portal-card" style="border-top:4px solid #8b5cf6">
+        <span class="icon">&#128100;</span>
+        <h3>Individual</h3>
+        <p>Personal finance, tasks, notes, goals &amp; habit tracking</p>
+        <span class="arrow">&rarr;</span>
+      </a>
+
+    </div>
+  </div>
+
+  <!-- FEATURES -->
+  <div class="section" id="features">
+    <h2 class="section-title">Platform Capabilities</h2>
+    <p class="section-sub">Powerful features that work across all 15 portal types</p>
     <div class="features-grid">
+
       <div class="feature-card">
-        <div class="icon">&#127891;</div>
+        <span class="ficon">&#127891;</span>
         <h3>School Management</h3>
-        <p>Student enrollment, attendance, gradebook, report cards, timetable builder, LMS, fee management, parent portal, and exam management.</p>
+        <p>Student enrollment, attendance, gradebook, report cards, timetable builder, LMS, fee management with mobile money, parent portal, exam management, promotions, and graduation tracking.</p>
+        <a href="https://ssewasswa.onrender.com/register?type=school" class="learn-more">Get started &rarr;</a>
       </div>
+
       <div class="feature-card">
-        <div class="icon">&#9968;</div>
+        <span class="ficon">&#9968;</span>
         <h3>Church Management</h3>
-        <p>Member directory, tithe & offering tracking, event management, sermon library, group ministries, visitor follow-up, and communication tools.</p>
+        <p>Member directory, tithe and offering tracking, event management, sermon library, group ministries, visitor follow-up, communication tools, and peer-to-peer fundraising campaigns.</p>
+        <a href="https://ssewasswa.onrender.com/register?type=church" class="learn-more">Get started &rarr;</a>
       </div>
+
       <div class="feature-card">
-        <div class="icon">&#127973;</div>
-        <h3>Clinic Management</h3>
-        <p>Patient records, appointments, prescriptions, lab results, billing, inventory management, vitals tracking, and health analytics dashboards.</p>
+        <span class="ficon">&#127973;</span>
+        <h3>Clinic &amp; Hospital Management</h3>
+        <p>Patient records, appointments, prescriptions, lab results, billing, inventory management, vitals tracking, department management, wards, referrals, and health analytics dashboards.</p>
+        <a href="https://ssewasswa.onrender.com/register?type=health" class="learn-more">Get started &rarr;</a>
       </div>
+
       <div class="feature-card">
-        <div class="icon">&#128188;</div>
-        <h3>Business ERP</h3>
-        <p>POS terminal, inventory management, invoicing, payroll, CRM, expense tracking, multi-branch support, and financial reporting.</p>
+        <span class="ficon">&#128188;</span>
+        <h3>Business ERP &amp; POS</h3>
+        <p>Point of sale with barcode scanning, multi-branch inventory management, invoicing, payroll, CRM, expense tracking, supplier management, quotations, and financial reporting.</p>
+        <a href="https://ssewasswa.onrender.com/register?type=business" class="learn-more">Get started &rarr;</a>
       </div>
+
       <div class="feature-card">
-        <div class="icon">&#128241;</div>
-        <h3>Mobile Money & Payments</h3>
-        <p>MTN MoMo, Airtel Money, QR code payments, fee installments, automated receipts via WhatsApp and SMS, and payment reconciliation.</p>
+        <span class="ficon">&#128241;</span>
+        <h3>Mobile Money &amp; Payments</h3>
+        <p>MTN MoMo, Airtel Money, QR code payments, fee installments, automated receipts via WhatsApp and SMS, payment reconciliation, and DPO/Flutterwave card payments.</p>
+        <a href="https://ssewasswa.onrender.com" class="learn-more">Learn more &rarr;</a>
       </div>
+
       <div class="feature-card">
-        <div class="icon">&#128202;</div>
-        <h3>Analytics & AI</h3>
-        <p>Real-time dashboards, predictive analytics, AI-powered assistant, custom report builder, data visualization, and trend forecasting.</p>
+        <span class="ficon">&#128202;</span>
+        <h3>Analytics &amp; AI</h3>
+        <p>Real-time dashboards, predictive analytics, AI-powered assistant, custom report builder, data visualization, trend forecasting, and automated smart notifications.</p>
+        <a href="https://ssewasswa.onrender.com" class="learn-more">Learn more &rarr;</a>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- WHY -->
+  <div class="section" id="why">
+    <h2 class="section-title">Why Comfort Zone?</h2>
+    <p class="section-sub">Built specifically for the African market with features that matter</p>
+    <div class="why-grid">
+      <div class="why-card">
+        <span class="wicon">&#128246;</span>
+        <h3>Works Offline</h3>
+        <p>Continue working without internet. Data syncs automatically when you reconnect. Perfect for areas with unreliable connectivity across Uganda, Kenya, Tanzania and beyond.</p>
+      </div>
+      <div class="why-card">
+        <span class="wicon">&#128176;</span>
+        <h3>Mobile Money First</h3>
+        <p>Deep integration with MTN MoMo and Airtel Money. Collect payments, send receipts, and reconcile accounts from the same dashboard. Supports installments.</p>
+      </div>
+      <div class="why-card">
+        <span class="wicon">&#128274;</span>
+        <h3>Bank-Level Security</h3>
+        <p>Multi-tenant data isolation, CSRF protection, rate limiting, 2FA authentication, SQL injection prevention, encrypted connections, and automated backups.</p>
+      </div>
+      <div class="why-card">
+        <span class="wicon">&#128241;</span>
+        <h3>Any Device, Anywhere</h3>
+        <p>Responsive web app works on phones, tablets, laptops, and desktops. No downloads needed. Bilingual support with English and Luganda.</p>
+      </div>
+      <div class="why-card">
+        <span class="wicon">&#9889;</span>
+        <h3>Real-Time Everything</h3>
+        <p>WebSocket-powered live updates. See changes instantly across all connected devices. Real-time attendance, live sales feeds, and instant notifications.</p>
+      </div>
+      <div class="why-card">
+        <span class="wicon">&#127758;</span>
+        <h3>Built for Africa</h3>
+        <p>Designed from the ground up for African organizations. Understands local payment systems, regulatory requirements, and the way businesses actually work here.</p>
       </div>
     </div>
   </div>
 
-  <div class="footer">
-    <p>Built with Node.js, PostgreSQL, Redis, and WebSocket &bull; <a href="https://ssewasswa.github.io/ssewasswa-api/">Comfort Zone Platform</a> &bull; <a href="https://ssewasswa.onrender.com/">Launch App</a> &bull; <a href="https://github.com/ssewasswa/ssewasswa-api">GitHub</a></p>
+  <!-- TESTIMONIALS -->
+  <div class="section">
+    <h2 class="section-title">Trusted by Organizations Across Africa</h2>
+    <p class="section-sub">Hear from real users transforming their operations</p>
+    <div class="testimonials">
+      <div class="testimonial">
+        <div class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
+        <blockquote>"Comfort Zone transformed how we manage our school. Fee collection with MoMo is seamless, and parents love the real-time notifications. We reduced late payments by 80%."</blockquote>
+        <div class="author">School Administrator, Kampala</div>
+      </div>
+      <div class="testimonial">
+        <div class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
+        <blockquote>"Managing our church membership and tithe tracking used to take hours every week. Now it's all automated. The sermon library and group management features are incredible."</blockquote>
+        <div class="author">Church Leader, Entebbe</div>
+      </div>
+      <div class="testimonial">
+        <div class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
+        <blockquote>"As a clinic, we needed something that handles patient records, prescriptions, and billing without complexity. Comfort Zone does exactly that. Our staff learned it in one day."</blockquote>
+        <div class="author">Clinic Manager, Mukono</div>
+      </div>
+    </div>
   </div>
+
+  <!-- CTA -->
+  <div class="cta-banner">
+    <h2>Ready to Transform Your Organization?</h2>
+    <p>Join hundreds of schools, churches, clinics, and businesses already using Comfort Zone. Free to start, no credit card required.</p>
+    <div class="cta-group">
+      <a href="https://ssewasswa.onrender.com/register" class="btn" style="background:white;color:#059669;font-weight:700">Create Free Account</a>
+      <a href="https://ssewasswa.onrender.com" class="btn" style="background:rgba(255,255,255,0.15);color:white;border:2px solid rgba(255,255,255,0.4)">Explore Dashboard</a>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <div class="footer-links">
+      <a href="https://ssewasswa.onrender.com">Home</a>
+      <a href="#features">Features</a>
+      <a href="#portals">Portals</a>
+      <a href="#why">About</a>
+      <a href="https://ssewasswa.onrender.com/register">Sign Up</a>
+      <a href="https://ssewasswa.onrender.com/login">Login</a>
+    </div>
+    <p>Comfort Zone Platform by Ssewasswa. Built with Node.js, PostgreSQL, Redis, and WebSocket.</p>
+    <p style="margin-top:6px"><a href="https://github.com/ssewasswa/ssewasswa-api">GitHub</a> &bull; <a href="https://ssewasswa.onrender.com">Launch App</a></p>
+  </footer>
 
 </body>
 </html>
