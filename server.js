@@ -7878,11 +7878,7 @@ app.get('/entertainment', ah(async (req, res) => {
 app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const flash = req.session.flash; delete req.session.flash;
   let logs = { rows: [] };
-  try {
-    logs = await pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 20');
-  } catch (e) {
-    console.warn('Audit logs query failed:', e.message);
-  }
+  try { logs = await pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 10'); } catch (e) {}
   const [tCount, uCount, rev, wal, tenants, chartData, revBreakdown, pendingSubs, adCount, blogCount, withdrawalHistory, newUserGrowth, activeTenants, paymentStats] = await Promise.all([
     pool.query('SELECT COUNT(*) FROM tenants'),
     pool.query('SELECT COUNT(*) FROM users'),
@@ -7904,264 +7900,159 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const chartValues = chartData.rows.map(r => r.total).join(',');
   const balance = parseInt(wal.rows[0]?.b || 0);
   const totalRev = parseInt(rev.rows[0].t || 0);
+  const impersonating = req.session._impersonate_tenant_id;
+
+  const navItem = (href, label, icon, color) =>
+    `<a href="${href}" style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;text-decoration:none;font-weight:600;font-size:13px;background:${color};color:white;transition:0.2s" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'" onmouseout="this.style.transform='';this.style.boxShadow=''">${icon} ${label}</a>`;
+
+  const statCard = (value, label, color) =>
+    `<div style="background:white;border-radius:12px;padding:20px;text-align:center;border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,0.04)"><div style="font-size:30px;font-weight:900;color:${color}">${value}</div><div style="color:#64748b;font-size:13px;margin-top:4px">${label}</div></div>`;
+
+  const moneyCard = (label, amount, bg, link, linkText) =>
+    `<div style="background:${bg};color:white;padding:24px;border-radius:16px;text-align:center"><div style="font-size:13px;opacity:0.85">${label}</div><div style="font-size:32px;font-weight:900;margin:8px 0">${amount}</div>${link ? `<a href="${link}" style="display:inline-block;margin-top:6px;padding:6px 16px;background:rgba(255,255,255,0.2);color:white;border-radius:8px;font-weight:600;font-size:12px;text-decoration:none">${linkText || 'Open'}</a>` : ''}</div>`;
+
+  const section = (title, content, extraStyle) =>
+    `<div style="background:white;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.04);border:1px solid #e2e8f0;${extraStyle || ''}"><h2 style="font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px">${title}</h2>${content}</div>`;
+
+  const actionCard = (href, icon, iconBg, title, desc) =>
+    `<a href="${href}" style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;border:1px solid #e2e8f0;text-decoration:none;color:inherit;transition:0.2s" onmouseover="this.style.borderColor='#4f46e5';this.style.background='#f8f7ff'" onmouseout="this.style.borderColor='#e2e8f0';this.style.background='white'"><div style="width:40px;height:40px;border-radius:10px;background:${iconBg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${icon}</div><div><div style="font-size:14px;font-weight:600">${title}</div><div style="font-size:12px;color:#64748b">${desc}</div></div></a>`;
+
   res.send(renderPage('Dev Master', `
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-      .dev-nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
-      .dev-nav a{padding:10px 16px;border-radius:10px;text-decoration:none;font-weight:600;font-size:13px;transition:0.2s}
-      .dev-nav a:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.15)}
-      .dev-section{background:white;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.05);border:1px solid #e2e8f0}
-      .dev-section h2{font-size:20px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
-      .money-card{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:24px;border-radius:16px;text-align:center}
-      .money-card .amount{font-size:36px;font-weight:900;margin:10px 0}
-      .money-card .label{font-size:14px;opacity:0.8}
-      .quick-action{display:flex;align-items:center;gap:12px;padding:14px 18px;border-radius:12px;border:1px solid #e2e8f0;margin-bottom:8px;cursor:pointer;transition:0.2s;text-decoration:none;color:inherit}
-      .quick-action:hover{border-color:#4f46e5;background:#f8f7ff;transform:translateX(4px)}
-      .quick-action .icon{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px}
-      .quick-action .text h4{margin:0;font-size:15px}
-      .quick-action .text p{margin:2px 0 0;font-size:12px;color:#64748b}
-    </style>
+    <style>.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.nav-wrap{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}</style>
 
-    <!-- HERO -->
-    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
-      <h1>Comfort Developer Hub</h1>
-      <p style="opacity:0.9;margin-top:4px">Your platform, your earnings, your control</p>
-    </div>
+    <!-- Impersonation Banner -->
+    ${impersonating ? `<div style="background:#4f46e5;color:#fff;padding:12px 20px;border-radius:12px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px"><span>You are viewing as: <strong>${esc(req.session.user.tenant_name || 'Unknown')}</strong></span><div style="display:flex;gap:8px"><a href="/dev/exit-tenant" style="background:rgba(255,255,255,0.2);color:#fff;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Exit Impersonation</a><a href="/dev/portals" style="background:rgba(255,255,255,0.2);color:#fff;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Switch Portal</a></div></div>` : ''}
     ${flashHtml}
 
-    <!-- DEV NAVIGATION -->
-    <div class="dev-nav">
-      <a href="/dev/master" style="background:#4f46e5;color:white">Dashboard</a>
-      <a href="/dev/settings" style="background:#ec4899;color:white">Settings</a>
-      <a href="/dev/withdraw" style="background:#059669;color:white">Withdraw</a>
-      <a href="/dev/adverts" style="background:#f59e0b;color:white">Adverts</a>
-      <a href="/dev/blog" style="background:#8b5cf6;color:white">Blog</a>
-      <a href="/dev/posts" style="background:#f97316;color:white">Posts</a>
-      <a href="/dev/resources" style="background:#14b8a6;color:white">Books & Papers</a>
-      <a href="/dev/plans" style="background:#e11d48;color:white">Plans & Pricing</a>
-      <a href="/dev/activity" style="background:#0ea5e9;color:white">Activity</a>
-      <a href="/dev/features" style="background:#64748b;color:white">Features</a>
-      <a href="/dev/subscription-access" style="background:#6366f1;color:white">Subscription Access</a>
-      <a href="/dev/portals" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white">Portal Switcher</a>
-      <a href="/fundraising" style="background:linear-gradient(135deg,#059669,#10b981);color:white">Fundraising</a>
-      <a href="/exams" style="background:#3b82f6;color:white">Exams</a>
-      <a href="/whatsapp" style="background:#22c55e;color:white">WhatsApp</a>
-      <a href="/scheduled-reports" style="background:#f59e0b;color:white">Reports</a>
-      <a href="/branches" style="background:#8b5cf6;color:white">Branches</a>
-      <a href="/clinic-enhanced" style="background:#ef4444;color:white">Health Portal</a>
-      <a href="/links" style="background:#0ea5e9;color:white">Deep Links</a>
-      <a href="/webhooks" style="background:#8b5cf6;color:white">Webhooks</a>
-      <a href="/marketplace" style="background:#d97706;color:white">Plugins</a>
-      <a href="/backup" style="background:#64748b;color:white">Backup</a>
-      <a href="/dev/api-playground" style="background:#7c3aed;color:white">API Playground</a>
-      <a href="/dev/api-analytics" style="background:#8b5cf6;color:white">API Analytics</a>
-      <a href="/dev/api-health" style="background:#10b981;color:white">API Health</a>
-      <a href="/dev/onboarding" style="background:#22c55e;color:white">Dev Onboarding</a>
+    <!-- Hero -->
+    <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:28px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1 style="margin:0">Comfort Developer Hub</h1>
+      <p style="opacity:0.9;margin-top:6px">Platform management, analytics, and earnings</p>
     </div>
 
-    <!-- MY MONEY SECTION -->
-    <h2 style="font-size:22px;margin-bottom:16px">My Earnings & Rewards</h2>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
-      <div class="money-card">
-        <div class="label">Available Balance</div>
-        <div class="amount">UGX ${balance.toLocaleString()}</div>
-        <a href="/dev/withdraw" style="display:inline-block;margin-top:8px;padding:8px 20px;background:rgba(255,255,255,0.2);color:white;border-radius:8px;font-weight:600;font-size:13px;text-decoration:none">Withdraw Now</a>
-      </div>
-      <div class="money-card" style="background:linear-gradient(135deg,#059669,#10b981)">
-        <div class="label">30-Day Revenue</div>
-        <div class="amount">UGX ${totalRev.toLocaleString()}</div>
-        <div class="label">From all sources</div>
-      </div>
-      <div class="money-card" style="background:linear-gradient(135deg,#f59e0b,#d97706)">
-        <div class="label">Active Subscribers</div>
-        <div class="amount">${pendingSubs.rows[0].count}</div>
-        <div class="label">Paying tenants</div>
-      </div>
+    <!-- Revenue Cards -->
+    <div class="grid2" style="margin-bottom:20px">
+      ${moneyCard('Available Balance', 'UGX ' + balance.toLocaleString(), 'linear-gradient(135deg,#4f46e5,#7c3aed)', '/dev/withdraw', 'Withdraw')}
+      ${moneyCard('30-Day Revenue', 'UGX ' + totalRev.toLocaleString(), 'linear-gradient(135deg,#059669,#10b981)')}
+      ${moneyCard('Active Subscribers', pendingSubs.rows[0].count, 'linear-gradient(135deg,#f59e0b,#d97706)')}
+      ${moneyCard('Total Users', uCount.rows[0].count, 'linear-gradient(135deg,#0ea5e9,#38bdf8)')}
     </div>
 
-    <!-- PLATFORM STATS -->
-    <div class="dev-section">
-      <h2>&#128202; Platform Overview</h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px">
-        <div style="background:#f1f5f9;border-radius:12px;padding:20px;text-align:center">
-          <div style="font-size:32px;font-weight:900;color:#4f46e5">${uCount.rows[0].count}</div>
-          <div style="color:#64748b;font-size:13px">Total Users</div>
-        </div>
-        <div style="background:#f1f5f9;border-radius:12px;padding:20px;text-align:center">
-          <div style="font-size:32px;font-weight:900;color:#059669">${activeTenants.rows[0].active}</div>
-          <div style="color:#64748b;font-size:13px">Active Tenants (7d)</div>
-        </div>
-        <div style="background:#f1f5f9;border-radius:12px;padding:20px;text-align:center">
-          <div style="font-size:32px;font-weight:900;color:#d97706">${paymentStats.rows[0].count}</div>
-          <div style="color:#64748b;font-size:13px">Payments (30d)</div>
-        </div>
-        <div style="background:#f1f5f9;border-radius:12px;padding:20px;text-align:center">
-          <div style="font-size:32px;font-weight:900;color:#7c3aed">${blogCount.rows[0].count}</div>
-          <div style="color:#64748b;font-size:13px">Blog Posts</div>
-        </div>
+    <!-- Platform Stats -->
+    <div class="grid2" style="margin-bottom:20px">
+      ${statCard(tCount.rows[0].count, 'Total Tenants', '#4f46e5')}
+      ${statCard(activeTenants.rows[0].active, 'Active (7 days)', '#059669')}
+      ${statCard(paymentStats.rows[0].count, 'Payments (30d)', '#d97706')}
+      ${statCard(blogCount.rows[0].count, 'Blog Posts', '#7c3aed')}
+      ${statCard(adCount.rows[0].count, 'Active Adverts', '#ec4899')}
+    </div>
+
+    <!-- Navigation - Organized by Category -->
+    <div style="background:white;border-radius:16px;padding:20px;margin-bottom:20px;border:1px solid #e2e8f0">
+      <h3 style="margin:0 0 12px;font-size:14px;color:#64748b;text-transform:uppercase;letter-spacing:1px">Quick Navigation</h3>
+      <div class="nav-wrap">
+        <!-- Portal -->
+        ${navItem('/dev/portals', 'Portal Switcher', '&#127760;', 'linear-gradient(135deg,#6366f1,#8b5cf6)')}
+        ${navItem('/dev/settings', 'Settings', '&#9881;', '#475569')}
+        ${navItem('/dev/api-health', 'System Health', '&#128737;', '#059669')}
+        ${navItem('/dev/api-analytics', 'Analytics', '&#128200;', '#0ea5e9')}
+        ${navItem('/dev/activity', 'Activity Logs', '&#128196;', '#6366f1')}
+        <!-- Content -->
+        ${navItem('/dev/blog', 'Blog', '&#128221;', '#7c3aed')}
+        ${navItem('/dev/posts', 'Public Posts', '&#128227;', '#f97316')}
+        ${navItem('/dev/resources', 'Books & Papers', '&#128214;', '#14b8a6')}
+        ${navItem('/dev/adverts', 'Adverts', '&#127918;', '#d97706')}
+        <!-- Money -->
+        ${navItem('/dev/withdraw', 'Withdraw', '&#128176;', '#059669')}
+        ${navItem('/dev/plans', 'Plans & Pricing', '&#128179;', '#e11d48')}
+        ${navItem('/dev/features', 'Feature Flags', '&#127991;', '#64748b')}
+        ${navItem('/dev/subscription-access', 'Subscription Access', '&#128274;', '#6366f1')}
+        <!-- Tools -->
+        ${navItem('/dev/api-playground', 'API Playground', '&#128736;', '#7c3aed')}
+        ${navItem('/dev/onboarding', 'Onboarding', '&#127919;', '#22c55e')}
+        ${navItem('/dev/cleanup', 'DB Cleanup', '&#9888;', '#dc2626')}
+        ${navItem('/status/admin', 'Status Page', '&#128994;', '#db2777')}
+        <!-- Portal Features -->
+        ${navItem('/fundraising', 'Fundraising', '&#127873;', '#059669')}
+        ${navItem('/backup', 'Backup', '&#128190;', '#64748b')}
+        ${navItem('/webhooks', 'Webhooks', '&#128279;', '#8b5cf6')}
+        ${navItem('/marketplace', 'Plugins', '&#128268;', '#d97706')}
       </div>
     </div>
 
-    <!-- REVENUE BREAKDOWN -->
-    <div class="dev-section">
-      <h2>Revenue Breakdown (30 Days)</h2>
-      ${revBreakdown.rows.length > 0 ? `
-        <table><tr><th>Source</th><th>Amount</th></tr>
-        ${revBreakdown.rows.map(r => `<tr><td><span class="tag">${esc(r.source)}</span></td><td style="font-weight:700">UGX ${parseInt(r.total).toLocaleString()}</td></tr>`).join('')}
-        </table>
-      ` : '<p class="muted">No revenue recorded in the last 30 days</p>'}
+    <!-- Charts Row -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+      ${section('&#128200; Revenue Trend (30 Days)', '<canvas id="revChart"></canvas>')}
+      ${section('&#128200; User Growth (30 Days)', '<canvas id="userGrowthChart" height="200"></canvas>')}
     </div>
 
-    <!-- REVENUE CHART -->
-    <div class="dev-section"><h3>30-Day Revenue Trend</h3><canvas id="revChart"></canvas></div>
+    <!-- Quick Actions Grid -->
+    ${section('Quick Actions', `
+      <div class="grid3">
+        ${actionCard('/dev/settings', '&#9881;', '#fce7f3', 'Platform Settings', 'Contacts, site name, social links')}
+        ${actionCard('/dev/withdraw', '&#128176;', '#dcfce7', 'Withdraw Money', 'Send earnings to mobile money')}
+        ${actionCard('/dev/posts', '&#128227;', '#ffedd5', 'Public Posts', 'Announcements & updates')}
+        ${actionCard('/dev/blog', '&#128221;', '#ede9fe', 'Write Blog Posts', blogCount.rows[0].count + ' posts published')}
+        ${actionCard('/dev/adverts', '&#127918;', '#fef3c7', 'Manage Adverts', adCount.rows[0].count + ' active')}
+        ${actionCard('/dev/features', '&#127991;', '#f1f5f9', 'Feature Flags', 'Toggle features on/off')}
+        ${actionCard('/status/admin', '&#128994;', '#fce7f3', 'Platform Status', 'Service incidents')}
+        ${actionCard('/dev/cleanup', '&#9888;', '#fee2e2', 'Database Cleanup', 'Erase test data')}
+        ${actionCard('/fundraising', '&#127873;', '#dcfce7', 'Fundraising', 'Campaigns & donations')}
+        ${actionCard('/dev/portals', '&#127760;', '#eef2ff', 'Switch Portal', 'Preview any tenant portal')}
+        ${actionCard('/dev/api-health', '&#128737;', '#ecfdf5', 'System Health', 'Database & server status')}
+        ${actionCard('/dev/api-playground', '&#128736;', '#f5f3ff', 'API Playground', 'Test endpoints')}
+      </div>
+    `)}
 
-    <!-- USER GROWTH CHART -->
-    <div class="dev-section"><h2>&#128200; User Growth (30 Days)</h2>
-      <canvas id="userGrowthChart" height="200"></canvas>
-    </div>
+    <!-- Revenue Breakdown -->
+    ${section('Revenue Breakdown (30 Days)', `
+      ${revBreakdown.rows.length > 0 ? `<table><tr><th>Source</th><th>Amount</th></tr>${revBreakdown.rows.map(r => '<tr><td><span class="tag">' + esc(r.source) + '</span></td><td style="font-weight:700">UGX ' + parseInt(r.total).toLocaleString() + '</td></tr>').join('')}</table>` : '<p class="muted">No revenue recorded</p>'}
+    `)}
 
-    <!-- QUICK ACTIONS - WHAT YOU CAN DO -->
-    <h2 style="font-size:22px;margin-bottom:16px;margin-top:24px">Quick Actions</h2>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:24px">
-      <a href="/dev/settings" class="quick-action">
-        <div class="icon" style="background:#fce7f3;color:#ec4899">&#9881;</div>
-        <div class="text"><h4>Platform Settings</h4><p>Edit your contacts, website name, social links</p></div>
-      </a>
-      <a href="/dev/withdraw" class="quick-action">
-        <div class="icon" style="background:#dcfce7;color:#059669">$</div>
-        <div class="text"><h4>Withdraw Money</h4><p>Send earnings to your MTN/Airtel mobile money</p></div>
-      </a>
-      <a href="/dev/posts" class="quick-action">
-        <div class="icon" style="background:#ffedd5;color:#f97316">P</div>
-        <div class="text"><h4>Post to Public</h4><p>Announcements, promotions, updates</p></div>
-      </a>
-      <a href="/dev/resources" class="quick-action">
-        <div class="icon" style="background:#ccfbf1;color:#14b8a6">R</div>
-        <div class="text"><h4>Books & Past Papers</h4><p>Add/scrape educational resources for users</p></div>
-      </a>
-      <a href="/dev/adverts" class="quick-action">
-        <div class="icon" style="background:#fef3c7;color:#d97706">A</div>
-        <div class="text"><h4>Manage Adverts</h4><p>${adCount.rows[0].count} active adverts on the platform</p></div>
-      </a>
-      <a href="/dev/blog" class="quick-action">
-        <div class="icon" style="background:#ede9fe;color:#7c3aed">B</div>
-        <div class="text"><h4>Write Blog Posts</h4><p>${blogCount.rows[0].count} posts - boost SEO and engagement</p></div>
-      </a>
-      <a href="/dev/activity" class="quick-action">
-        <div class="icon" style="background:#e0f2fe;color:#0ea5e9">L</div>
-        <div class="text"><h4>View Activity Logs</h4><p>Monitor signups, payments, and system events</p></div>
-      </a>
-      <a href="/dev/features" class="quick-action">
-        <div class="icon" style="background:#f1f5f9;color:#64748b">F</div>
-        <div class="text"><h4>Feature Flags</h4><p>Toggle platform features on/off</p></div>
-      </a>
-      <a href="/status/admin" class="quick-action">
-        <div class="icon" style="background:#fce7f3;color:#db2777">S</div>
-        <div class="text"><h4>Platform Status</h4><p>Update service status and incidents</p></div>
-      </a>
-      <a href="/dev/cleanup" class="quick-action">
-        <div class="icon" style="background:#fee2e2;color:#dc2626">&#9888;</div>
-        <div class="text"><h4>Database Cleanup</h4><p>Erase test data, prepare for real users</p></div>
-      </a>
-      <a href="/fundraising" class="quick-action">
-        <div class="icon" style="background:#dcfce7;color:#059669">&#127873;</div>
-        <div class="text"><h4>Fundraising Portal</h4><p>Create campaigns, collect donations, track progress</p></div>
-      </a>
-    </div>
+    ${withdrawalHistory.rows.length > 0 ? section('Recent Withdrawals', `
+      <table><tr><th>Amount</th><th>Details</th><th>Date</th></tr>${withdrawalHistory.rows.map(w => { let m = {}; try { m = JSON.parse(w.details || '{}'); } catch(e){} return '<tr><td style="color:#dc2626;font-weight:700">UGX ' + Math.abs(parseInt(w.amount)).toLocaleString() + '</td><td>' + esc(m.phone||'') + ' (' + esc(m.network||'') + ')</td><td>' + new Date(w.created_at).toLocaleString() + '</td></tr>'; }).join('')}</table>
+    `) : ''}
 
-    <!-- RECENT WITHDRAWALS -->
-    ${withdrawalHistory.rows.length > 0 ? `
-    <div class="dev-section">
-      <h2>Recent Withdrawals</h2>
-      <table><tr><th>Amount</th><th>Details</th><th>Date</th></tr>
-      ${withdrawalHistory.rows.map(w => {
-        let meta = {};
-        try { meta = JSON.parse(w.details || '{}'); } catch(e) { console.error('[Error]', e.message); }
-        return `<tr><td style="color:#dc2626;font-weight:700">UGX ${Math.abs(parseInt(w.amount)).toLocaleString()}</td><td>${esc(meta.phone||'')} (${esc(meta.network||'')})</td><td>${new Date(w.created_at).toLocaleString()}</td></tr>`;
-      }).join('')}
-      </table>
-    </div>
-    ` : ''}
-
-    <!-- INJECT REVENUE -->
-    <div class="dev-section">
-      <h2>Record Revenue</h2>
+    <!-- Record Revenue -->
+    ${section('Record Revenue', `
       <form method="POST" action="/dev/inject-revenue" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
-        <div style="flex:1;min-width:150px"><label>Amount UGX</label><input name="amount" placeholder="e.g. 50000" type="number" required></div>
-        <div style="flex:1;min-width:150px"><label>Source</label><input name="source" placeholder="e.g. Subscription, Ads, Grant" required></div>
+        <div style="flex:1;min-width:150px"><label>Amount (UGX)</label><input name="amount" placeholder="50000" type="number" required></div>
+        <div style="flex:1;min-width:150px"><label>Source</label><input name="source" placeholder="Subscription, Ads..." required></div>
         <button class="btn btn-gold">Record</button>
       </form>
-    </div>
+    `)}
 
-    <!-- TENANT MANAGEMENT -->
-    <h2 style="font-size:22px;margin-bottom:16px;margin-top:24px">Tenant Management</h2>
-    <div class="dev-section">
-      <h3>Quick Tenant Action</h3>
-      <form method="POST" action="/dev/execute" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+    <!-- Tenant Management -->
+    ${section('Tenant Management (' + tCount.rows[0].count + ' total)', `
+      <form method="POST" action="/dev/execute" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:16px">
         <div style="flex:1;min-width:150px"><label>Action</label>
-          <select name="action" required><option value="">Select</option>
-            <option value="add_balance">Add Balance</option>
-            <option value="verify_tenant">Verify Tenant</option>
-            <option value="unverify_tenant">Unverify Tenant</option>
-            <option value="approve_tenant">Approve Tenant</option>
-            <option value="ban_tenant">Ban Tenant</option>
-            <option value="unban_tenant">Unban Tenant</option>
-            <option value="grant_free_access">Grant Free Access</option>
-            <option value="enable_fundraising">Enable Fundraising</option>
-            <option value="delete_tenant">DELETE Tenant</option>
-            <option value="switch_to_tenant" style="color:#4f46e5;font-weight:700">⬡ SWITCH TO TENANT</option>
-          </select>
-        </div>
+          <select name="action" required><option value="">Select...</option>
+            <option value="add_balance">Add Balance</option><option value="verify_tenant">Verify</option>
+            <option value="approve_tenant">Approve</option><option value="ban_tenant">Ban</option>
+            <option value="unban_tenant">Unban</option><option value="grant_free_access">Grant Free Access</option>
+            <option value="switch_to_tenant" style="color:#4f46e5;font-weight:700">Switch to Tenant</option>
+          </select></div>
         <div style="min-width:100px"><label>Tenant ID</label><input name="target_id" placeholder="ID" type="number" required></div>
         <div style="min-width:100px"><label>Amount</label><input name="amount" placeholder="UGX" type="number"></div>
-        <div style="min-width:100px"><label>Reason</label><input name="reason" placeholder="Reason" type="text"></div>
         <button class="btn btn-red">Execute</button>
       </form>
-    </div>
+      <div style="overflow-x:auto"><table><tr><th>ID</th><th>Name</th><th>Type</th><th>Wallet</th><th>Status</th><th>Action</th></tr>
+      ${tenants.rows.map(t => '<tr><td>' + t.id + '</td><td>' + esc(t.name) + '</td><td>' + esc(t.type) + '</td><td>UGX ' + parseInt(t.wallet_balance || 0).toLocaleString() + '</td><td>' + (t.approved ? (t.banned ? '<span style="color:#dc2626">Banned</span>' : '<span style="color:#059669">Active</span>') : '<span style="color:#d97706">Pending</span>') + '</td><td><form method="POST" action="/dev/execute" style="display:inline"><input type="hidden" name="action" value="switch_to_tenant"><input type="hidden" name="target_id" value="' + t.id + '"><button type="submit" style="background:#4f46e5;color:#fff;border:none;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">Switch To</button></form></td></tr>').join('')}
+      </table></div>
+    `)}
 
-    <div class="dev-section">
-      <h3>All Tenants (${tCount.rows[0].count})</h3>
-      <div style="overflow-x:auto">
-      ${req.session._impersonate_tenant_id ? '<div style="background:#4f46e5;color:#fff;padding:12px 20px;border-radius:10px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between"><span>⬡ You are impersonating <strong>' + esc(req.session.user.tenant_name || 'Unknown') + '</strong></span><a href="/dev/exit-tenant" style="background:rgba(255,255,255,0.2);color:#fff;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Exit Impersonation</a></div>' : ''}
-      <table><tr><th>ID</th><th>Name</th><th>Type</th><th>Wallet</th><th>Verified</th><th>Status</th><th>Action</th></tr>
-      ${tenants.rows.map(t => `<tr>
-        <td>${t.id}</td><td>${esc(t.name)}</td><td>${esc(t.type)}</td>
-        <td>UGX ${parseInt(t.wallet_balance || 0).toLocaleString()}</td>
-        <td>${t.verified ? '<span style="color:#059669">Yes</span>' : '<span style="color:#dc2626">No</span>'}</td>
-        <td>${t.approved ? (t.banned ? '<span style="color:#dc2626">Banned</span>' : '<span style="color:#059669">Active</span>') : '<span style="color:#d97706">Pending</span>'}</td>
-        <td><form method="POST" action="/dev/execute" style="display:inline"><input type="hidden" name="action" value="switch_to_tenant"><input type="hidden" name="target_id" value="${t.id}"><button type="submit" style="background:#4f46e5;color:#fff;border:none;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">Switch To</button></form></td>
-      </tr>`).join('')}
-      </table>
-      </div>
-    </div>
-
-    <div class="dev-section">
-      <h3>Recent Audit Logs</h3>
-      <table><tr><th>User</th><th>Action</th><th>Details</th><th>Time</th></tr>
-      ${logs.rows.map(l => `<tr><td>${esc(l.user_email || l.email || '')}</td><td>${esc(l.action || '')}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.details || '')}</td><td>${l.created_at ? new Date(l.created_at).toLocaleString() : ''}</td></tr>`).join('')}
-      </table>
+    <!-- Recent Logs -->
+    ${section('Recent Activity', `
+      <table><tr><th>User</th><th>Action</th><th>Time</th></tr>${logs.rows.map(l => '<tr><td>' + esc(l.user_email || '') + '</td><td><span class="tag">' + esc(l.action || '') + '</span></td><td style="font-size:12px">' + (l.created_at ? new Date(l.created_at).toLocaleString() : '') + '</td></tr>').join('')}</table>
       <a href="/dev/activity" class="btn btn-sm" style="margin-top:10px">View All Activity</a>
-    </div>
+    `)}
 
     <script>
-      new Chart(document.getElementById('revChart'), {
-        type: 'line',
-        data: {
-          labels: ['${chartLabels}'],
-          datasets: [{ label: 'UGX Revenue', data: [${chartValues}], borderColor: '#4f46e5', tension: 0.3, fill: true, backgroundColor: 'rgba(79,70,229,0.1)' }]
-        },
-        options: { responsive: true, plugins: { legend: { display: false } } }
-      });
-    </script>
-    <script>
-      const ugLabels = ${JSON.stringify(newUserGrowth.rows.map(r => new Date(r.day).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' })))};
-      const ugData = ${JSON.stringify(newUserGrowth.rows.map(r => parseInt(r.count)))};
-      if (ugLabels.length > 0) {
-        new Chart(document.getElementById('userGrowthChart'), {
-          type: 'line', data: { labels: ugLabels, datasets: [{ label: 'New Users', data: ugData, borderColor: '#059669', backgroundColor: 'rgba(5,150,105,0.1)', fill: true, tension: 0.3 }] },
-          options: { responsive: true, plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } }
-        });
-      }
+    new Chart(document.getElementById('revChart'),{type:'line',data:{labels:['${chartLabels}'],datasets:[{label:'Revenue',data:[${chartValues}],borderColor:'#4f46e5',tension:0.3,fill:true,backgroundColor:'rgba(79,70,229,0.1)'}]},options:{responsive:true,plugins:{legend:{display:false}}}});
+    var ugLabels=${JSON.stringify(newUserGrowth.rows.map(r=>new Date(r.day).toLocaleDateString('en-GB',{month:'short',day:'numeric'})))};
+    var ugData=${JSON.stringify(newUserGrowth.rows.map(r=>parseInt(r.count)))};
+    if(ugLabels.length>0){new Chart(document.getElementById('userGrowthChart'),{type:'line',data:{labels:ugLabels,datasets:[{label:'New Users',data:ugData,borderColor:'#059669',backgroundColor:'rgba(5,150,105,0.1)',fill:true,tension:0.3}]},options:{responsive:true,plugins:{legend:{display:true}},scales:{y:{beginAtZero:true}}}});}
     </script>
   `, req.session.user));
 }));
