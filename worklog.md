@@ -58,3 +58,30 @@ Stage Summary:
 - Users can select subscription tier during registration (Free/Basic/Pro/Enterprise)
 - All landing page links now functional and point to /register with correct type parameter
 - Changes deployed to GitHub, Render redeploy triggered
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix landing page - clicking any portal card only redirected to School Portal
+
+Work Log:
+- Identified root cause: Line 589 in launch-routes.js had `if (req.session.user) return res.redirect('/dashboard')` which immediately sent logged-in users to their dashboard (School Portal)
+- Removed the redirect so logged-in users can now see the landing page
+- Created `portalBtn()` helper function that generates different buttons based on login state:
+  - Logged-in: Shows "Switch to [Portal]" form button (POSTs to /switch-portal)
+  - Logged-in + current portal: Shows "✓ Current Portal" badge
+  - Anonymous: Shows "Start Free Trial" link to /register?type=xxx
+- Updated hero section CTAs:
+  - Logged-in: "My Dashboard (School)" + "Switch Portal"
+  - Anonymous: "Start Free" + "Login"
+- Updated Entertainment and Fundraising cards:
+  - Logged-in: "Open Entertainment →" / "Open Fundraising →"
+  - Anonymous: "Sign Up to Access" / "Start Fundraising"
+- All 8 portal type cards now use the dynamic portalBtn helper
+- Pushed commit 82e05fc, Render redeploy triggered
+
+Stage Summary:
+- Logged-in users can now see the full landing page with all portal types
+- Clicking any portal card switches to that portal type (not just School)
+- Anonymous users still see registration links as before
+- The fix properly uses POST /switch-portal which updates tenant type in DB and session
