@@ -3417,7 +3417,88 @@ app.get('/dashboard', requireAuth, (req, res) => {
     return res.redirect(`/portal/${tenantType}`);
   }
   if (u.role === 'super_admin') return res.redirect('/dev/master');
-  res.redirect(`/portal/${u.tenant_type}`);
+
+  // Show beautiful portal picker instead of auto-redirecting
+  const currentType = u.tenant_type || 'school';
+  const dark = u?.dark_mode || false;
+  const portalCards = USER_PORTAL_TYPES.map(p => {
+    const isActive = currentType === p.type;
+    const isSchool = p.type === 'school';
+    const isChurch = p.type === 'church';
+    const isOrg = p.type === 'organization';
+    const isHealth = p.type === 'health';
+    const isBusiness = p.type === 'business';
+    const isIndividual = p.type === 'individual';
+    const isPublic = p.type === 'public';
+    // Gradient colors per portal
+    const grad = isSchool ? 'linear-gradient(135deg,#059669,#10b981)' :
+                 isChurch ? 'linear-gradient(135deg,#7c3aed,#a855f7)' :
+                 isOrg ? 'linear-gradient(135deg,#10b981,#34d399)' :
+                 isHealth ? 'linear-gradient(135deg,#ef4444,#f87171)' :
+                 isBusiness ? 'linear-gradient(135deg,#0891b2,#22d3ee)' :
+                 isIndividual ? 'linear-gradient(135deg,#8b5cf6,#c084fc)' :
+                 'linear-gradient(135deg,#0ea5e9,#38bdf8)';
+    const lightBg = isSchool ? '#ecfdf5' : isChurch ? '#f5f3ff' : isOrg ? '#ecfdf5' : isHealth ? '#fef2f2' : isBusiness ? '#ecfeff' : isIndividual ? '#f5f3ff' : '#f0f9ff';
+    const borderCol = isActive ? '#22c55e' : (dark ? '#334155' : '#e2e8f0');
+    return `
+      <a href="/portal/${p.type}" style="display:block;text-decoration:none;color:inherit;border:2px solid ${borderCol};border-radius:20px;overflow:hidden;background:${dark ? '#1e293b' : '#fff'};transition:all 0.35s cubic-bezier(0.16,1,0.3,1);position:relative" onmouseover="this.style.transform='translateY(-6px) scale(1.02)';this.style.boxShadow='0 20px 40px rgba(0,0,0,0.12)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+        ${isActive ? '<div style="position:absolute;top:12px;right:12px;background:#22c55e;color:white;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;z-index:2;letter-spacing:0.5px">CURRENT</div>' : ''}
+        <div style="background:${grad};padding:28px 20px 20px;text-align:center;position:relative;overflow:hidden">
+          <div style="position:absolute;top:-20px;right:-20px;width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,0.1)"></div>
+          <div style="position:absolute;bottom:-15px;left:-15px;width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,0.08)"></div>
+          <div style="font-size:48px;margin-bottom:6px;position:relative;z-index:1">${p.icon}</div>
+          <h3 style="margin:0;color:white;font-size:18px;font-weight:800;letter-spacing:-0.02em;position:relative;z-index:1">${esc(p.label)}</h3>
+        </div>
+        <div style="padding:16px 18px 18px">
+          <p style="font-size:13px;color:${dark ? '#94a3b8' : '#64748b'};margin:0 0 14px;line-height:1.5">${esc(p.desc)}</p>
+          <span style="display:inline-block;padding:8px 20px;background:${isActive ? '#f0fdf4' : lightBg};color:${isActive ? '#16a34a' : p.color};font-weight:700;font-size:13px;border-radius:12px;border:1px solid ${isActive ? '#bbf7d0' : 'transparent'}">
+            ${isActive ? '&#10003; Go to Dashboard' : 'Enter Portal'}
+          </span>
+        </div>
+      </a>
+    `;
+  }).join('');
+
+  res.send(renderPage('Dashboard', `
+    <style>
+      @keyframes dashFadeIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+      @keyframes dashGradient{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+      @keyframes dashPulse{0%,100%{opacity:1}50%{opacity:0.7}}
+      @keyframes dashFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+      .dash-hero{background:linear-gradient(135deg,#0f172a 0%,#1e293b 30%,#0f172a 50%,#1e1b4b 80%,#0f172a 100%);background-size:300% 300%;animation:dashGradient 10s ease infinite;padding:48px 24px 40px;border-radius:24px;text-align:center;position:relative;overflow:hidden;margin-bottom:32px}
+      .dash-hero::before{content:'';position:absolute;top:0;left:0;right:0;bottom:0;background:radial-gradient(ellipse at 30% 20%,rgba(99,102,241,0.15),transparent 50%),radial-gradient(ellipse at 70% 80%,rgba(6,182,212,0.12),transparent 50%);z-index:1}
+      .dash-hero>*{position:relative;z-index:2}
+      .dash-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px;animation:dashFadeIn 0.6s cubic-bezier(0.16,1,0.3,1)}
+      .dash-welcome{font-family:'Plus Jakarta Sans','Inter',sans-serif;font-size:28px;font-weight:800;color:white;letter-spacing:-0.03em;margin-bottom:8px}
+      .dash-subtitle{font-size:15px;color:rgba(255,255,255,0.6);font-weight:400}
+      .dash-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,0.08);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.12);border-radius:50px;padding:6px 16px;color:rgba(255,255,255,0.8);font-size:12px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:20px}
+      .dash-badge-dot{width:6px;height:6px;border-radius:50%;background:#34d399;animation:dashPulse 2s infinite}
+      .dash-quick-links{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:20px}
+      .dash-quick-link{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border-radius:12px;font-size:13px;font-weight:600;text-decoration:none;transition:all 0.2s ease;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.85);backdrop-filter:blur(4px)}
+      .dash-quick-link:hover{background:rgba(255,255,255,0.12);color:white;transform:translateY(-2px)}
+      @media(max-width:600px){
+        .dash-hero{padding:32px 16px 28px;border-radius:16px}
+        .dash-welcome{font-size:22px}
+        .dash-grid{grid-template-columns:1fr 1fr;gap:12px}
+      }
+      @media(max-width:400px){
+        .dash-grid{grid-template-columns:1fr}
+      }
+    </style>
+    <div class="dash-hero">
+      <div class="dash-badge"><span class="dash-badge-dot"></span> Comfort Platform</div>
+      <div class="dash-welcome">Welcome back, ${esc(u.email?.split('@')[0] || 'User')}</div>
+      <div class="dash-subtitle">Choose a portal to manage your organization</div>
+      <div class="dash-quick-links">
+        <a href="/switch-portal" class="dash-quick-link">&#127760; Switch Portal Type</a>
+        <a href="/settings" class="dash-quick-link">&#9881; Settings</a>
+        <a href="/logout" class="dash-quick-link">&#128682; Logout</a>
+      </div>
+    </div>
+    <div class="dash-grid">
+      ${portalCards}
+    </div>
+  `, req.session.user));
 });
 
 // === EXIT TENANT IMPERSONATION ===
