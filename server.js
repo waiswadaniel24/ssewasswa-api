@@ -2666,9 +2666,6 @@ app.get('/login', (req, res) => {
   res.send(renderPage('Login', `
     <div class="card" style="max-width:450px;margin:40px auto">
       <h2 style="text-align:center;margin-bottom:20px">Welcome Back</h2>
-      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;margin-bottom:16px;text-align:center">
-        <p style="margin:0;font-size:13px;color:#166534"><strong>Admin Login:</strong> waiswadaniel24@gmail.com / Daniel@123</p>
-      </div>
       <form method="POST" action="/login">
         <input name="email" type="email" placeholder="Email" required>
         <input name="password" type="password" placeholder="Password" required>
@@ -2676,7 +2673,6 @@ app.get('/login', (req, res) => {
       </form>
       <p style="text-align:center;margin-top:15px">No account? <a href="/register">Register</a></p>
       <p style="text-align:center;margin-top:8px"><a href="/forgot-password" style="font-size:13px">Forgot Password?</a></p>
-      <p style="text-align:center;margin-top:8px"><a href="/parent/login" style="font-size:13px">Parent Portal</a></p>
       <div style="margin-top:16px;padding-top:16px;border-top:1px solid #e2e8f0">
         <p style="text-align:center;color:#64748b;font-size:13px;margin-bottom:10px">Or continue with</p>
         <div style="display:flex;gap:8px;justify-content:center">
