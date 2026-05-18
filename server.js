@@ -4684,6 +4684,11 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       <div class="card" style="background:#f0fdf4;border:2px solid #15803d"><h3 style="color:#15803d">Import</h3><a href="/org/members/import" class="btn btn-sm">CSV Import</a></div>
       <div class="card" style="background:#eff6ff;border:2px solid #1e40af"><h3 style="color:#1e40af">Tasks</h3><a href="/org/tasks" class="btn btn-sm">Task Manager</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">Notifications</h3><a href="/org/notifications" class="btn btn-sm">In-App Alerts</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Analytics</h3><a href="/org/analytics" class="btn btn-sm">Engagement</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Calendar</h3><a href="/org/calendar" class="btn btn-sm">Calendar View</a></div>
+      <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">Activity</h3><a href="/org/activity" class="btn btn-sm">Activity Feed</a></div>
+      <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">Bulk Actions</h3><a href="/org/members/bulk" class="btn btn-sm">Bulk Manage</a></div>
+      <div class="card" style="background:#f8fafc;border:2px solid #475569"><h3 style="color:#475569">Settings</h3><a href="/org/settings" class="btn btn-sm">Org Settings</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Sick Bay</h3><p class="muted" style="font-size:12px">First aid for staff & visitors</p><a href="/sickbay" class="btn btn-sm" style="background:#ec4899;color:white">Sick Bay</a></div>
     </div>
@@ -4744,6 +4749,7 @@ app.get('/org/members', requireAuth, requireNotBanned, requireTenantAccess, ah(a
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;align-items:center">
         <a href="/org/register" class="btn btn-sm btn-green">+ Register New Member</a>
         <a href="/org/members/import" class="btn btn-sm">Import CSV</a>
+        <a href="/org/members/bulk" class="btn btn-sm">Bulk Actions</a>
         <a href="/org/reports/export?type=members" class="btn btn-sm">Export CSV</a>
       </div>
       <form method="GET" action="/org/members" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px">
@@ -4753,7 +4759,7 @@ app.get('/org/members', requireAuth, requireNotBanned, requireTenantAccess, ah(a
       </form>
       <table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Joined</th><th>Actions</th></tr>
       ${members.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td>${esc(m.phone)}</td><td><span class="tag">${esc(m.role)}</span></td><td>${new Date(m.joined_at).toLocaleDateString()}</td>
-        <td><a href="/org/members/${m.id}/edit" class="btn btn-sm">Edit</a> <form method="POST" action="/org/members/${m.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red btn-sm" onclick="return confirm('Delete ${esc(m.name)}?')">Del</button></form></td>
+        <td><a href="/org/members/${m.id}/profile" class="btn btn-sm">Profile</a> <a href="/org/members/${m.id}/edit" class="btn btn-sm">Edit</a> <form method="POST" action="/org/members/${m.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red btn-sm" onclick="return confirm('Delete ${esc(m.name)}?')">Del</button></form></td>
       </tr>`).join('') || '<tr><td colspan="6">No members found</td></tr>'}
       </table>
       ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/members?page=${i+1}&search=${esc(search)}&role=${esc(roleFilter)}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
@@ -17024,6 +17030,498 @@ app.post('/org/committees/:id/update', requireAuth, requireNotBanned, ah(async (
   await pool.query('UPDATE committees SET name=$1,description=$2,chairperson=$3,meeting_day=$4,meeting_time=$5 WHERE id=$6 AND tenant_id=$7', [name, description || null, chairperson || null, meeting_day || null, meeting_time || null, req.params.id, t]);
   await audit(req.session.user.email, 'update_committee', `Updated committee: ${name}`);
   res.redirect(`/org/committees/${req.params.id}`);
+}));
+
+
+// =============================================
+// ORG: ACTIVITY FEED / TIMELINE
+// =============================================
+app.get('/org/activity', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 30;
+  const offset = (page - 1) * limit;
+  // Gather recent activities from audit_logs (the single source of truth for all org actions)
+  const total = (await pool.query("SELECT COUNT(*) FROM audit_logs WHERE tenant_id=$1 AND action IN ('create_task','update_task_status','task_comment','create_event','event_rsvp','create_committee','add_committee_member','create_finance_category','register_member','update_member','delete_member','create_project','update_project_status','meeting_save','notice_save','vote_resolution','create_finance','ticket_checkin','import_members','create_committee','update_committee','delete_committee','create_task','delete_task','assign_task')", [t])).rows[0].count;
+  const activities = (await pool.query("SELECT user_email, action, details, created_at FROM audit_logs WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", [t, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
+  // Icon and color mapping for activity types
+  const actionMeta = {
+    create_task: {icon:'&#9745;', color:'#3b82f6', label:'Task Created'},
+    update_task_status: {icon:'&#8634;', color:'#8b5cf6', label:'Task Updated'},
+    task_comment: {icon:'&#128172;', color:'#6b7280', label:'Task Comment'},
+    delete_task: {icon:'&#128465;', color:'#dc2626', label:'Task Deleted'},
+    create_event: {icon:'&#128197;', color:'#059669', label:'Event Created'},
+    create_recurring_events: {icon:'&#128257;', color:'#0891b2', label:'Recurring Events'},
+    event_rsvp: {icon:'&#9989;', color:'#7c3aed', label:'RSVP'},
+    create_committee: {icon:'&#128101;', color:'#0891b2', label:'Committee Created'},
+    update_committee: {icon:'&#9998;', color:'#d97706', label:'Committee Updated'},
+    add_committee_member: {icon:'&#128100;', color:'#059669', label:'Member Added to Committee'},
+    create_finance_category: {icon:'&#128176;', color:'#059669', label:'Budget Category'},
+    register_member: {icon:'&#128100;', color:'#3b82f6', label:'Member Registered'},
+    update_member: {icon:'&#9998;', color:'#d97706', label:'Member Updated'},
+    delete_member: {icon:'&#128465;', color:'#dc2626', label:'Member Removed'},
+    create_project: {icon:'&#128203;', color:'#7c3aed', label:'Project Created'},
+    update_project_status: {icon:'&#8634;', color:'#8b5cf6', label:'Project Status'},
+    meeting_save: {icon:'&#128221;', color:'#1e40af', label:'Meeting Recorded'},
+    notice_save: {icon:'&#128227;', color:'#f59e0b', label:'Notice Posted'},
+    vote_resolution: {icon:'&#127497;', color:'#7c3aed', label:'Vote Cast'},
+    create_finance: {icon:'&#128178;', color:'#059669', label:'Finance Entry'},
+    ticket_checkin: {icon:'&#9989;', color:'#059669', label:'Ticket Checked In'},
+    import_members: {icon:'&#128228;', color:'#0891b2', label:'Members Imported'},
+    assign_task: {icon:'&#128100;', color:'#3b82f6', label:'Task Assigned'}
+  };
+  res.send(renderPage('Activity Feed', `
+    <div class="hero" style="background:linear-gradient(135deg,#0f172a,#334155)"><h1>Activity Feed</h1><p>Recent actions across your organization</p></div>
+    <div class="card">
+      ${activities.length ? `<div style="position:relative;padding-left:30px;border-left:3px solid #e2e8f0">${activities.map(a => {
+        const meta = actionMeta[a.action] || {icon:'&#9679;', color:'#6b7280', label:a.action.replace(/_/g,' ')};
+        const timeAgo = getTimeAgo(new Date(a.created_at));
+        return `<div style="margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:8px;position:relative">
+          <div style="position:absolute;left:-38px;top:12px;width:24px;height:24px;background:${meta.color};color:white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px">${meta.icon}</div>
+          <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:4px">
+            <div><strong style="color:${meta.color}">${meta.label}</strong> <span class="muted">by ${esc(a.user_email)}</span></div>
+            <span class="muted" style="font-size:12px;white-space:nowrap">${timeAgo}</span>
+          </div>
+          <p style="margin:4px 0;color:#4b5563;font-size:14px">${esc(a.details||'')}</p>
+        </div>`;
+      }).join('')}</div>` : '<p class="muted">No activity yet. Start using the portal to see your activity feed here.</p>'}
+      ${totalPages > 1 ? `<div style="margin-top:15px;text-align:center">${Array.from({length:Math.min(totalPages,10)},(_,i)=>`<a href="/org/activity?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-green':''}" style="margin:2px">${i+1}</a>`).join('')}</div>` : ''}
+    </div>
+  `, req.session.user));
+}));
+
+// Helper: time ago formatter
+function getTimeAgo(date) {
+  const seconds = Math.floor((new Date() - date) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + 'm ago';
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + 'h ago';
+  const days = Math.floor(hours / 24);
+  if (days < 30) return days + 'd ago';
+  const months = Math.floor(days / 30);
+  return months + 'mo ago';
+}
+
+
+// =============================================
+// ORG: ORGANIZATION SETTINGS
+// =============================================
+app.get('/org/settings', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  if (!tenant) return res.status(404).send('Tenant not found');
+  // Get feature flags for this tenant
+  const features = (await pool.query("SELECT feature_name, is_enabled FROM feature_flags WHERE tenant_id=$1 ORDER BY feature_name", [t])).rows;
+  res.send(renderPage('Organization Settings', `
+    <div class="hero" style="background:linear-gradient(135deg,#0f172a,#1e293b)"><h1>Organization Settings</h1><p>Configure your organization's profile and features</p></div>
+    <div class="card" style="max-width:800px;margin:0 auto">
+      <h3>Organization Profile</h3>
+      <form method="POST" action="/org/settings/save">
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Organization Name</label><input name="name" required value="${esc(tenant.name)}" style="width:100%"></div>
+          <div><label>Organization Type</label><input name="type" value="${esc(tenant.type)}" readonly style="width:100%;background:#f1f5f9"></div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Email</label><input name="email" type="email" value="${esc(tenant.email||'')}" style="width:100%"></div>
+          <div><label>Phone</label><input name="phone" value="${esc(tenant.phone||'')}" style="width:100%"></div>
+        </div>
+        <label>Address</label><input name="address" value="${esc(tenant.address||'')}" style="width:100%">
+        <label>Description</label><textarea name="description" rows="3" style="width:100%">${esc(tenant.description||'')}</textarea>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Logo URL</label><input name="logo_url" value="${esc(tenant.logo_url||'')}" placeholder="https://..." style="width:100%"></div>
+          <div><label>Subdomain</label><input name="subdomain" value="${esc(tenant.subdomain||'')}" readonly style="width:100%;background:#f1f5f9"></div>
+        </div>
+        <button class="btn btn-green" style="margin-top:15px">Save Settings</button>
+      </form>
+    </div>
+    <div class="card" style="max-width:800px;margin:20px auto 0">
+      <h3>Feature Flags</h3>
+      <p class="muted">Enable or disable features for your organization</p>
+      <form method="POST" action="/org/settings/features">
+        <table>
+          <tr><th>Feature</th><th>Status</th><th>Toggle</th></tr>
+          ${features.length ? features.map(f => `<tr><td>${esc(f.feature_name)}</td><td>${f.is_enabled ? '<span class="tag" style="background:#d1fae5;color:#065f46">Enabled</span>' : '<span class="tag" style="background:#fee2e2;color:#991b1b">Disabled</span>'}</td><td><label style="cursor:pointer"><input type="checkbox" name="feature_${esc(f.feature_name)}" ${f.is_enabled?'checked':''}> ${f.is_enabled?'Disable':'Enable'}</label></td></tr>`).join('') : '<tr><td colspan="3"><span class="muted">No feature flags configured</span></td></tr>'}
+        </table>
+        ${features.length ? '<button class="btn btn-sm" style="margin-top:10px">Update Features</button>' : ''}
+      </form>
+    </div>
+    <div class="card" style="max-width:800px;margin:20px auto 0">
+      <h3>Organization Stats</h3>
+      <div class="stats">
+        <div class="stat-card"><div class="stat-num">${tenant.verified ? '&#9989;' : '&#9888;'}</div><div>${tenant.verified ? 'Verified' : 'Unverified'}</div></div>
+        <div class="stat-card"><div class="stat-num">${tenant.approved ? '&#9989;' : '&#9203;'}</div><div>${tenant.approved ? 'Approved' : 'Pending'}</div></div>
+        <div class="stat-card"><div class="stat-num">${tenant.has_fundraising ? '&#9989;' : '&#10060;'}</div><div>Fundraising</div></div>
+        <div class="stat-card"><div class="stat-num">UGX ${parseInt(tenant.wallet_balance||0).toLocaleString()}</div><div>Wallet</div></div>
+      </div>
+      <p class="muted" style="margin-top:10px">Created: ${new Date(tenant.created_at).toLocaleDateString()} | Account ID: ${tenant.id}</p>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/settings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, email, phone, address, description, logo_url } = req.body;
+  if (!name || !name.trim()) return res.status(400).send('Organization name is required');
+  await pool.query('UPDATE tenants SET name=$1,email=$2,phone=$3,address=$4,description=$5,logo_url=$6 WHERE id=$7', [name.trim(), email||null, phone||null, address||null, description||null, logo_url||null, t]);
+  await audit(req.session.user.email, 'update_org_settings', `Updated organization profile`);
+  res.redirect('/org/settings');
+}));
+
+app.post('/org/settings/features', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const features = (await pool.query("SELECT feature_name FROM feature_flags WHERE tenant_id=$1", [t])).rows;
+  for (const f of features) {
+    const enabled = !!req.body['feature_' + f.feature_name];
+    await pool.query('UPDATE feature_flags SET is_enabled=$1 WHERE tenant_id=$2 AND feature_name=$3', [enabled, t, f.feature_name]);
+  }
+  await audit(req.session.user.email, 'update_feature_flags', `Updated feature flags`);
+  res.redirect('/org/settings');
+}));
+
+
+// =============================================
+// ORG: CALENDAR VIEW
+// =============================================
+app.get('/org/calendar', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const month = parseInt(req.query.month) || (new Date().getMonth() + 1);
+  const year = parseInt(req.query.year) || new Date().getFullYear();
+  // Get events, meetings, and task due dates for the month
+  const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+  const endDate = new Date(year, month, 0).toISOString().split('T')[0]; // Last day of month
+  const [events, meetings, tasks] = await Promise.all([
+    pool.query('SELECT id, name, event_date, is_recurring, recurring_pattern FROM events WHERE tenant_id=$1 AND event_date BETWEEN $2 AND $3 ORDER BY event_date', [t, startDate, endDate]),
+    pool.query('SELECT id, title, meeting_date FROM meeting_minutes WHERE tenant_id=$1 AND meeting_date BETWEEN $2 AND $3 ORDER BY meeting_date', [t, startDate, endDate]),
+    pool.query("SELECT id, title, due_date, status, priority FROM org_tasks WHERE tenant_id=$1 AND due_date BETWEEN $2 AND $3 ORDER BY due_date", [t, startDate, endDate])
+  ]);
+  // Build calendar grid
+  const firstDay = new Date(year, month - 1, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  // Group events/meetings/tasks by date
+  const eventsByDate = {};
+  events.rows.forEach(e => { const d = e.event_date; if (!eventsByDate[d]) eventsByDate[d] = []; eventsByDate[d].push({type:'event', name:e.name, id:e.id, recurring:e.is_recurring}); });
+  meetings.rows.forEach(m => { const d = m.meeting_date; if (!eventsByDate[d]) eventsByDate[d] = []; eventsByDate[d].push({type:'meeting', name:m.title, id:m.id}); });
+  tasks.rows.forEach(tk => { const d = tk.due_date; if (!eventsByDate[d]) eventsByDate[d] = []; eventsByDate[d].push({type:'task', name:tk.title, id:tk.id, status:tk.status, priority:tk.priority}); });
+  // Build calendar HTML
+  let calHtml = '<table style="width:100%;border-collapse:collapse"><tr>';
+  ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => { calHtml += `<th style="padding:8px;text-align:center;background:#f1f5f9;font-size:12px">${d}</th>`; });
+  calHtml += '</tr><tr>';
+  // Empty cells before first day
+  for (let i = 0; i < firstDay; i++) { calHtml += '<td style="padding:4px;min-height:80px;vertical-align:top;border:1px solid #e2e8f0"></td>'; }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const isToday = dateStr === todayStr;
+    const dayEvents = eventsByDate[dateStr] || [];
+    calHtml += `<td style="padding:4px;min-height:80px;vertical-align:top;border:1px solid #e2e8f0;${isToday?'background:#eff6ff;':''}${dayEvents.length>3?'font-size:11px;':''}">
+      <div style="font-weight:${isToday?'bold':'normal'};color:${isToday?'#1e40af':'inherit'};margin-bottom:2px">${day}</div>
+      ${dayEvents.slice(0,3).map(e => {
+        const colors = {event:'#059669', meeting:'#1e40af', task:'#f59e0b'};
+        const labels = {event:'E', meeting:'M', task:'T'};
+        return `<div style="font-size:10px;padding:1px 4px;margin:1px 0;border-radius:3px;background:${colors[e.type]}15;color:${colors[e.type]};white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(e.name)}">${labels[e.type]} ${esc(e.name.substring(0,10))}${e.name.length>10?'...':''}</div>`;
+      }).join('')}
+      ${dayEvents.length > 3 ? `<div style="font-size:9px;color:#6b7280">+${dayEvents.length-3} more</div>` : ''}
+    </td>`;
+    if ((firstDay + day) % 7 === 0 && day < daysInMonth) { calHtml += '</tr><tr>'; }
+  }
+  // Fill remaining cells
+  const remaining = 7 - ((firstDay + daysInMonth) % 7);
+  if (remaining < 7) { for (let i = 0; i < remaining; i++) { calHtml += '<td style="padding:4px;min-height:80px;vertical-align:top;border:1px solid #e2e8f0"></td>'; } }
+  calHtml += '</tr></table>';
+  // Legend
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear = month === 1 ? year - 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  res.send(renderPage('Calendar', `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#6d28d9)"><h1>Calendar</h1><p>${monthNames[month-1]} ${year}</p></div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
+        <a href="/org/calendar?month=${prevMonth}&year=${prevYear}" class="btn btn-sm">&larr; ${monthNames[prevMonth-1]}</a>
+        <a href="/org/calendar" class="btn btn-sm">Today</a>
+        <a href="/org/calendar?month=${nextMonth}&year=${nextYear}" class="btn btn-sm">${monthNames[nextMonth-1]} &rarr;</a>
+      </div>
+      ${calHtml}
+      <div style="display:flex;gap:15px;margin-top:15px;flex-wrap:wrap">
+        <span style="font-size:12px"><span style="display:inline-block;width:12px;height:12px;background:#05966915;border:1px solid #059669;border-radius:2px;vertical-align:middle"></span> Event</span>
+        <span style="font-size:12px"><span style="display:inline-block;width:12px;height:12px;background:#1e40af15;border:1px solid #1e40af;border-radius:2px;vertical-align:middle"></span> Meeting</span>
+        <span style="font-size:12px"><span style="display:inline-block;width:12px;height:12px;background:#f59e0b15;border:1px solid #f59e0b;border-radius:2px;vertical-align:middle"></span> Task Due</span>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG: BULK ACTIONS
+// =============================================
+app.get('/org/members/bulk', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT id, name, email, phone, role FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Bulk Actions', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#b91c1c)"><h1>Bulk Actions</h1><p>Perform actions on multiple members at once</p></div>
+    <div class="card" style="max-width:900px;margin:0 auto">
+      <h3>Select Members</h3>
+      <form method="POST" action="/org/members/bulk/action">
+        <div style="margin-bottom:10px">
+          <label style="cursor:pointer"><input type="checkbox" id="selectAll" onchange="document.querySelectorAll('.memberCheck').forEach(cb=>cb.checked=this.checked)"> Select All</label>
+        </div>
+        <table><tr><th></th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th></tr>
+          ${members.map(m => `<tr><td><input type="checkbox" class="memberCheck" name="member_ids" value="${m.id}"></td><td>${esc(m.name)}</td><td>${esc(m.email||'-')}</td><td>${esc(m.phone||'-')}</td><td>${esc(m.role||'Member')}</td></tr>`).join('')}
+        </table>
+        <div style="margin-top:15px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <select name="bulk_action" required style="padding:8px">
+            <option value="">Choose Action...</option>
+            <option value="delete">Delete Selected Members</option>
+            <option value="assign_role">Change Role</option>
+            <option value="send_email">Send Email</option>
+            <option value="add_to_committee">Add to Committee</option>
+          </select>
+          <select name="role" id="bulkRole" style="padding:8px;display:none">
+            <option value="Member">Member</option><option value="Volunteer">Volunteer</option><option value="Staff">Staff</option><option value="Board">Board</option>
+          </select>
+          <input name="email_subject" id="bulkSubject" placeholder="Email subject" style="padding:8px;display:none;min-width:200px">
+          <textarea name="email_body" id="bulkBody" placeholder="Email body..." rows="2" style="padding:8px;display:none;min-width:200px"></textarea>
+          <select name="committee_id" id="bulkCommittee" style="padding:8px;display:none">
+            <option value="">Select Committee...</option>
+            ${(await pool.query('SELECT id, name FROM committees WHERE tenant_id=$1 ORDER BY name', [t])).rows.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+          </select>
+          <button class="btn btn-red" onclick="return confirm('Are you sure you want to perform this bulk action?')">Execute</button>
+        </div>
+      </form>
+      <script>
+        document.querySelector('[name=bulk_action]').addEventListener('change', function() {
+          document.getElementById('bulkRole').style.display = this.value==='assign_role'?'inline-block':'none';
+          document.getElementById('bulkSubject').style.display = this.value==='send_email'?'inline-block':'none';
+          document.getElementById('bulkBody').style.display = this.value==='send_email'?'inline-block':'none';
+          document.getElementById('bulkCommittee').style.display = this.value==='add_to_committee'?'inline-block':'none';
+        });
+      </script>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/members/bulk/action', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { bulk_action, member_ids, role, email_subject, email_body, committee_id } = req.body;
+  const ids = Array.isArray(member_ids) ? member_ids : (member_ids ? [member_ids] : []);
+  if (!ids.length) return res.status(400).send('No members selected');
+  let resultMsg = '';
+  if (bulk_action === 'delete') {
+    let deleted = 0;
+    for (const id of ids) {
+      try { await pool.query('DELETE FROM members WHERE id=$1 AND tenant_id=$2', [id, t]); deleted++; } catch(e) {}
+    }
+    resultMsg = `Deleted ${deleted} member(s)`;
+  } else if (bulk_action === 'assign_role') {
+    const VALID_ROLES = ['Member','Volunteer','Staff','Board'];
+    if (!VALID_ROLES.includes(role)) return res.status(400).send('Invalid role');
+    const result = await pool.query('UPDATE members SET role=$1 WHERE id=ANY($2) AND tenant_id=$3', [role, ids, t]);
+    resultMsg = `Updated role to "${role}" for ${result.rowCount} member(s)`;
+  } else if (bulk_action === 'send_email') {
+    const members = (await pool.query('SELECT email, name FROM members WHERE id=ANY($1) AND tenant_id=$2 AND email IS NOT NULL', [ids, t])).rows;
+    let sent = 0;
+    for (const m of members) {
+      try { await sendEmail(t, m.email, email_subject || 'Organization Update', email_body || ''); sent++; } catch(e) {}
+    }
+    resultMsg = `Sent email to ${sent} member(s) (${members.length} have email, ${ids.length - members.length} have no email)`;
+  } else if (bulk_action === 'add_to_committee') {
+    if (!committee_id) return res.status(400).send('No committee selected');
+    let added = 0;
+    for (const id of ids) {
+      try {
+        await pool.query('INSERT INTO committee_members(tenant_id,committee_id,member_id,role) VALUES($1,$2,$3,$4) ON CONFLICT (committee_id,member_id) DO NOTHING', [t, committee_id, id, 'member']);
+        added++;
+      } catch(e) {}
+    }
+    resultMsg = `Added ${added} member(s) to committee`;
+  } else {
+    return res.status(400).send('Invalid action');
+  }
+  await audit(req.session.user.email, 'bulk_action', `${bulk_action}: ${resultMsg}`);
+  res.send(renderPage('Bulk Action Complete', `
+    <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+      <div class="alert alert-success">${resultMsg}</div>
+      <a href="/org/members/bulk" class="btn" style="margin-top:10px">Back to Bulk Actions</a>
+      <a href="/org/members" class="btn" style="margin-top:10px">View Members</a>
+    </div>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG: MEMBER PROFILE (Detailed View)
+// =============================================
+app.get('/org/members/:id/profile', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const member = (await pool.query('SELECT * FROM members WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!member) return res.status(404).send('Member not found');
+  // Get related data
+  const [committees, tasks, attendance, rsvps, auditHistory] = await Promise.all([
+    pool.query('SELECT c.name, cm.role, cm.joined_at FROM committee_members cm JOIN committees c ON c.id=cm.committee_id WHERE cm.member_id=$1 AND cm.tenant_id=$2', [member.id, t]),
+    pool.query('SELECT * FROM org_tasks WHERE assigned_to=$1 AND tenant_id=$2 ORDER BY created_at DESC LIMIT 10', [member.id, t]),
+    pool.query('SELECT date, status FROM attendance WHERE tenant_id=$1 AND date IN (SELECT date FROM attendance WHERE tenant_id=$1 ORDER BY date DESC LIMIT 30) ORDER BY date DESC', [t]),
+    pool.query('SELECT er.response, er.responded_at, e.name as event_name FROM event_rsvps er JOIN events e ON e.id=er.event_id WHERE er.member_id=$1 AND er.tenant_id=$2 ORDER BY er.responded_at DESC LIMIT 10', [member.id, t]),
+    pool.query("SELECT action, details, created_at FROM audit_logs WHERE tenant_id=$1 AND (details ILIKE $2 OR details ILIKE $3) ORDER BY created_at DESC LIMIT 15", [t, `%${member.email||''}%`, `%member ${member.id}%`])
+  ]);
+  // Task stats
+  const taskStats = { total: tasks.rows.length, completed: tasks.rows.filter(t=>t.status==='completed').length, pending: tasks.rows.filter(t=>t.status==='pending').length, overdue: tasks.rows.filter(t=>t.status!=='completed'&&t.due_date&&new Date(t.due_date)<new Date()).length };
+  const prioColors = {critical:'#dc2626',high:'#f59e0b',medium:'#3b82f6',low:'#6b7280'};
+  const statusColors = {pending:'#f59e0b',in_progress:'#3b82f6',completed:'#059669',overdue:'#dc2626'};
+  res.send(renderPage(member.name, `
+    <div class="card" style="max-width:900px;margin:0 auto">
+      <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-bottom:20px">
+        <div style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#3b82f6);display:flex;align-items:center;justify-content:center;color:white;font-size:32px;font-weight:bold">${esc(member.name.charAt(0).toUpperCase())}</div>
+        <div>
+          <h2 style="margin:0">${esc(member.name)}</h2>
+          <span class="tag" style="margin-top:4px">${esc(member.role||'Member')}</span>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <a href="/org/members/${member.id}/edit" class="btn btn-sm">Edit</a>
+          <a href="/org/members" class="btn btn-sm">Back</a>
+        </div>
+      </div>
+
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><strong>Email:</strong> ${esc(member.email||'Not provided')}</div>
+        <div><strong>Phone:</strong> ${esc(member.phone||'Not provided')}</div>
+        <div><strong>Role:</strong> ${esc(member.role||'Member')}</div>
+        <div><strong>Joined:</strong> ${member.joined_at ? new Date(member.joined_at).toLocaleDateString() : 'Unknown'}</div>
+      </div>
+
+      <h3 style="margin-top:25px">Committees (${committees.rows.length})</h3>
+      ${committees.rows.length ? `<table><tr><th>Committee</th><th>Role</th><th>Joined</th></tr>${committees.rows.map(c => `<tr><td>${esc(c.name)}</td><td><span class="tag">${esc(c.role)}</span></td><td>${new Date(c.joined_at).toLocaleDateString()}</td></tr>`).join('')}</table>` : '<p class="muted">Not in any committee</p>'}
+
+      <h3 style="margin-top:25px">Assigned Tasks (${taskStats.total})</h3>
+      <div class="stats" style="margin-bottom:10px">
+        <div class="stat-card"><div class="stat-num" style="color:#059669;font-size:18px">${taskStats.completed}</div><div>Completed</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#f59e0b;font-size:18px">${taskStats.pending}</div><div>Pending</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#dc2626;font-size:18px">${taskStats.overdue}</div><div>Overdue</div></div>
+      </div>
+      ${tasks.rows.length ? `<table><tr><th>Task</th><th>Priority</th><th>Status</th><th>Due</th></tr>${tasks.rows.map(tk => {
+        const isOverdue = tk.status!=='completed'&&tk.due_date&&new Date(tk.due_date)<new Date();
+        return `<tr><td><a href="/org/tasks/${tk.id}">${esc(tk.title)}</a></td><td><span class="tag" style="background:${prioColors[tk.priority]||'#6b7280'}20;color:${prioColors[tk.priority]||'#6b7280'}">${tk.priority}</span></td><td><span class="tag" style="background:${statusColors[isOverdue?'overdue':tk.status]||'#6b7280'}20;color:${statusColors[isOverdue?'overdue':tk.status]||'#6b7280'}">${isOverdue?'overdue':tk.status.replace('_',' ')}</span></td><td>${tk.due_date?new Date(tk.due_date).toLocaleDateString():'-'}</td></tr>`;
+      }).join('')}</table>` : '<p class="muted">No tasks assigned</p>'}
+
+      <h3 style="margin-top:25px">Event RSVPs (${rsvps.rows.length})</h3>
+      ${rsvps.rows.length ? `<table><tr><th>Event</th><th>Response</th><th>Date</th></tr>${rsvps.rows.map(r => `<tr><td>${esc(r.event_name)}</td><td><span class="tag" style="background:${r.response==='yes'?'#d1fae5;color:#065f46':r.response==='maybe'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b'}">${r.response}</span></td><td>${new Date(r.responded_at).toLocaleDateString()}</td></tr>`).join('')}</table>` : '<p class="muted">No RSVPs</p>'}
+
+      <h3 style="margin-top:25px">Activity History</h3>
+      ${auditHistory.rows.length ? auditHistory.rows.map(a => `<div style="padding:6px 0;border-bottom:1px solid #f1f5f9"><span class="muted" style="font-size:12px">${new Date(a.created_at).toLocaleDateString()}</span> <strong>${esc(a.action.replace(/_/g,' '))}</strong> ${esc(a.details||'')}</div>`).join('') : '<p class="muted">No activity recorded</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG: ENGAGEMENT ANALYTICS DASHBOARD
+// =============================================
+app.get('/org/analytics', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  // Compute engagement metrics
+  const [memberGrowth, taskCompletion, eventAttendance, meetingParticipation, financeTrend, topContributors] = await Promise.all([
+    // Member growth over last 6 months
+    pool.query("SELECT TO_CHAR(joined_at,'Mon YYYY') as month, COUNT(*) as cnt FROM members WHERE tenant_id=$1 AND joined_at > NOW()-INTERVAL '6 months' GROUP BY month ORDER BY MIN(joined_at)", [t]),
+    // Task completion rate
+    pool.query("SELECT COUNT(*) as total, COUNT(*) FILTER(WHERE status='completed') as completed, COUNT(*) FILTER(WHERE status='pending') as pending, COUNT(*) FILTER(WHERE status='in_progress') as in_progress, COUNT(*) FILTER(WHERE status!='completed' AND due_date < CURRENT_DATE) as overdue FROM org_tasks WHERE tenant_id=$1", [t]),
+    // Event RSVP stats
+    pool.query("SELECT response, COUNT(*) as cnt FROM event_rsvps WHERE tenant_id=$1 GROUP BY response", [t]),
+    // Meeting participation
+    pool.query("SELECT COUNT(*) as total_meetings, COUNT(*) FILTER(WHERE meeting_date > NOW()-INTERVAL '3 months') as recent FROM meeting_minutes WHERE tenant_id=$1", [t]),
+    // Finance trend
+    pool.query("SELECT type, COALESCE(SUM(amount),0) as total, TO_CHAR(created_at,'Mon YYYY') as month FROM org_finance WHERE tenant_id=$1 AND created_at > NOW()-INTERVAL '6 months' GROUP BY type, month ORDER BY MIN(created_at)", [t]),
+    // Top task completers
+    pool.query("SELECT m.name, COUNT(ot.id) as task_count FROM org_tasks ot JOIN members m ON m.id=ot.assigned_to WHERE ot.tenant_id=$1 AND ot.status='completed' GROUP BY m.name ORDER BY task_count DESC LIMIT 5", [t])
+  ]);
+  const totalMembers = (await pool.query('SELECT COUNT(*) FROM members WHERE tenant_id=$1', [t])).rows[0].count;
+  const totalEvents = (await pool.query('SELECT COUNT(*) FROM events WHERE tenant_id=$1', [t])).rows[0].count;
+  const taskData = taskCompletion.rows[0] || {total:0,completed:0,pending:0,in_progress:0,overdue:0};
+  const completionRate = parseInt(taskData.total) > 0 ? Math.round(parseInt(taskData.completed) / parseInt(taskData.total) * 100) : 0;
+  const rsvpYes = eventAttendance.rows.find(r => r.response==='yes')?.cnt || 0;
+  const rsvpNo = eventAttendance.rows.find(r => r.response==='no')?.cnt || 0;
+  const rsvpMaybe = eventAttendance.rows.find(r => r.response==='maybe')?.cnt || 0;
+  res.send(renderPage('Engagement Analytics', `
+    <div class="hero" style="background:linear-gradient(135deg,#0f172a,#334155)"><h1>Engagement Analytics</h1><p>Understand how your organization is performing</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${totalMembers}</div><div>Total Members</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${completionRate>=70?'#059669':completionRate>=40?'#f59e0b':'#dc2626'}">${completionRate}%</div><div>Task Completion</div></div>
+      <div class="stat-card"><div class="stat-num">${totalEvents}</div><div>Total Events</div></div>
+      <div class="stat-card"><div class="stat-num">${meetingParticipation.rows[0]?.recent||0}</div><div>Recent Meetings</div></div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>Task Completion Rate</h3>
+        <div style="display:flex;align-items:center;gap:15px;margin:15px 0">
+          <div style="width:120px;height:120px;border-radius:50%;background:conic-gradient(#059669 ${completionRate*3.6}deg, #e2e8f0 ${completionRate*3.6}deg);display:flex;align-items:center;justify-content:center">
+            <div style="width:90px;height:90px;border-radius:50%;background:white;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:bold;color:#059669">${completionRate}%</div>
+          </div>
+          <div>
+            <div>Completed: ${taskData.completed}</div>
+            <div>In Progress: ${taskData.in_progress}</div>
+            <div>Pending: ${taskData.pending}</div>
+            <div style="color:#dc2626">Overdue: ${taskData.overdue}</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Event RSVPs</h3>
+        <div style="display:flex;gap:10px;margin:15px 0;flex-wrap:wrap">
+          <div style="flex:1;text-align:center;padding:15px;background:#d1fae5;border-radius:8px"><div style="font-size:24px;font-weight:bold;color:#065f46">${rsvpYes}</div><div>Attending</div></div>
+          <div style="flex:1;text-align:center;padding:15px;background:#fef3c7;border-radius:8px"><div style="font-size:24px;font-weight:bold;color:#92400e">${rsvpMaybe}</div><div>Maybe</div></div>
+          <div style="flex:1;text-align:center;padding:15px;background:#fee2e2;border-radius:8px"><div style="font-size:24px;font-weight:bold;color:#991b1b">${rsvpNo}</div><div>Not Attending</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>Member Growth (6 months)</h3>
+        ${memberGrowth.rows.length ? `<table><tr><th>Month</th><th>New Members</th><th>Bar</th></tr>${memberGrowth.rows.map(m => {
+          const maxCnt = Math.max(...memberGrowth.rows.map(r=>parseInt(r.cnt)),1);
+          const width = Math.round(parseInt(m.cnt)/maxCnt*100);
+          return `<tr><td>${esc(m.month)}</td><td>${m.cnt}</td><td><div style="background:#7c3aed;height:16px;width:${width}%;border-radius:4px"></div></td></tr>`;
+        }).join('')}</table>` : '<p class="muted">No member growth data yet</p>'}
+      </div>
+      <div class="card">
+        <h3>Top Task Completers</h3>
+        ${topContributors.rows.length ? `<table><tr><th>Member</th><th>Tasks Done</th><th>Bar</th></tr>${topContributors.rows.map(m => {
+          const maxCnt = Math.max(...topContributors.rows.map(r=>parseInt(r.task_count)),1);
+          const width = Math.round(parseInt(m.task_count)/maxCnt*100);
+          return `<tr><td>${esc(m.name)}</td><td>${m.task_count}</td><td><div style="background:#059669;height:16px;width:${width}%;border-radius:4px"></div></td></tr>`;
+        }).join('')}</table>` : '<p class="muted">No completed tasks yet</p>'}
+      </div>
+    </div>
+    <div class="card">
+      <h3>Finance Trend (6 months)</h3>
+      ${financeTrend.rows.length ? `<table><tr><th>Month</th><th>Income</th><th>Expense</th></tr>${(() => {
+        const months = [...new Set(financeTrend.rows.map(r=>r.month))];
+        return months.map(m => {
+          const income = financeTrend.rows.find(r=>r.month===m&&r.type==='income')?.total||0;
+          const expense = financeTrend.rows.find(r=>r.month===m&&r.type==='expense')?.total||0;
+          return `<tr><td>${esc(m)}</td><td style="color:#059669">UGX ${parseInt(income).toLocaleString()}</td><td style="color:#dc2626">UGX ${parseInt(expense).toLocaleString()}</td></tr>`;
+        }).join('');
+      })()}</table>` : '<p class="muted">No finance data in the last 6 months</p>'}
+    </div>
+    <a href="/portal/organization" class="btn" style="margin-top:15px">Back to Dashboard</a>
+  `, req.session.user));
+}));
+
+// Analytics chart API endpoints
+app.get('/org/analytics/tasks-chart', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const data = (await pool.query("SELECT TO_CHAR(created_at,'Mon YYYY') as month, COUNT(*) as created, COUNT(*) FILTER(WHERE status='completed') as completed FROM org_tasks WHERE tenant_id=$1 AND created_at > NOW()-INTERVAL '6 months' GROUP BY month ORDER BY MIN(created_at)", [t])).rows;
+  res.json({ labels: data.map(d=>d.month), created: data.map(d=>parseInt(d.created)), completed: data.map(d=>parseInt(d.completed)) });
+}));
+
+app.get('/org/analytics/finance-chart', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const data = (await pool.query("SELECT TO_CHAR(created_at,'Mon YYYY') as month, type, COALESCE(SUM(amount),0) as total FROM org_finance WHERE tenant_id=$1 AND created_at > NOW()-INTERVAL '6 months' GROUP BY month, type ORDER BY MIN(created_at)", [t])).rows;
+  const months = [...new Set(data.map(d=>d.month))];
+  res.json({ labels: months, income: months.map(m=>parseInt(data.find(d=>d.month===m&&d.type==='income')?.total||0)), expense: months.map(m=>parseInt(data.find(d=>d.month===m&&d.type==='expense')?.total||0)) });
 }));
 
 
