@@ -85,3 +85,21 @@ Stage Summary:
 - Clicking any portal card switches to that portal type (not just School)
 - Anonymous users still see registration links as before
 - The fix properly uses POST /switch-portal which updates tenant type in DB and session
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix mobile navigation - no Sign In/Out buttons visible, Home button redirects to School Portal
+
+Work Log:
+- Investigated user complaint: "NO SIGN IN OR OUT BUTTONS SEEN" + "Home button takes me to School Portal"
+- Found root cause: server.js line 2486 CSS had `.nav{display:none!important}` on mobile (≤768px) — this HID the ENTIRE navigation bar including all Login/Logout buttons
+- Found second issue: Bottom nav 🏠 "Home" went to `/dashboard` which redirects to `/portal/school`, not to the landing page `/`
+- Found 3 render functions: `renderPage` (line 2370, used by portal dashboards), `renderPageV3` (line 13175, used by landing page/blog/etc.), `renderPatientPage` (line 22171, patient portal)
+- `launchRoutes` at line 30511 uses `renderPageV3` (not `renderPage`)
+
+Stage Summary:
+- Fixed `renderPage` mobile CSS: removed `display:none!important`, added hamburger menu toggle (☰/✕), collapsible nav-links
+- Fixed `renderPage` bottom nav: 🏠 Home → `/` (was `/dashboard`), added 📊 Dashboard, 🔍 Search, 🔔 Alerts, 🚪 Logout (for logged-in), 🏠/🔑/✨ (for anonymous)
+- Applied same fixes to `renderPageV3`: added hamburger menu, nav-links-v3 class, bottom nav with Login/Logout
+- Added `body{padding-bottom:70px}` and `.bottom-nav{display:flex!important}` for mobile
+- Force pushed commit 01bba19 to trigger Render deployment
