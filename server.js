@@ -32,6 +32,7 @@ const SUBSCRIPTION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days
 const crypto = require('crypto');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const compression = require('compression');
 const { authenticator } = require('otplib');
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle } = require('docx');
 const PDFDocument = require('pdfkit');
@@ -128,6 +129,20 @@ const pool = new Pool({
 
 // === SECURITY ===
 app.set('trust proxy', 1);
+
+// === HTTPS ENFORCEMENT (production only) ===
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-proto'] !== 'https') {
+      return res.redirect(301, 'https://' + req.headers.host + req.url);
+    }
+    next();
+  });
+}
+
+// === COMPRESSION (gzip all responses) ===
+app.use(compression({ threshold: 1024, level: 6 }));
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -140,7 +155,19 @@ app.use(helmet({
       frameSrc: ["'self'", "https://checkout.flutterwave.com", "https://secure.3gdirectpay.com"],
     }
   },
-  crossOriginEmbedderPolicy: false
+  crossOriginEmbedderPolicy: false,
+  permissionsPolicy: {
+    features: {
+      geolocation: ["'none'"],
+      camera: ["'none'"],
+      microphone: ["'none'"],
+      payment: ["'self'"],
+      usb: ["'none'"],
+      magnetometer: ["'none'"],
+      gyroscope: ["'none'"],
+      accelerometer: ["'none'"],
+    }
+  }
 }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
@@ -222,13 +249,22 @@ app.use((req, res, next) => {
 });
 
 // === RATE LIMIT ===
-app.use('/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 50 }));
-app.use('/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 5 }));
-app.use('/api/', rateLimit({ windowMs: 60 * 1000, max: 100 }));
-app.use('/dev/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
-app.use('/billing', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/pay/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
-app.use('/momo/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
+// Global rate limiter for all unauthenticated page requests
+const globalLimiter = rateLimit({ windowMs: 60 * 1000, max: 200, standardHeaders: true, legacyHeaders: false, message: 'Too many requests, please slow down.' });
+app.use('/', (req, res, next) => {
+  // Only rate-limit unauthenticated users on page routes
+  if (!req.session?.user && req.method === 'GET' && !req.path.startsWith('/api/') && !req.path.startsWith('/ping') && !req.path.startsWith('/health')) {
+    return globalLimiter(req, res, next);
+  }
+  next();
+});
+app.use('/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 50, standardHeaders: true }));
+app.use('/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true }));
+app.use('/api/', rateLimit({ windowMs: 60 * 1000, max: 100, standardHeaders: true }));
+app.use('/dev/', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true }));
+app.use('/billing', rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true }));
+app.use('/pay/', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true }));
+app.use('/momo/', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true }));
 
 // Request timeout middleware
 app.use((req, res, next) => {
@@ -2340,6 +2376,8 @@ ${platformSettings.google_verification ? `<meta name="google-site-verification" 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${esc(title)} | ${esc(siteName)}">
 <meta name="twitter:description" content="${esc(siteDesc)}">
+<meta property="og:image" content="${esc(process.env.OG_IMAGE_URL || process.env.BASE_URL + '/og-image.png' || 'https://ssewasswa.onrender.com/og-image.png')}">
+<meta name="twitter:image" content="${esc(process.env.OG_IMAGE_URL || process.env.BASE_URL + '/og-image.png' || 'https://ssewasswa.onrender.com/og-image.png')}">
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}">
 <meta name="user-lang" content="${lang}">
@@ -37009,40 +37047,58 @@ app.get('/attendance/analytics', requireAuth, requireNotBanned, ah(async (req, r
 }));
 
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
-app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
-
-// === ERROR HANDLER ===
-app.use((err, req, res, next) => {
-  console.error('Server Error:', err);
-  // Send to Sentry if configured
-  if (Sentry) Sentry.captureException(err);
-  const msg = err.message || 'Something went wrong';
-  const user = req.session?.user || null;
-  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, user));
-});
-
-// === REQUEST TIMEOUT MIDDLEWARE ===
-app.use((req, res, next) => {
-  req.setTimeout(REQUEST_TIMEOUT_MS, () => {
-    if (!res.headersSent) {
-      res.status(504).json({ error: 'Request timeout' });
-    }
-  });
-  next();
-});
-
-// === CENTRALIZED ERROR HANDLER ===
-app.use((err, req, res, next) => {
-  console.error(`[Error] ${req.method} ${req.path}:`, err.message);
-  // Guard against double-response (headers already sent)
-  if (res.headersSent) return;
-  // Don't leak stack traces in production
-  const msg = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred' : err.message;
+app.use((req, res) => {
   if (req.accepts('json')) {
-    return res.status(500).json({ error: msg });
+    return res.status(404).json({ error: 'Not found', path: req.path });
   }
+  res.status(404).send(renderPage('404 - Page Not Found', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)"><h1>404</h1><p>Page not found</p></div>
+    <div class="card" style="max-width:600px;margin:0 auto;text-align:center">
+      <div style="font-size:80px;margin:20px 0">🔍</div>
+      <h2>Oops! This page doesn't exist</h2>
+      <p class="muted" style="margin:15px 0">The page you're looking for might have been removed, renamed, or is temporarily unavailable.</p>
+      <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <a href="/" class="btn">Go Home</a>
+        <a href="/org/search" class="btn" style="background:#64748b">Search</a>
+        <a href="javascript:history.back()" class="btn" style="background:#dc2626">Go Back</a>
+      </div>
+    </div>
+  `, req.session?.user || null));
+});
+
+// === PRODUCTION ERROR HANDLER (single unified handler) ===
+app.use((err, req, res, next) => {
+  // Guard against double-response
+  if (res.headersSent) return next(err);
+  
+  // Log the error
+  console.error(`[Error] ${req.method} ${req.path}:`, err.message);
+  
+  // Send to Sentry if configured
+  try { if (Sentry) Sentry.captureException(err); } catch(e) {}
+  
+  // Don't leak error details in production
+  const msg = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred. Our team has been notified.' : (err.message || 'Something went wrong');
+  
+  // JSON response for API requests
+  if (req.accepts('json')) {
+    return res.status(500).json({ error: msg, ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }) });
+  }
+  
+  // HTML response for browser requests
   const user = req.session?.user || null;
-  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, user));
+  res.status(500).send(renderPage('500 - Server Error', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#b91c1c)"><h1>500</h1><p>Something went wrong</p></div>
+    <div class="card" style="max-width:600px;margin:0 auto;text-align:center">
+      <div style="font-size:80px;margin:20px 0">⚠️</div>
+      <h2>Internal Server Error</h2>
+      <p class="muted" style="margin:15px 0">${esc(msg)}</p>
+      <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <a href="/" class="btn">Go Home</a>
+        <a href="javascript:history.back()" class="btn" style="background:#64748b">Go Back</a>
+      </div>
+    </div>
+  `, user));
 });
 
 const PORT = process.env.PORT || 3000;

@@ -19,6 +19,7 @@
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.7.0",
     "cloudinary": "^2.2.0",
+    "compression": "^1.8.1",
     "connect-pg-simple": "^9.0.1",
     "cors": "^2.8.5",
     "docx": "^8.5.0",
