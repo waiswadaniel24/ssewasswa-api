@@ -141,14 +141,6 @@ pool.on('error', (err) => {
   console.error('[DB Pool] Unexpected error on idle client:', err.message);
 });
 
-// === EARLY SERVER START — bind port IMMEDIATELY so Render health check passes ===
-const PORT = process.env.PORT || 3000;
-const server = http.createServer(app);
-server.listen(PORT, () => {
-  console.log(`Comfort Platform LIVE on ${PORT} (modules loading in background...)`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
-
 // === SECURITY ===
 app.set('trust proxy', 1);
 
@@ -37315,6 +37307,13 @@ try {
   });
   console.log('[WS] WebSocket server initialized');
 } catch (e) { console.warn('[WS] Failed to initialize WebSocket:', e.message); }
+
+// === START SERVER (after all routes are registered) ===
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Comfort Platform LIVE on ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+});
 
 // Deploy trigger 1779091065
 // Phase 4 deploy trigger: 27 additional modules — 2026-05-18
