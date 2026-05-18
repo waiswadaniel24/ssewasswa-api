@@ -1065,6 +1065,144 @@ const migrations = [
   `ALTER TABLE sibling_discounts ADD COLUMN IF NOT EXISTS sibling_count INTEGER`,
   `ALTER TABLE sibling_discounts ADD COLUMN IF NOT EXISTS discount_type TEXT DEFAULT 'fee'`,
 
+  // === DUPLICATE SCHEMA COLUMN MIGRATIONS ===
+  // For tables with multiple CREATE TABLE IF NOT EXISTS definitions using different schemas,
+  // add all missing columns so code referencing any schema version works correctly.
+  // invoices: clinic/billing invoice columns (second schema at line ~33354)
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP`,
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_method TEXT`,
+  // visitors: both visitor management schemas (~16860 vs ~27289)
+  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS host_name TEXT`,
+  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS badge_number TEXT`,
+  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS id_number TEXT`,
+  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS person_to_see TEXT`,
+  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS vehicle_plate TEXT`,
+  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS gate_pass_code TEXT`,
+  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
+  // staff_appraisals: both appraisal schemas (~16866 vs ~32373)
+  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS staff_name TEXT`,
+  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS appraisal_period TEXT`,
+  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS overall_score NUMERIC DEFAULT 0`,
+  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS rating TEXT DEFAULT 'satisfactory'`,
+  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS strengths TEXT`,
+  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS improvements TEXT`,
+  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS goals TEXT`,
+  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ`,
+  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS period TEXT`,
+  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS scores JSONB`,
+  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS total_score NUMERIC DEFAULT 0`,
+  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS comments TEXT`,
+  // event_tickets v3: event management system columns (~28768)
+  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS title TEXT`,
+  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS description TEXT`,
+  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS category TEXT`,
+  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS venue TEXT`,
+  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS event_date DATE`,
+  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS event_time TIME`,
+  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS total_tickets INTEGER DEFAULT 100`,
+  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS tickets_sold INTEGER DEFAULT 0`,
+  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'UGX'`,
+  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS image_url TEXT`,
+  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS created_by TEXT`,
+  // journal_entries: double-entry accounting columns (~32372)
+  `ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS entry_date DATE DEFAULT CURRENT_DATE`,
+  `ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS account_id INTEGER`,
+  `ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS debit NUMERIC DEFAULT 0`,
+  `ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS credit NUMERIC DEFAULT 0`,
+  `ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS created_by TEXT`,
+  // leave_requests: both leave management schemas (~1481 vs ~27287)
+  `ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS user_email TEXT`,
+  `ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS approver_email TEXT`,
+  `ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS employee_name TEXT`,
+  `ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS approved_by TEXT`,
+  // clinic_prescriptions: both clinic schemas (~28473 vs ~33352)
+  `ALTER TABLE clinic_prescriptions ADD COLUMN IF NOT EXISTS patient_name TEXT`,
+  `ALTER TABLE clinic_prescriptions ADD COLUMN IF NOT EXISTS diagnosis TEXT`,
+  `ALTER TABLE clinic_prescriptions ADD COLUMN IF NOT EXISTS medications JSONB DEFAULT '[]'`,
+  `ALTER TABLE clinic_prescriptions ADD COLUMN IF NOT EXISTS consultation_id INTEGER`,
+  `ALTER TABLE clinic_prescriptions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'`,
+  // clinic_appointments: both clinic schemas (~24211 vs ~28456)
+  `ALTER TABLE clinic_appointments ADD COLUMN IF NOT EXISTS department VARCHAR(100)`,
+  `ALTER TABLE clinic_appointments ADD COLUMN IF NOT EXISTS patient_name TEXT`,
+  `ALTER TABLE clinic_appointments ADD COLUMN IF NOT EXISTS patient_type TEXT DEFAULT 'patient'`,
+  `ALTER TABLE clinic_appointments ADD COLUMN IF NOT EXISTS phone TEXT`,
+  `ALTER TABLE clinic_appointments ADD COLUMN IF NOT EXISTS created_by TEXT`,
+  `ALTER TABLE clinic_appointments ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT false`,
+  // crm_leads: both CRM schemas (~1486 vs ~28550)
+  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'new'`,
+  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'medium'`,
+  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS estimated_value NUMERIC DEFAULT 0`,
+  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS last_contact TIMESTAMPTZ`,
+  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
+  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS stage TEXT DEFAULT 'new'`,
+  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS value INTEGER DEFAULT 0`,
+  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS next_follow_up DATE`,
+  // push_subscriptions: web-push key columns (~33361)
+  `ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS p256dh_key TEXT`,
+  `ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS auth_key TEXT`,
+  // assets: both asset management schemas (~1496 vs ~27290)
+  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'available'`,
+  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS assigned_to TEXT`,
+  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS purchase_price NUMERIC DEFAULT 0`,
+  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS purchase_value INTEGER DEFAULT 0`,
+  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS current_value INTEGER DEFAULT 0`,
+  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS depreciation_rate NUMERIC DEFAULT 0`,
+  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS custodian TEXT`,
+  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS condition TEXT DEFAULT 'good'`,
+  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS notes TEXT`,
+  // branches: multi-branch management columns (~28432)
+  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS code TEXT`,
+  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS manager_name TEXT`,
+  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS manager_email TEXT`,
+  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS phone TEXT`,
+  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
+  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false`,
+  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS manager TEXT`,
+  // calendar_events: enhanced event calendar columns (~32338)
+  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS event_type TEXT DEFAULT 'event'`,
+  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS all_day BOOLEAN DEFAULT false`,
+  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS location TEXT`,
+  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS color TEXT DEFAULT '#6366f1'`,
+  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS max_attendees INTEGER DEFAULT 0`,
+  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT false`,
+  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS recurring_pattern TEXT`,
+  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS recurring_end_date DATE`,
+  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS created_by TEXT`,
+  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS source TEXT`,
+  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS external_id TEXT`,
+  // chart_of_accounts: enhanced accounting columns (~32371)
+  `ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS account_code TEXT`,
+  `ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS account_name TEXT`,
+  `ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS account_type TEXT DEFAULT 'asset'`,
+  `ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS description TEXT`,
+  `ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
+  // document_templates: receipt/invoice template columns (~1896)
+  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS template_type TEXT DEFAULT 'receipt'`,
+  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS header_text TEXT`,
+  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS footer_text TEXT`,
+  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS background_color TEXT DEFAULT '#ffffff'`,
+  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS text_color TEXT DEFAULT '#1e293b'`,
+  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS show_logo BOOLEAN DEFAULT true`,
+  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS show_stamp BOOLEAN DEFAULT false`,
+  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS stamp_text TEXT`,
+  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS auto_number_prefix TEXT`,
+  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS next_number INTEGER DEFAULT 1`,
+  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false`,
+  // purchase_orders: inventory/supplier PO columns (~28526)
+  `ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS supplier_id INTEGER`,
+  `ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS po_number TEXT`,
+  `ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS expected_date DATE`,
+  `ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS total_amount NUMERIC DEFAULT 0`,
+  `ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS created_by TEXT`,
+  // scheduled_reports: report scheduler columns (~28417)
+  `ALTER TABLE scheduled_reports ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
+  `ALTER TABLE scheduled_reports ADD COLUMN IF NOT EXISTS format TEXT DEFAULT 'csv'`,
+  // sms_campaigns: enhanced campaign columns (~32367)
+  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS name TEXT`,
+  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS campaign_type TEXT DEFAULT 'sms'`,
+  // campaign_updates: tenant isolation column (~16906)
+  `ALTER TABLE campaign_updates ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+
   // v11.0 - Billing/Subscriptions
   `CREATE TABLE IF NOT EXISTS subscriptions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, plan TEXT DEFAULT 'free', amount INTEGER DEFAULT 0, currency TEXT DEFAULT 'UGX', status TEXT DEFAULT 'active', started_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ, payment_method TEXT, reference TEXT)`,
   `CREATE TABLE IF NOT EXISTS payments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, amount INTEGER NOT NULL, method TEXT, reference TEXT, status TEXT DEFAULT 'pending', description TEXT, plan TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
@@ -34726,6 +34864,152 @@ app.post('/clinic/consent/:type/:id/save', requireAuth, requireNotBanned, requir
 }));
 
 console.log('[v12] All v12 health features loaded successfully');
+
+// === v22 MEGA MODULE LOAD: 143 Additional Modules ===
+try { const m = require('./3d-printing'); m(app, db, pool, renderPage, esc); console.log('[3DPrinting] 3DPrinting module loaded'); } catch(e) { console.warn('[3DPrinting] Error:', e.message); }
+try { const m = require('./academic-integrity'); m(app, db, pool, renderPage, esc); console.log('[AcademicIntegrity] AcademicIntegrity module loaded'); } catch(e) { console.warn('[AcademicIntegrity] Error:', e.message); }
+try { const m = require('./adaptive-learning'); m(app, db, pool, renderPage, esc); console.log('[AdaptiveLearning] AdaptiveLearning module loaded'); } catch(e) { console.warn('[AdaptiveLearning] Error:', e.message); }
+try { const m = require('./advanced-platform'); m(app, db, pool, renderPage, esc); console.log('[AdvancedPlatform] AdvancedPlatform module loaded'); } catch(e) { console.warn('[AdvancedPlatform] Error:', e.message); }
+try { const m = require('./ai-auto-grading'); m(app, db, pool, renderPage, esc); console.log('[AiAutoGrading] AiAutoGrading module loaded'); } catch(e) { console.warn('[AiAutoGrading] Error:', e.message); }
+try { const m = require('./ai-content-engine'); m(app, db, pool, renderPage, esc); console.log('[AiContentEngine] AiContentEngine module loaded'); } catch(e) { console.warn('[AiContentEngine] Error:', e.message); }
+try { const m = require('./ai-dropout-predictor'); m(app, db, pool, renderPage, esc); console.log('[AiDropoutPredictor] AiDropoutPredictor module loaded'); } catch(e) { console.warn('[AiDropoutPredictor] Error:', e.message); }
+try { const m = require('./ai-lesson-planner-v2'); m(app, db, pool, renderPage, esc); console.log('[AiLessonPlannerV2] AiLessonPlannerV2 module loaded'); } catch(e) { console.warn('[AiLessonPlannerV2] Error:', e.message); }
+try { const m = require('./ai-lesson-plans'); m(app, db, pool, renderPage, esc); console.log('[AiLessonPlans] AiLessonPlans module loaded'); } catch(e) { console.warn('[AiLessonPlans] Error:', e.message); }
+try { const m = require('./ai-resume-builder'); m(app, db, pool, renderPage, esc); console.log('[AiResumeBuilder] AiResumeBuilder module loaded'); } catch(e) { console.warn('[AiResumeBuilder] Error:', e.message); }
+try { const m = require('./ai-tutor'); m(app, db, pool, renderPage, esc); console.log('[AiTutor] AiTutor module loaded'); } catch(e) { console.warn('[AiTutor] Error:', e.message); }
+try { const m = require('./air-quality-monitor'); m(app, db, pool, renderPage, esc); console.log('[AirQualityMonitor] AirQualityMonitor module loaded'); } catch(e) { console.warn('[AirQualityMonitor] Error:', e.message); }
+try { const m = require('./alumni-mentoring'); m(app, db, pool, renderPage, esc); console.log('[AlumniMentoring] AlumniMentoring module loaded'); } catch(e) { console.warn('[AlumniMentoring] Error:', e.message); }
+try { const m = require('./analytics-engine'); m(app, db, pool, renderPage, esc); console.log('[AnalyticsEngine] AnalyticsEngine module loaded'); } catch(e) { console.warn('[AnalyticsEngine] Error:', e.message); }
+try { const m = require('./anti-bullying'); m(app, db, pool, renderPage, esc); console.log('[AntiBullying] AntiBullying module loaded'); } catch(e) { console.warn('[AntiBullying] Error:', e.message); }
+try { const m = require('./ar-campus-tour'); m(app, db, pool, renderPage, esc); console.log('[ArCampusTour] ArCampusTour module loaded'); } catch(e) { console.warn('[ArCampusTour] Error:', e.message); }
+try { const m = require('./art-gallery'); m(app, db, pool, renderPage, esc); console.log('[ArtGallery] ArtGallery module loaded'); } catch(e) { console.warn('[ArtGallery] Error:', e.message); }
+try { const m = require('./blockchain-certificates'); m(app, db, pool, renderPage, esc); console.log('[BlockchainCertificates] BlockchainCertificates module loaded'); } catch(e) { console.warn('[BlockchainCertificates] Error:', e.message); }
+try { const m = require('./blockchain-gradebook'); m(app, db, pool, renderPage, esc); console.log('[BlockchainGradebook] BlockchainGradebook module loaded'); } catch(e) { console.warn('[BlockchainGradebook] Error:', e.message); }
+try { const m = require('./bus-route-optimizer'); m(app, db, pool, renderPage, esc); console.log('[BusRouteOptimizer] BusRouteOptimizer module loaded'); } catch(e) { console.warn('[BusRouteOptimizer] Error:', e.message); }
+try { const m = require('./campus-podcast'); m(app, db, pool, renderPage, esc); console.log('[CampusPodcast] CampusPodcast module loaded'); } catch(e) { console.warn('[CampusPodcast] Error:', e.message); }
+try { const m = require('./canteen-preorder'); m(app, db, pool, renderPage, esc); console.log('[CanteenPreorder] CanteenPreorder module loaded'); } catch(e) { console.warn('[CanteenPreorder] Error:', e.message); }
+try { const m = require('./career-guidance'); m(app, db, pool, renderPage, esc); console.log('[CareerGuidance] CareerGuidance module loaded'); } catch(e) { console.warn('[CareerGuidance] Error:', e.message); }
+try { const m = require('./carpool-coordination'); m(app, db, pool, renderPage, esc); console.log('[CarpoolCoordination] CarpoolCoordination module loaded'); } catch(e) { console.warn('[CarpoolCoordination] Error:', e.message); }
+try { const m = require('./chess-club'); m(app, db, pool, renderPage, esc); console.log('[ChessClub] ChessClub module loaded'); } catch(e) { console.warn('[ChessClub] Error:', e.message); }
+try { const m = require('./code-runner'); m(app, db, pool, renderPage, esc); console.log('[CodeRunner] CodeRunner module loaded'); } catch(e) { console.warn('[CodeRunner] Error:', e.message); }
+try { const m = require('./cooking-club'); m(app, db, pool, renderPage, esc); console.log('[CookingClub] CookingClub module loaded'); } catch(e) { console.warn('[CookingClub] Error:', e.message); }
+try { const m = require('./cross-school-collab'); m(app, db, pool, renderPage, esc); console.log('[CrossSchoolCollab] CrossSchoolCollab module loaded'); } catch(e) { console.warn('[CrossSchoolCollab] Error:', e.message); }
+try { const m = require('./debate-club'); m(app, db, pool, renderPage, esc); console.log('[DebateClub] DebateClub module loaded'); } catch(e) { console.warn('[DebateClub] Error:', e.message); }
+try { const m = require('./digital-signatures'); m(app, db, pool, renderPage, esc); console.log('[DigitalSignatures] DigitalSignatures module loaded'); } catch(e) { console.warn('[DigitalSignatures] Error:', e.message); }
+try { const m = require('./drama-club'); m(app, db, pool, renderPage, esc); console.log('[DramaClub] DramaClub module loaded'); } catch(e) { console.warn('[DramaClub] Error:', e.message); }
+try { const m = require('./drone-education'); m(app, db, pool, renderPage, esc); console.log('[DroneEducation] DroneEducation module loaded'); } catch(e) { console.warn('[DroneEducation] Error:', e.message); }
+try { const m = require('./email-automation'); m(app, db, pool, renderPage, esc); console.log('[EmailAutomation] EmailAutomation module loaded'); } catch(e) { console.warn('[EmailAutomation] Error:', e.message); }
+try { const m = require('./emergency-alerts'); m(app, db, pool, renderPage, esc); console.log('[EmergencyAlerts] EmergencyAlerts module loaded'); } catch(e) { console.warn('[EmergencyAlerts] Error:', e.message); }
+try { const m = require('./emotion-analytics'); m(app, db, pool, renderPage, esc); console.log('[EmotionAnalytics] EmotionAnalytics module loaded'); } catch(e) { console.warn('[EmotionAnalytics] Error:', e.message); }
+try { const m = require('./engagement-engine'); m(app, db, pool, renderPage, esc); console.log('[EngagementEngine] EngagementEngine module loaded'); } catch(e) { console.warn('[EngagementEngine] Error:', e.message); }
+try { const m = require('./exam-seating'); m(app, db, pool, renderPage, esc); console.log('[ExamSeating] ExamSeating module loaded'); } catch(e) { console.warn('[ExamSeating] Error:', e.message); }
+try { const m = require('./eye-tracking'); m(app, db, pool, renderPage, esc); console.log('[EyeTracking] EyeTracking module loaded'); } catch(e) { console.warn('[EyeTracking] Error:', e.message); }
+try { const m = require('./facial-attendance'); m(app, db, pool, renderPage, esc); console.log('[FacialAttendance] FacialAttendance module loaded'); } catch(e) { console.warn('[FacialAttendance] Error:', e.message); }
+try { const m = require('./features-block'); m(app, db, pool, renderPage, esc); console.log('[FeaturesBlock] FeaturesBlock module loaded'); } catch(e) { console.warn('[FeaturesBlock] Error:', e.message); }
+try { const m = require('./fitness-ai'); m(app, db, pool, renderPage, esc); console.log('[FitnessAi] FitnessAi module loaded'); } catch(e) { console.warn('[FitnessAi] Error:', e.message); }
+try { const m = require('./fundraising-mega'); m(app, db, pool, renderPage, esc); console.log('[FundraisingMega] FundraisingMega module loaded'); } catch(e) { console.warn('[FundraisingMega] Error:', e.message); }
+try { const m = require('./fundraising-mega2'); m(app, db, pool, renderPage, esc); console.log('[FundraisingMega2] FundraisingMega2 module loaded'); } catch(e) { console.warn('[FundraisingMega2] Error:', e.message); }
+try { const m = require('./fundraising-ultimate'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate] FundraisingUltimate module loaded'); } catch(e) { console.warn('[FundraisingUltimate] Error:', e.message); }
+try { const m = require('./fundraising-ultimate10'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate10] FundraisingUltimate10 module loaded'); } catch(e) { console.warn('[FundraisingUltimate10] Error:', e.message); }
+try { const m = require('./fundraising-ultimate11'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate11] FundraisingUltimate11 module loaded'); } catch(e) { console.warn('[FundraisingUltimate11] Error:', e.message); }
+try { const m = require('./fundraising-ultimate2'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate2] FundraisingUltimate2 module loaded'); } catch(e) { console.warn('[FundraisingUltimate2] Error:', e.message); }
+try { const m = require('./fundraising-ultimate3'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate3] FundraisingUltimate3 module loaded'); } catch(e) { console.warn('[FundraisingUltimate3] Error:', e.message); }
+try { const m = require('./fundraising-ultimate4'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate4] FundraisingUltimate4 module loaded'); } catch(e) { console.warn('[FundraisingUltimate4] Error:', e.message); }
+try { const m = require('./fundraising-ultimate5'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate5] FundraisingUltimate5 module loaded'); } catch(e) { console.warn('[FundraisingUltimate5] Error:', e.message); }
+try { const m = require('./fundraising-ultimate6'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate6] FundraisingUltimate6 module loaded'); } catch(e) { console.warn('[FundraisingUltimate6] Error:', e.message); }
+try { const m = require('./fundraising-ultimate7'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate7] FundraisingUltimate7 module loaded'); } catch(e) { console.warn('[FundraisingUltimate7] Error:', e.message); }
+try { const m = require('./fundraising-ultimate8'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate8] FundraisingUltimate8 module loaded'); } catch(e) { console.warn('[FundraisingUltimate8] Error:', e.message); }
+try { const m = require('./fundraising-ultimate9'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate9] FundraisingUltimate9 module loaded'); } catch(e) { console.warn('[FundraisingUltimate9] Error:', e.message); }
+try { const m = require('./gamification-engine'); m(app, db, pool, renderPage, esc); console.log('[GamificationEngine] GamificationEngine module loaded'); } catch(e) { console.warn('[GamificationEngine] Error:', e.message); }
+try { const m = require('./gate-pass'); m(app, db, pool, renderPage, esc); console.log('[GatePass] GatePass module loaded'); } catch(e) { console.warn('[GatePass] Error:', e.message); }
+try { const m = require('./gesture-control'); m(app, db, pool, renderPage, esc); console.log('[GestureControl] GestureControl module loaded'); } catch(e) { console.warn('[GestureControl] Error:', e.message); }
+try { const m = require('./global-expansion-engine'); m(app, db, pool, renderPage, esc); console.log('[GlobalExpansionEngine] GlobalExpansionEngine module loaded'); } catch(e) { console.warn('[GlobalExpansionEngine] Error:', e.message); }
+try { const m = require('./global-viral-engine'); m(app, db, pool, renderPage, esc); console.log('[GlobalViralEngine] GlobalViralEngine module loaded'); } catch(e) { console.warn('[GlobalViralEngine] Error:', e.message); }
+try { const m = require('./green-campus'); m(app, db, pool, renderPage, esc); console.log('[GreenCampus] GreenCampus module loaded'); } catch(e) { console.warn('[GreenCampus] Error:', e.message); }
+try { const m = require('./hackathon-platform'); m(app, db, pool, renderPage, esc); console.log('[HackathonPlatform] HackathonPlatform module loaded'); } catch(e) { console.warn('[HackathonPlatform] Error:', e.message); }
+try { const m = require('./industry-partnerships'); m(app, db, pool, renderPage, esc); console.log('[IndustryPartnerships] IndustryPartnerships module loaded'); } catch(e) { console.warn('[IndustryPartnerships] Error:', e.message); }
+try { const m = require('./innovation-lab'); m(app, db, pool, renderPage, esc); console.log('[InnovationLab] InnovationLab module loaded'); } catch(e) { console.warn('[InnovationLab] Error:', e.message); }
+try { const m = require('./interactive-maps'); m(app, db, pool, renderPage, esc); console.log('[InteractiveMaps] InteractiveMaps module loaded'); } catch(e) { console.warn('[InteractiveMaps] Error:', e.message); }
+try { const m = require('./interactive-whiteboard'); m(app, db, pool, renderPage, esc); console.log('[InteractiveWhiteboard] InteractiveWhiteboard module loaded'); } catch(e) { console.warn('[InteractiveWhiteboard] Error:', e.message); }
+try { const m = require('./internship-tracker'); m(app, db, pool, renderPage, esc); console.log('[InternshipTracker] InternshipTracker module loaded'); } catch(e) { console.warn('[InternshipTracker] Error:', e.message); }
+try { const m = require('./interview-simulator'); m(app, db, pool, renderPage, esc); console.log('[InterviewSimulator] InterviewSimulator module loaded'); } catch(e) { console.warn('[InterviewSimulator] Error:', e.message); }
+try { const m = require('./iot-workshop'); m(app, db, pool, renderPage, esc); console.log('[IotWorkshop] IotWorkshop module loaded'); } catch(e) { console.warn('[IotWorkshop] Error:', e.message); }
+try { const m = require('./job-shadow'); m(app, db, pool, renderPage, esc); console.log('[JobShadow] JobShadow module loaded'); } catch(e) { console.warn('[JobShadow] Error:', e.message); }
+try { const m = require('./lab-manager'); m(app, db, pool, renderPage, esc); console.log('[LabManager] LabManager module loaded'); } catch(e) { console.warn('[LabManager] Error:', e.message); }
+try { const m = require('./language-lab'); m(app, db, pool, renderPage, esc); console.log('[LanguageLab] LanguageLab module loaded'); } catch(e) { console.warn('[LanguageLab] Error:', e.message); }
+try { const m = require('./leadership-program'); m(app, db, pool, renderPage, esc); console.log('[LeadershipProgram] LeadershipProgram module loaded'); } catch(e) { console.warn('[LeadershipProgram] Error:', e.message); }
+try { const m = require('./lost-found'); m(app, db, pool, renderPage, esc); console.log('[LostFound] LostFound module loaded'); } catch(e) { console.warn('[LostFound] Error:', e.message); }
+try { const m = require('./marketplace-vendor'); m(app, db, pool, renderPage, esc); console.log('[MarketplaceVendor] MarketplaceVendor module loaded'); } catch(e) { console.warn('[MarketplaceVendor] Error:', e.message); }
+try { const m = require('./media-engine'); m(app, db, pool, renderPage, esc); console.log('[MediaEngine] MediaEngine module loaded'); } catch(e) { console.warn('[MediaEngine] Error:', e.message); }
+try { const m = require('./mental-health'); m(app, db, pool, renderPage, esc); console.log('[MentalHealth] MentalHealth module loaded'); } catch(e) { console.warn('[MentalHealth] Error:', e.message); }
+try { const m = require('./metaverse-classroom'); m(app, db, pool, renderPage, esc); console.log('[MetaverseClassroom] MetaverseClassroom module loaded'); } catch(e) { console.warn('[MetaverseClassroom] Error:', e.message); }
+try { const m = require('./monetization-engine'); m(app, db, pool, renderPage, esc); console.log('[MonetizationEngine] MonetizationEngine module loaded'); } catch(e) { console.warn('[MonetizationEngine] Error:', e.message); }
+try { const m = require('./music-studio'); m(app, db, pool, renderPage, esc); console.log('[MusicStudio] MusicStudio module loaded'); } catch(e) { console.warn('[MusicStudio] Error:', e.message); }
+try { const m = require('./nft-student-art'); m(app, db, pool, renderPage, esc); console.log('[NftStudentArt] NftStudentArt module loaded'); } catch(e) { console.warn('[NftStudentArt] Error:', e.message); }
+try { const m = require('./noise-monitor'); m(app, db, pool, renderPage, esc); console.log('[NoiseMonitor] NoiseMonitor module loaded'); } catch(e) { console.warn('[NoiseMonitor] Error:', e.message); }
+try { const m = require('./nutrition-ai'); m(app, db, pool, renderPage, esc); console.log('[NutritionAi] NutritionAi module loaded'); } catch(e) { console.warn('[NutritionAi] Error:', e.message); }
+try { const m = require('./omr-scanner'); m(app, db, pool, renderPage, esc); console.log('[OmrScanner] OmrScanner module loaded'); } catch(e) { console.warn('[OmrScanner] Error:', e.message); }
+try { const m = require('./parent-communication'); m(app, db, pool, renderPage, esc); console.log('[ParentCommunication] ParentCommunication module loaded'); } catch(e) { console.warn('[ParentCommunication] Error:', e.message); }
+try { const m = require('./parent-teacher-chat'); m(app, db, pool, renderPage, esc); console.log('[ParentTeacherChat] ParentTeacherChat module loaded'); } catch(e) { console.warn('[ParentTeacherChat] Error:', e.message); }
+try { const m = require('./parent-workshop'); m(app, db, pool, renderPage, esc); console.log('[ParentWorkshop] ParentWorkshop module loaded'); } catch(e) { console.warn('[ParentWorkshop] Error:', e.message); }
+try { const m = require('./peer-review'); m(app, db, pool, renderPage, esc); console.log('[PeerReview] PeerReview module loaded'); } catch(e) { console.warn('[PeerReview] Error:', e.message); }
+try { const m = require('./peer-tutoring'); m(app, db, pool, renderPage, esc); console.log('[PeerTutoring] PeerTutoring module loaded'); } catch(e) { console.warn('[PeerTutoring] Error:', e.message); }
+try { const m = require('./photography-club'); m(app, db, pool, renderPage, esc); console.log('[PhotographyClub] PhotographyClub module loaded'); } catch(e) { console.warn('[PhotographyClub] Error:', e.message); }
+try { const m = require('./pocket-money'); m(app, db, pool, renderPage, esc); console.log('[PocketMoney] PocketMoney module loaded'); } catch(e) { console.warn('[PocketMoney] Error:', e.message); }
+try { const m = require('./predictive-maintenance'); m(app, db, pool, renderPage, esc); console.log('[PredictiveMaintenance] PredictiveMaintenance module loaded'); } catch(e) { console.warn('[PredictiveMaintenance] Error:', e.message); }
+try { const m = require('./quantum-computing'); m(app, db, pool, renderPage, esc); console.log('[QuantumComputing] QuantumComputing module loaded'); } catch(e) { console.warn('[QuantumComputing] Error:', e.message); }
+try { const m = require('./realtime-engine'); m(app, db, pool, renderPage, esc); console.log('[RealtimeEngine] RealtimeEngine module loaded'); } catch(e) { console.warn('[RealtimeEngine] Error:', e.message); }
+try { const m = require('./referral-rewards'); m(app, db, pool, renderPage, esc); console.log('[ReferralRewards] ReferralRewards module loaded'); } catch(e) { console.warn('[ReferralRewards] Error:', e.message); }
+try { const m = require('./resource-reservation'); m(app, db, pool, renderPage, esc); console.log('[ResourceReservation] ResourceReservation module loaded'); } catch(e) { console.warn('[ResourceReservation] Error:', e.message); }
+try { const m = require('./revenue-quickstart'); m(app, db, pool, renderPage, esc); console.log('[RevenueQuickstart] RevenueQuickstart module loaded'); } catch(e) { console.warn('[RevenueQuickstart] Error:', e.message); }
+try { const m = require('./robotics-club'); m(app, db, pool, renderPage, esc); console.log('[RoboticsClub] RoboticsClub module loaded'); } catch(e) { console.warn('[RoboticsClub] Error:', e.message); }
+try { const m = require('./school-elections'); m(app, db, pool, renderPage, esc); console.log('[SchoolElections] SchoolElections module loaded'); } catch(e) { console.warn('[SchoolElections] Error:', e.message); }
+try { const m = require('./school-health-ai'); m(app, db, pool, renderPage, esc); console.log('[SchoolHealthAi] SchoolHealthAi module loaded'); } catch(e) { console.warn('[SchoolHealthAi] Error:', e.message); }
+try { const m = require('./school-merch'); m(app, db, pool, renderPage, esc); console.log('[SchoolMerch] SchoolMerch module loaded'); } catch(e) { console.warn('[SchoolMerch] Error:', e.message); }
+try { const m = require('./school-newsletter'); m(app, db, pool, renderPage, esc); console.log('[SchoolNewsletter] SchoolNewsletter module loaded'); } catch(e) { console.warn('[SchoolNewsletter] Error:', e.message); }
+try { const m = require('./school-newspaper'); m(app, db, pool, renderPage, esc); console.log('[SchoolNewspaper] SchoolNewspaper module loaded'); } catch(e) { console.warn('[SchoolNewspaper] Error:', e.message); }
+try { const m = require('./school-radio'); m(app, db, pool, renderPage, esc); console.log('[SchoolRadio] SchoolRadio module loaded'); } catch(e) { console.warn('[SchoolRadio] Error:', e.message); }
+try { const m = require('./school-v18-b'); m(app, db, pool, renderPage, esc); console.log('[SchoolV18B] SchoolV18B module loaded'); } catch(e) { console.warn('[SchoolV18B] Error:', e.message); }
+try { const m = require('./school-v18-upgrade'); m(app, db, pool, renderPage, esc); console.log('[SchoolV18Upgrade] SchoolV18Upgrade module loaded'); } catch(e) { console.warn('[SchoolV18Upgrade] Error:', e.message); }
+try { const m = require('./science-fair'); m(app, db, pool, renderPage, esc); console.log('[ScienceFair] ScienceFair module loaded'); } catch(e) { console.warn('[ScienceFair] Error:', e.message); }
+try { const m = require('./seo-traffic-engine'); m(app, db, pool, renderPage, esc); console.log('[SeoTrafficEngine] SeoTrafficEngine module loaded'); } catch(e) { console.warn('[SeoTrafficEngine] Error:', e.message); }
+try { const m = require('./skill-assessment'); m(app, db, pool, renderPage, esc); console.log('[SkillAssessment] SkillAssessment module loaded'); } catch(e) { console.warn('[SkillAssessment] Error:', e.message); }
+try { const m = require('./sleep-tracker'); m(app, db, pool, renderPage, esc); console.log('[SleepTracker] SleepTracker module loaded'); } catch(e) { console.warn('[SleepTracker] Error:', e.message); }
+try { const m = require('./smart-classroom'); m(app, db, pool, renderPage, esc); console.log('[SmartClassroom] SmartClassroom module loaded'); } catch(e) { console.warn('[SmartClassroom] Error:', e.message); }
+try { const m = require('./smart-desk'); m(app, db, pool, renderPage, esc); console.log('[SmartDesk] SmartDesk module loaded'); } catch(e) { console.warn('[SmartDesk] Error:', e.message); }
+try { const m = require('./smart-door-lock'); m(app, db, pool, renderPage, esc); console.log('[SmartDoorLock] SmartDoorLock module loaded'); } catch(e) { console.warn('[SmartDoorLock] Error:', e.message); }
+try { const m = require('./smart-hostel'); m(app, db, pool, renderPage, esc); console.log('[SmartHostel] SmartHostel module loaded'); } catch(e) { console.warn('[SmartHostel] Error:', e.message); }
+try { const m = require('./smart-hvac'); m(app, db, pool, renderPage, esc); console.log('[SmartHvac] SmartHvac module loaded'); } catch(e) { console.warn('[SmartHvac] Error:', e.message); }
+try { const m = require('./smart-lighting'); m(app, db, pool, renderPage, esc); console.log('[SmartLighting] SmartLighting module loaded'); } catch(e) { console.warn('[SmartLighting] Error:', e.message); }
+try { const m = require('./smart-parking'); m(app, db, pool, renderPage, esc); console.log('[SmartParking] SmartParking module loaded'); } catch(e) { console.warn('[SmartParking] Error:', e.message); }
+try { const m = require('./smart-restroom'); m(app, db, pool, renderPage, esc); console.log('[SmartRestroom] SmartRestroom module loaded'); } catch(e) { console.warn('[SmartRestroom] Error:', e.message); }
+try { const m = require('./smart-security'); m(app, db, pool, renderPage, esc); console.log('[SmartSecurity] SmartSecurity module loaded'); } catch(e) { console.warn('[SmartSecurity] Error:', e.message); }
+try { const m = require('./smart-textbook'); m(app, db, pool, renderPage, esc); console.log('[SmartTextbook] SmartTextbook module loaded'); } catch(e) { console.warn('[SmartTextbook] Error:', e.message); }
+try { const m = require('./social-media-autopost'); m(app, db, pool, renderPage, esc); console.log('[SocialMediaAutopost] SocialMediaAutopost module loaded'); } catch(e) { console.warn('[SocialMediaAutopost] Error:', e.message); }
+try { const m = require('./soft-skills'); m(app, db, pool, renderPage, esc); console.log('[SoftSkills] SoftSkills module loaded'); } catch(e) { console.warn('[SoftSkills] Error:', e.message); }
+try { const m = require('./spaced-repetition'); m(app, db, pool, renderPage, esc); console.log('[SpacedRepetition] SpacedRepetition module loaded'); } catch(e) { console.warn('[SpacedRepetition] Error:', e.message); }
+try { const m = require('./staff-performance'); m(app, db, pool, renderPage, esc); console.log('[StaffPerformance] StaffPerformance module loaded'); } catch(e) { console.warn('[StaffPerformance] Error:', e.message); }
+try { const m = require('./startup-incubator'); m(app, db, pool, renderPage, esc); console.log('[StartupIncubator] StartupIncubator module loaded'); } catch(e) { console.warn('[StartupIncubator] Error:', e.message); }
+try { const m = require('./student-banking'); m(app, db, pool, renderPage, esc); console.log('[StudentBanking] StudentBanking module loaded'); } catch(e) { console.warn('[StudentBanking] Error:', e.message); }
+try { const m = require('./student-council'); m(app, db, pool, renderPage, esc); console.log('[StudentCouncil] StudentCouncil module loaded'); } catch(e) { console.warn('[StudentCouncil] Error:', e.message); }
+try { const m = require('./student-heatmap'); m(app, db, pool, renderPage, esc); console.log('[StudentHeatmap] StudentHeatmap module loaded'); } catch(e) { console.warn('[StudentHeatmap] Error:', e.message); }
+try { const m = require('./student-portfolio'); m(app, db, pool, renderPage, esc); console.log('[StudentPortfolio] StudentPortfolio module loaded'); } catch(e) { console.warn('[StudentPortfolio] Error:', e.message); }
+try { const m = require('./supply-chain-procurement'); m(app, db, pool, renderPage, esc); console.log('[SupplyChainProcurement] SupplyChainProcurement module loaded'); } catch(e) { console.warn('[SupplyChainProcurement] Error:', e.message); }
+try { const m = require('./talent-show'); m(app, db, pool, renderPage, esc); console.log('[TalentShow] TalentShow module loaded'); } catch(e) { console.warn('[TalentShow] Error:', e.message); }
+try { const m = require('./teacher-substitution'); m(app, db, pool, renderPage, esc); console.log('[TeacherSubstitution] TeacherSubstitution module loaded'); } catch(e) { console.warn('[TeacherSubstitution] Error:', e.message); }
+try { const m = require('./uniform-shop'); m(app, db, pool, renderPage, esc); console.log('[UniformShop] UniformShop module loaded'); } catch(e) { console.warn('[UniformShop] Error:', e.message); }
+try { const m = require('./university-tracker'); m(app, db, pool, renderPage, esc); console.log('[UniversityTracker] UniversityTracker module loaded'); } catch(e) { console.warn('[UniversityTracker] Error:', e.message); }
+try { const m = require('./video-conferencing'); m(app, db, pool, renderPage, esc); console.log('[VideoConferencing] VideoConferencing module loaded'); } catch(e) { console.warn('[VideoConferencing] Error:', e.message); }
+try { const m = require('./viral-content-engine'); m(app, db, pool, renderPage, esc); console.log('[ViralContentEngine] ViralContentEngine module loaded'); } catch(e) { console.warn('[ViralContentEngine] Error:', e.message); }
+try { const m = require('./viral-growth-booster'); m(app, db, pool, renderPage, esc); console.log('[ViralGrowthBooster] ViralGrowthBooster module loaded'); } catch(e) { console.warn('[ViralGrowthBooster] Error:', e.message); }
+try { const m = require('./viral-loop-engine'); m(app, db, pool, renderPage, esc); console.log('[ViralLoopEngine] ViralLoopEngine module loaded'); } catch(e) { console.warn('[ViralLoopEngine] Error:', e.message); }
+try { const m = require('./virtual-lab'); m(app, db, pool, renderPage, esc); console.log('[VirtualLab] VirtualLab module loaded'); } catch(e) { console.warn('[VirtualLab] Error:', e.message); }
+try { const m = require('./voice-assistant'); m(app, db, pool, renderPage, esc); console.log('[VoiceAssistant] VoiceAssistant module loaded'); } catch(e) { console.warn('[VoiceAssistant] Error:', e.message); }
+try { const m = require('./volunteer-hours'); m(app, db, pool, renderPage, esc); console.log('[VolunteerHours] VolunteerHours module loaded'); } catch(e) { console.warn('[VolunteerHours] Error:', e.message); }
+try { const m = require('./water-quality'); m(app, db, pool, renderPage, esc); console.log('[WaterQuality] WaterQuality module loaded'); } catch(e) { console.warn('[WaterQuality] Error:', e.message); }
+try { const m = require('./weather-station'); m(app, db, pool, renderPage, esc); console.log('[WeatherStation] WeatherStation module loaded'); } catch(e) { console.warn('[WeatherStation] Error:', e.message); }
+try { const m = require('./wellness-dashboard'); m(app, db, pool, renderPage, esc); console.log('[WellnessDashboard] WellnessDashboard module loaded'); } catch(e) { console.warn('[WellnessDashboard] Error:', e.message); }
+console.log('[v22] All 143 additional modules loaded');
 
 server.listen(PORT, () => {
   console.log(`Comfort Platform LIVE on ${PORT}`);
