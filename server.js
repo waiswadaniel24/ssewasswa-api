@@ -2512,16 +2512,27 @@ ${process.env.GA_TRACKING_ID ? `
 // Service Worker registration + Push subscription + PWA install prompt
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
-    navigator.serviceWorker.register('/sw.js').then(function(reg) {
-      console.log('[PWA] SW registered');
-      setInterval(function(){reg.update()},1800000);
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(function(reg) {
+      console.log('[PWA] Service Worker registered successfully');
+      // Check for updates every 30 minutes
+      setInterval(function(){ reg.update(); }, 1800000);
+      // Handle service worker updates
+      reg.addEventListener('updatefound', function() {
+        var newWorker = reg.installing;
+        newWorker.addEventListener('statechange', function() {
+          if (newWorker.state === 'activated') {
+            // Optionally notify user about update
+            console.log('[PWA] New version activated');
+          }
+        });
+      });
       if (window.__VAPID_KEY) {
         function urlBase64ToUint8Array(b){const d=atob(b.replace(/-/g,'+').replace(/_/g,'/'));const a=new Uint8Array(d.length);for(let i=0;i<d.length;i++)a[i]=d.charCodeAt(i);return a}
         reg.pushManager.getSubscription().then(function(sub){
-          if(!sub){reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(window.__VAPID_KEY)}).then(function(s){fetch('/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({endpoint:s.endpoint,keys:s.keys})}).catch(function(){})}).catch(function(){})}
+          if(!sub){reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(window.__VAPID_KEY)}).then(function(s){fetch('/notifications/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({endpoint:s.endpoint,p256dh_key:s.keys.p256dh,auth_key:s.keys.auth})}).catch(function(){})}).catch(function(){})}
         });
       }
-    }).catch(function(err){console.warn('[PWA] SW failed:',err)});
+    }).catch(function(err){console.warn('[PWA] Service Worker registration failed:',err)});
   });
 }
 // PWA Install Banner
@@ -13114,14 +13125,24 @@ ${googleVerification ? `<meta name="google-site-verification" content="${esc(goo
 <meta name="twitter:image" content="${baseUrl}/icon.png">
 <link rel="manifest" href="/manifest.json">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="icon" type="image/png" sizes="1024x1024" href="/icon.png">
-<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icon-16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
+<link rel="apple-touch-icon" sizes="120x120" href="/icon-120.png">
+<link rel="apple-touch-icon" sizes="152x152" href="/icon-152.png">
+<link rel="apple-touch-icon" sizes="167x167" href="/icon-167.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png">
+<link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png">
+<link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ComfortZone">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#4f46e5">
+<meta name="theme-color" content="#059669">
 <meta name="application-name" content="ComfortZone">
+<meta name="msapplication-TileColor" content="#059669">
+<meta name="msapplication-TileImage" content="/icon-512.png">
 <title>${esc(title)} | Comfort</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -19854,16 +19875,21 @@ app.get('/shortcuts', requireAuth, requireFeature('keyboard_shortcuts'), (req, r
 });
 
 app.get('/sw.js', (req, res) => {
+  const swPath = path.join(__dirname, 'public', 'sw.js');
   res.set('Content-Type', 'application/javascript');
-  res.send(`const CACHE_NAME='ssewasswa-v11';const OFFLINE_URLS=['/','/login','/dashboard','/guide','/shop/browse'];
-self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(OFFLINE_URLS)));self.skipWaiting()});
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.set('Service-Worker-Allowed', '/');
+  if (fs.existsSync(swPath)) {
+    res.sendFile(swPath);
+  } else {
+    // Fallback minimal service worker
+    res.send(`const CACHE_NAME='comfort-v5.0';const OFFLINE_URLS=['/','/login','/dashboard','/offline'];
+self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(OFFLINE_URLS)).catch(()=>{}));self.skipWaiting()});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));self.clients.claim()});
 self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{if(r.status===200){const rc=r.clone();caches.open(CACHE_NAME).then(c=>c.put(e.request,rc))}return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))))});
-self.addEventListener('push',e=>{const d=e.data?e.data.json():{};e.waitUntil(self.registration.showNotification(d.title||'Comfort',{body:d.body||'New update',icon:'/icon-192.png',data:d}))});
-self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.openWindow(e.notification.data?.url||'/'))});
-self.addEventListener('sync',e=>{if(e.tag==='offline-sync'){e.waitUntil(getQueuedActions().then(actions=>{if(actions.length>0){return fetch('/api/sync/push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actions:actions})}).then(r=>{if(r.ok)clearQueuedActions()}).catch(()=>{})}}))}});
-function getQueuedActions(){return new Promise(resolve=>{try{const data=localStorage.getItem('offline_sync_queue');resolve(data?JSON.parse(data):[])}catch(e){resolve([])}})}
-function clearQueuedActions(){try{localStorage.removeItem('offline_sync_queue')}catch(e){}}`);
+self.addEventListener('push',e=>{const d=e.data?e.data.json():{};e.waitUntil(self.registration.showNotification(d.title||'Comfort Zone',{body:d.body||'New update',icon:'/icon-192.png',badge:'/icon-96.png',data:d}))});
+self.addEventListener('notificationclick',e=>{e.notification.close();const url=e.notification.data?.url||'/';e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if(c.url.includes(self.location.origin)&&'focus'in c){c.navigate(url);return c.focus()}}return clients.openWindow(url)}))});`);
+  }
 });
 
 
@@ -36908,51 +36934,84 @@ app.get('/pricing', ah(async (req, res) => {
 // === 4. PWA MANIFEST & SERVICE WORKER ===
 // ============================================================
 app.get('/manifest.json', (req, res) => {
-  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Type', 'application/manifest+json');
   res.setHeader('Cache-Control', 'public, max-age=3600');
   res.send(JSON.stringify({
     name: "Comfort Zone - All-in-One Management Platform",
     short_name: "ComfortZone",
-    description: "The Operating System for African Institutions. Manage schools, churches, clinics, businesses & organizations — all in one place.",
-    start_url: "/",
+    description: "The Operating System for African Institutions. Manage schools, churches, clinics, businesses and organizations all in one place. Students to invoices. Patients to prescriptions. Members to ministry. Staff to salaries.",
+    start_url: "/?source=pwa",
     scope: "/",
     display: "standalone",
     background_color: "#ffffff",
-    theme_color: "#4f46e5",
+    theme_color: "#059669",
     orientation: "any",
     dir: "ltr",
     lang: "en",
-    categories: ["business", "education", "health", "finance", "productivity", "medical"],
+    categories: ["business", "education", "health", "finance", "productivity", "medical", "lifestyle"],
     prefer_related_applications: false,
     icons: [
-      { src: "/icon-16.png", sizes: "16x16", type: "image/png" },
-      { src: "/icon-32.png", sizes: "32x32", type: "image/png" },
-      { src: "/icon-48.png", sizes: "48x48", type: "image/png" },
-      { src: "/icon-72.png", sizes: "72x72", type: "image/png" },
-      { src: "/icon-96.png", sizes: "96x96", type: "image/png" },
-      { src: "/icon-120.png", sizes: "120x120", type: "image/png" },
-      { src: "/icon-152.png", sizes: "152x152", type: "image/png" },
-      { src: "/icon-167.png", sizes: "167x167", type: "image/png" },
-      { src: "/icon-180.png", sizes: "180x180", type: "image/png" },
-      { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
-      { src: "/icon-512-sized.png", sizes: "512x512", type: "image/png" },
-      { src: "/icon-maskable.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
-      { src: "/icon.png", sizes: "1024x1024", type: "image/png" }
+      { src: "/icon-16.png", sizes: "16x16", type: "image/png", purpose: "any" },
+      { src: "/icon-32.png", sizes: "32x32", type: "image/png", purpose: "any" },
+      { src: "/icon-48.png", sizes: "48x48", type: "image/png", purpose: "any" },
+      { src: "/icon-72.png", sizes: "72x72", type: "image/png", purpose: "any" },
+      { src: "/icon-96.png", sizes: "96x96", type: "image/png", purpose: "any" },
+      { src: "/icon-120.png", sizes: "120x120", type: "image/png", purpose: "any" },
+      { src: "/icon-152.png", sizes: "152x152", type: "image/png", purpose: "any" },
+      { src: "/icon-167.png", sizes: "167x167", type: "image/png", purpose: "any" },
+      { src: "/icon-180.png", sizes: "180x180", type: "image/png", purpose: "any" },
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/icon-512-sized.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
+      { src: "/icon-512-sized.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      { src: "/icon.png", sizes: "1024x1024", type: "image/png", purpose: "any" }
     ],
-    screenshots: [],
+    screenshots: [
+      { src: "/og-image.png", sizes: "1200x630", type: "image/png", form_factor: "wide", label: "Comfort Zone Dashboard" }
+    ],
     shortcuts: [
-      { name: "Dashboard", url: "/dashboard", icons: [{ src: "/icon.png", sizes: "192x192" }] },
-      { name: "Students", url: "/school/students", icons: [{ src: "/icon.png", sizes: "192x192" }] },
-      { name: "Messages", url: "/notifications", icons: [{ src: "/icon.png", sizes: "192x192" }] },
-      { name: "Settings", url: "/settings", icons: [{ src: "/icon.png", sizes: "192x192" }] }
+      { name: "Dashboard", short_name: "Dashboard", url: "/dashboard?source=pwa", icons: [{ src: "/icon-96.png", sizes: "96x96" }] },
+      { name: "Students", short_name: "Students", url: "/school/students?source=pwa", icons: [{ src: "/icon-96.png", sizes: "96x96" }] },
+      { name: "Messages", short_name: "Messages", url: "/notifications?source=pwa", icons: [{ src: "/icon-96.png", sizes: "96x96" }] },
+      { name: "Settings", short_name: "Settings", url: "/settings?source=pwa", icons: [{ src: "/icon-96.png", sizes: "96x96" }] }
     ],
     share_target: {
       action: "/share",
       method: "POST",
       enctype: "multipart/form-data",
       params: { title: "title", text: "text", url: "url" }
-    }
+    },
+    display_override: ["standalone", "minimal-ui"],
+    edge_side_panel: { preferred_width: 400 },
+    launch_handler: { client_mode: "auto" }
   }));
+});
+
+// ============================================================
+// PWA OFFLINE PAGE
+// ============================================================
+app.get('/offline', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Offline - Comfort Zone</title>
+<meta name="theme-color" content="#059669">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0fdf4;color:#1e293b;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.card{background:white;border-radius:20px;padding:40px;max-width:420px;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,.1)}
+h1{font-size:24px;margin-bottom:8px;color:#059669}.icon{font-size:56px;margin-bottom:16px;display:block}
+.btn{display:inline-block;padding:14px 28px;background:linear-gradient(135deg,#059669,#10b981);color:white;text-decoration:none;border-radius:12px;font-weight:700;margin-top:20px;border:none;cursor:pointer;font-size:16px}
+.btn:hover{transform:translateY(-2px);box-shadow:0 8px 25px rgba(5,150,105,.4)}
+.muted{color:#64748b;font-size:14px;margin-top:8px}
+.indicator{display:inline-block;width:10px;height:10px;border-radius:50%;background:#f59e0b;margin-right:6px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.info{background:#f0fdf4;border-radius:12px;padding:16px;margin-top:16px;text-align:left;font-size:13px;color:#475569}
+.info li{margin-bottom:6px;margin-left:18px}
+</style></head>
+<body><div class="card"><span class="icon">&#128225;</span><h1>You're Offline</h1><p style="color:#475569;margin-top:8px">Don't worry - your data is safe and will sync automatically when you reconnect.</p>
+<div class="info"><ul><li><span class="indicator"></span>Any changes you make will be queued</li><li><span class="indicator"></span>Cached data is still available to view</li><li><span class="indicator"></span>Sync resumes when connection returns</li></ul></div>
+<a href="/" class="btn">Try Again</a><p class="muted">Comfort Zone &middot; Offline Mode &middot; <span id="last-sync">${new Date().toLocaleTimeString()}</span></p></div>
+<script>window.addEventListener('online',function(){window.location.reload()});</script></body></html>`);
 });
 
 // ============================================================

@@ -1,5 +1,5 @@
 // ============================================================
-// Comfort Platform — Service Worker v4.0 (Updated 2026)
+// Comfort Zone — Service Worker v5.0 (Updated 2026-05-19)
 // ============================================================
 // Strategies:
 //   - Cache-first: static assets (HTML, CSS, JS, images, fonts)
@@ -9,18 +9,19 @@
 //   - Push notifications: enhanced with data and actions
 // ============================================================
 
-const CACHE_NAME = 'comfort-v4.0';
-const STATIC_CACHE = 'comfort-static-v4.0';
-const DATA_CACHE = 'comfort-data-v4.0';
-const OFFLINE_CACHE = 'comfort-offline-v4.0';
+const CACHE_NAME = 'comfort-v5.0';
+const STATIC_CACHE = 'comfort-static-v5.0';
+const DATA_CACHE = 'comfort-data-v5.0';
+const OFFLINE_CACHE = 'comfort-offline-v5.0';
 
 // Assets to pre-cache on install
 const PRECACHE_URLS = [
   '/',
   '/offline',
-  '/offline.html',
   '/manifest.json',
   '/icon-192.png',
+  '/icon-96.png',
+  '/icon-512.png',
   '/icon.png',
   '/favicon.svg',
   '/favicon.png'
@@ -42,7 +43,7 @@ const SWR_PREFIXES = ['/dashboard', '/students', '/fees'];
 // INSTALL EVENT
 // ============================================================
 self.addEventListener('install', event => {
-  console.log('[SW] Installing service worker v4.0...');
+  console.log('[SW] Installing service worker v5.0...');
   event.waitUntil(
     caches.open(STATIC_CACHE).then(cache => {
       return cache.addAll(PRECACHE_URLS).catch(err => {
@@ -60,12 +61,12 @@ self.addEventListener('install', event => {
 // ACTIVATE EVENT
 // ============================================================
 self.addEventListener('activate', event => {
-  console.log('[SW] Activating service worker v4.0...');
+  console.log('[SW] Activating service worker v5.0...');
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames
-          .filter(name => !name.includes('v4.0'))
+          .filter(name => !name.includes('v5.0'))
           .map(name => {
             console.log('[SW] Deleting old cache:', name);
             return caches.delete(name);
