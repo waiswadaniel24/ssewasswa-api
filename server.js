@@ -254,6 +254,44 @@ if (ALLOWED_ORIGINS.length > 0) {
 const ah = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const esc = s => String(s === null || s === undefined ? '' : (typeof s === 'object' ? JSON.stringify(s) : s)).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 
+// === TOP-LEVEL i18n HELPER (uiT) ===
+const _uiTDict = {
+  'nav.dashboard': { lg: 'Olutimbe', sw: 'Dashibodi', fr: 'Tableau de bord' },
+  'nav.notifications': { lg: 'Ebyogerwa', sw: 'Arifa', fr: 'Notifications' },
+  'nav.modules': { lg: 'Amasomo', sw: 'Moduli', fr: 'Modules' },
+  'nav.search': { lg: 'Noonya', sw: 'Tafuta', fr: 'Rechercher' },
+  'nav.portal': { lg: 'Akabinja', sw: 'Lango', fr: 'Portail' },
+  'nav.settings': { lg: 'Enteekateeka', sw: 'Mipangilio', fr: 'Parametres' },
+  'nav.parent': { lg: 'Muziro', sw: 'Mzazi', fr: 'Parent' },
+  'nav.worker': { lg: 'Mukazi', sw: 'Mfanyakazi', fr: 'Travailleur' },
+  'nav.guide': { lg: 'Enyamba', sw: 'Mwongozo', fr: 'Guide' },
+  'nav.logout': { lg: 'Woloka', sw: 'Toka', fr: 'Deconnexion' },
+  'nav.login': { lg: 'Yingira', sw: 'Ingia', fr: 'Connexion' },
+  'nav.register': { lg: 'Wandikira', sw: 'Jisajili', fr: 'Inscription' },
+  'nav.pricing': { lg: 'Enteekateeka', sw: 'Bei', fr: 'Tarifs' },
+  'nav.faq': { lg: 'Ebibuuzo', sw: 'Maswali', fr: 'FAQ' },
+  'nav.blog': { lg: 'Obulamwa', sw: 'Blogu', fr: 'Blog' },
+  'nav.library': { lg: 'Essomero', sw: 'Maktaba', fr: 'Bibliotheque' },
+  'nav.mark_all_read': { lg: 'Soma Byonna', sw: 'Soma Zote', fr: 'Tout marquer lu' },
+  'nav.view_all': { lg: 'Labye Byonna', sw: 'Tazama Zote', fr: 'Voir tout' },
+  'nav.loading': { lg: 'Kutegereza...', sw: 'Inapakia...', fr: 'Chargement...' },
+  'nav.error_loading': { lg: 'Kiremya', sw: 'Hitilafu', fr: 'Erreur' },
+  'mod.hr': { lg: 'Abakazzi', sw: 'Rasilimali', fr: 'RH' },
+  'mod.bookings': { lg: 'Okubooka', sw: 'Uhifadhi', fr: 'Reservations' },
+  'mod.procurement': { lg: 'Okugaba', sw: 'Manunuzi', fr: 'Approvisionnement' },
+  'mod.incidents': { lg: 'Ebintu', sw: 'Matukio', fr: 'Incidents' },
+  'mod.fleet': { lg: 'Emotoka', sw: 'Magari', fr: 'Flotte' },
+  'mod.tickets': { lg: 'Kaarata', sw: 'Tiketi', fr: 'Tickets' },
+  'mod.kb': { lg: 'Ebisomo', sw: 'Ujuzi', fr: 'Base de connaissances' },
+  'bottom.home': { lg: 'Awaka', sw: 'Nyumbani', fr: 'Accueil' },
+  'bottom.search': { lg: 'Noonya', sw: 'Tafuta', fr: 'Rechercher' },
+  'bottom.alerts': { lg: 'Amakuru', sw: 'Arifa', fr: 'Alertes' },
+  'bottom.install': { lg: 'Tegeka', sw: 'Sakinisha', fr: 'Installer' },
+  'bottom.me': { lg: 'Anze', sw: 'Mimi', fr: 'Moi' },
+  'footer.tagline': { lg: "Amasomero, Amatali, Amakyaala n'Amakolero", sw: 'Shule, Vituo vya Afya, Makanisa na Biashara', fr: 'Ecoles, Cliniques, Eglises et Entreprises' },
+};
+const uiT = (key, lang) => { const e = _uiTDict[key]; return e ? (e[lang] || key) : key; };
+
 // === INPUT VALIDATION ===
 const validateEmail = (email) => typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 const validatePhone = (phone) => typeof phone === 'string' && /^(\+?\d{7,15})$/.test(phone.replace(/[\s\-()]/g, ''));
@@ -7681,6 +7719,10 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       <a href="/webhooks" style="background:#8b5cf6;color:white">Webhooks</a>
       <a href="/marketplace" style="background:#d97706;color:white">Plugins</a>
       <a href="/backup" style="background:#64748b;color:white">Backup</a>
+      <a href="/dev/api-playground" style="background:#7c3aed;color:white">API Playground</a>
+      <a href="/dev/api-analytics" style="background:#8b5cf6;color:white">API Analytics</a>
+      <a href="/dev/api-health" style="background:#10b981;color:white">API Health</a>
+      <a href="/dev/onboarding" style="background:#22c55e;color:white">Dev Onboarding</a>
     </div>
 
     <!-- MY MONEY SECTION -->
@@ -33553,6 +33595,7 @@ setTimeout(() => {
 // Batch 8 — 14s delay
 setTimeout(() => {
   try { const m = require('./dev-team-manager'); m(app, db, pool, renderPage, esc); console.log('[DevTeam] Dev team manager loaded'); } catch(e) { console.warn('[DevTeam] Error:', e.message); }
+  try { const m = require('./dev-portal'); m(app, pool, renderPage, esc); console.log('[DevPortal] Developer portal extension loaded — 25 features'); } catch(e) { console.warn('[DevPortal] Error:', e.message); }
   try { const m = require('./staff-access-control'); m(app, db, pool, renderPage, esc); console.log('[StaffAccess] Staff & access control loaded'); } catch(e) { console.warn('[StaffAccess] Error:', e.message); }
   try { const m = require('./tithes-offerings'); m(app, db, pool, renderPage, esc); console.log('[Tithes] Tithes & offerings module loaded'); } catch(e) { console.warn('[Tithes] Error:', e.message); }
   try { const m = require('./analytics-dashboard'); m(app, db, pool, renderPage, esc); console.log('[Analytics] Analytics dashboard module loaded'); } catch(e) { console.warn('[Analytics] Error:', e.message); }
