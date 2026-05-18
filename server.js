@@ -8264,6 +8264,13 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
 
     <!-- Tenant Management -->
     ${section('Tenant Management (' + tCount.rows[0].count + ' total)', `
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;font-weight:600">
+          <input type="checkbox" id="showDemoTenants" onchange="this.checked?document.querySelectorAll('.demo-row').forEach(function(r){r.style.display=''}):document.querySelectorAll('.demo-row').forEach(function(r){r.style.display='none'})">
+          Show Dev Demo Tenants
+        </label>
+        <span class="muted" style="font-size:12px">(Demo tenants are hidden by default)</span>
+      </div>
       <form method="POST" action="/dev/execute" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:16px">
         <div style="flex:1;min-width:150px"><label>Action</label>
           <select name="action" required><option value="">Select...</option>
@@ -8277,7 +8284,12 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
         <button class="btn btn-red">Execute</button>
       </form>
       <div style="overflow-x:auto"><table><tr><th>ID</th><th>Name</th><th>Type</th><th>Wallet</th><th>Status</th><th>Action</th></tr>
-      ${tenants.rows.map(t => '<tr><td>' + t.id + '</td><td>' + esc(t.name) + '</td><td>' + esc(t.type) + '</td><td>UGX ' + parseInt(t.wallet_balance || 0).toLocaleString() + '</td><td>' + (t.approved ? (t.banned ? '<span style="color:#dc2626">Banned</span>' : '<span style="color:#059669">Active</span>') : '<span style="color:#d97706">Pending</span>') + '</td><td><form method="POST" action="/dev/execute" style="display:inline"><input type="hidden" name="action" value="switch_to_tenant"><input type="hidden" name="target_id" value="' + t.id + '"><button type="submit" style="background:#4f46e5;color:#fff;border:none;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">Switch To</button></form></td></tr>').join('')}
+      ${tenants.rows.map(t => {
+        var isDemo = t.name && t.name.startsWith('Dev ');
+        var rowClass = isDemo ? ' class="demo-row" style="display:none;background:#fef9c3"' : '';
+        var demoBadge = isDemo ? ' <span style="background:#fbbf24;color:#78350f;font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700">DEMO</span>' : '';
+        return '<tr' + rowClass + '><td>' + t.id + '</td><td>' + esc(t.name) + demoBadge + '</td><td>' + esc(t.type) + '</td><td>UGX ' + parseInt(t.wallet_balance || 0).toLocaleString() + '</td><td>' + (t.approved ? (t.banned ? '<span style="color:#dc2626">Banned</span>' : '<span style="color:#059669">Active</span>') : '<span style="color:#d97706">Pending</span>') + '</td><td><form method="POST" action="/dev/execute" style="display:inline"><input type="hidden" name="action" value="switch_to_tenant"><input type="hidden" name="target_id" value="' + t.id + '"><button type="submit" style="background:#4f46e5;color:#fff;border:none;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">Switch To</button></form></td></tr>';
+      }).join('')}
       </table></div>
     `)}
 
@@ -32743,6 +32755,7 @@ app.post('/dev/switch-tenant', requireAuth, requireSuperAdmin, ah(async (req, re
   const type = String(rawType || '').trim().toLowerCase();
   if (!DEV_PORTAL_TYPES.find(p => p.type === type)) {
     console.warn('[Portal Switch] Invalid type:', rawType, 'body:', JSON.stringify(req.body).substring(0, 200));
+    if (req.xhr || req.headers.accept === 'application/json') return res.status(400).json({error:'Invalid portal type: ' + esc(type)});
     return res.status(400).send('Invalid portal type: ' + esc(type));
   }
   const user = req.session.user;
@@ -32773,6 +32786,9 @@ app.post('/dev/switch-tenant', requireAuth, requireSuperAdmin, ah(async (req, re
   req.session.user.tenant_type = type;
   req.session._impersonate_tenant_id = tenant.id;
   audit(user.email, 'dev_switch_tenant', 'Switched to ' + tenantName + ' (#' + tenant.id + ')');
+  if (req.xhr || req.headers.accept === 'application/json') {
+    return res.json({success:true, redirect:'/portal/' + type, type:type, tenant:tenantName});
+  }
   res.redirect('/portal/' + type);
 }));
 
@@ -32807,24 +32823,60 @@ app.get('/switch-portal', requireAuth, requireNotBanned, ah(async (req, res) => 
   const csrfVal = req.csrfToken || req.session?.csrfToken || '';
   const cards = USER_PORTAL_TYPES.map(p => {
     const isActive = currentType === p.type;
-    return `<form method="POST" action="/switch-portal" style="border:2px solid ${isActive ? '#22c55e' : (dark ? '#334155' : '#e2e8f0')};border-radius:14px;padding:20px;text-align:center;cursor:pointer;background:${isActive ? '#f0fdf4' : (dark ? '#1e293b' : '#fff')};margin:0;display:block;transition:all 0.2s" onclick="if(!${isActive})this.submit()" onmouseover="if(!${isActive}){this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(0,0,0,0.12)'}" onmouseout="this.style.transform='';this.style.boxShadow=''">
-      <input type="hidden" name="_csrf" value="${esc(csrfVal)}">
-      <input type="hidden" name="type" value="${esc(p.type)}">
+    const pType = p.type;
+    return `<div id="card-${pType}" style="border:2px solid ${isActive ? '#22c55e' : (dark ? '#334155' : '#e2e8f0')};border-radius:14px;padding:20px;text-align:center;cursor:pointer;background:${isActive ? '#f0fdf4' : (dark ? '#1e293b' : '#fff')};margin:0;display:block;transition:all 0.25s;position:relative;overflow:hidden" onclick="switchPortal('${pType}',this)" onmouseover="if(!${isActive}){this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(0,0,0,0.12)'}" onmouseout="this.style.transform='';this.style.boxShadow=''">
       <div style="font-size:44px;margin-bottom:8px;pointer-events:none">${p.icon}</div>
       <h3 style="margin:0 0 4px;pointer-events:none;color:${isActive ? '#16a34a' : (dark ? '#e2e8f0' : '#1e293b')}">${esc(p.label)}</h3>
       <p style="font-size:12px;color:#64748b;margin:0 0 12px;pointer-events:none">${esc(p.desc)}</p>
-      ${isActive ? '<span style="color:#22c55e;font-weight:700;font-size:14px;pointer-events:none">&#10003; CURRENT PORTAL</span>' : '<button type="submit" class="btn" style="background:' + p.color + ';color:#fff;font-size:13px">Switch to ' + esc(p.label) + '</button>'}
-    </form>`;
+      ${isActive ? '<span style="color:#22c55e;font-weight:700;font-size:14px;pointer-events:none">&#10003; CURRENT PORTAL</span>' : '<span class="btn" style="background:' + p.color + ';color:#fff;font-size:13px;display:inline-block">Switch to ' + esc(p.label) + '</span>'}
+    </div>`;
   }).join('');
   res.send(renderPage('Switch Portal', `
     <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
       <h1>Switch Portal</h1>
       <p style="opacity:0.9;margin-top:4px">Change your organization type. All your data stays — you'll just see different dashboard modules.</p>
     </div>
-    <div style="background:#fefce8;border:1px solid #facc15;border-radius:10px;padding:14px 18px;margin-bottom:20px;font-size:14px;color:#854d0e">
+    <div id="switchNotice" style="background:#fefce8;border:1px solid #facc15;border-radius:10px;padding:14px 18px;margin-bottom:20px;font-size:14px;color:#854d0e">
       <strong>Current portal:</strong> ${esc(currentType.charAt(0).toUpperCase() + currentType.slice(1))} — Switching will update your dashboard to show modules relevant to the new portal type. Your existing data is preserved.
     </div>
+    <div id="switchLoading" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.85);z-index:9999;justify-content:center;align-items:center;flex-direction:column;gap:12px">
+      <div style="width:48px;height:48px;border:4px solid #e2e8f0;border-top-color:#4f46e5;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+      <p style="font-weight:600;color:#4f46e5" id="switchMsg">Switching portal...</p>
+      <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+    </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px">${cards}</div>
+    <script>
+    function switchPortal(type, el){
+      if(document.querySelector('[id^="card-"][style*="border-color: rgb(34, 197, 94)"], [id^="card-"][style*="border-color:#22c55e"]')) return;
+      // Show loading
+      var ld=document.getElementById('switchLoading');
+      var msg=document.getElementById('switchMsg');
+      ld.style.display='flex';
+      msg.textContent='Switching to '+type.charAt(0).toUpperCase()+type.slice(1)+' portal...';
+      // AJAX POST
+      var fd=new FormData();
+      fd.append('type',type);
+      fd.append('_csrf','${esc(csrfVal)}');
+      fetch('/switch-portal',{method:'POST',body:fd,headers:{'X-Requested-With':'XMLHttpRequest'}})
+        .then(function(r){return r.json()})
+        .then(function(d){
+          if(d.success){
+            msg.textContent='Done! Redirecting...';
+            // Highlight the card green briefly
+            el.style.borderColor='#22c55e';
+            el.style.background='#f0fdf4';
+            setTimeout(function(){ window.location.href=d.redirect; },400);
+          } else {
+            ld.style.display='none';
+            alert(d.error||'Failed to switch portal');
+          }
+        })
+        .catch(function(e){
+          ld.style.display='none';
+          alert('Network error. Please try again.');
+        });
+    }
+    </script>
   `, req.session.user));
 }));
 
@@ -32832,10 +32884,12 @@ app.post('/switch-portal', requireAuth, requireNotBanned, ah(async (req, res) =>
   const rawType = Array.isArray(req.body.type) ? req.body.type[0] : req.body.type;
   const newType = String(rawType || '').trim().toLowerCase();
   if (!USER_PORTAL_TYPES.find(p => p.type === newType)) {
+    if (req.xhr || req.headers.accept === 'application/json') return res.status(400).json({error:'Invalid portal type'});
     return res.status(400).send('Invalid portal type.');
   }
   const user = req.session.user;
   const tid = user.tenant_id;
+  const oldType = user.tenant_type || 'unknown';
   // Update the tenant type in the database
   await pool.query('UPDATE tenants SET type = $1 WHERE id = $2', [newType, tid]);
   // Update user role to match new portal type (unless super_admin)
@@ -32847,7 +32901,11 @@ app.post('/switch-portal', requireAuth, requireNotBanned, ah(async (req, res) =>
   if (user.role !== 'super_admin') {
     req.session.user.role = newType;
   }
-  await audit(user.email, 'portal_switch', 'Switched portal type from ' + (user.tenant_type || 'unknown') + ' to ' + newType);
+  await audit(user.email, 'portal_switch', 'Switched portal type from ' + oldType + ' to ' + newType);
+  // If AJAX request, return JSON so frontend can do smooth redirect
+  if (req.xhr || req.headers.accept === 'application/json') {
+    return res.json({success:true, redirect:'/portal/' + newType, type:newType, oldType:oldType});
+  }
   res.redirect('/portal/' + newType);
 }));
 
