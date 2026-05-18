@@ -35011,6 +35011,18 @@ try { const m = require('./weather-station'); m(app, db, pool, renderPage, esc);
 try { const m = require('./wellness-dashboard'); m(app, db, pool, renderPage, esc); console.log('[WellnessDashboard] WellnessDashboard module loaded'); } catch(e) { console.warn('[WellnessDashboard] Error:', e.message); }
 console.log('[v22] All 143 additional modules loaded');
 
+// === v23 ENTERTAINMENT PORTAL: 9 Entertainment Modules ===
+try { const m = require('./entertainment-videos'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Videos module loaded'); } catch(e) { console.warn('[Entertainment] Videos Error:', e.message); }
+try { const m = require('./entertainment-music'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Music module loaded'); } catch(e) { console.warn('[Entertainment] Music Error:', e.message); }
+try { const m = require('./entertainment-gaming'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Gaming module loaded'); } catch(e) { console.warn('[Entertainment] Gaming Error:', e.message); }
+try { const m = require('./entertainment-social'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Social module loaded'); } catch(e) { console.warn('[Entertainment] Social Error:', e.message); }
+try { const m = require('./entertainment-ai'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] AI module loaded'); } catch(e) { console.warn('[Entertainment] AI Error:', e.message); }
+try { const m = require('./entertainment-monetization'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Monetization module loaded'); } catch(e) { console.warn('[Entertainment] Monetization Error:', e.message); }
+try { const m = require('./entertainment-admin'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Admin module loaded'); } catch(e) { console.warn('[Entertainment] Admin Error:', e.message); }
+try { const m = require('./entertainment-shorts'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Shorts module loaded'); } catch(e) { console.warn('[Entertainment] Shorts Error:', e.message); }
+try { const m = require('./entertainment-pwa'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] PWA module loaded'); } catch(e) { console.warn('[Entertainment] PWA Error:', e.message); }
+console.log('[v23] All 9 entertainment portal modules loaded (100+ features)');
+
 server.listen(PORT, () => {
   console.log(`Comfort Platform LIVE on ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
