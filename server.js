@@ -2509,15 +2509,25 @@ ${process.env.GA_TRACKING_ID ? `
 </script>
 ` : ''}
 <script>window.__VAPID_KEY = '${VAPID_PUBLIC_KEY || ''}';
-// Service Worker registration + Push notification subscription
-if ('serviceWorker' in navigator && window.__VAPID_KEY) {
-  function urlBase64ToUint8Array(b){const d=atob(b.replace(/-/g,'+').replace(/_/g,'/'));const a=new Uint8Array(d.length);for(let i=0;i<d.length;i++)a[i]=d.charCodeAt(i);return a}
-  navigator.serviceWorker.register('/sw.js').then(function(reg){
-    reg.pushManager.getSubscription().then(function(sub){
-      if(!sub){reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(window.__VAPID_KEY)}).then(function(s){fetch('/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({endpoint:s.endpoint,keys:s.keys})}).catch(function(){})}).catch(function(){})}
-    });
+// Service Worker registration + Push subscription + PWA install prompt
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/sw.js').then(function(reg) {
+      console.log('[PWA] SW registered');
+      setInterval(function(){reg.update()},1800000);
+      if (window.__VAPID_KEY) {
+        function urlBase64ToUint8Array(b){const d=atob(b.replace(/-/g,'+').replace(/_/g,'/'));const a=new Uint8Array(d.length);for(let i=0;i<d.length;i++)a[i]=d.charCodeAt(i);return a}
+        reg.pushManager.getSubscription().then(function(sub){
+          if(!sub){reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(window.__VAPID_KEY)}).then(function(s){fetch('/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({endpoint:s.endpoint,keys:s.keys})}).catch(function(){})}).catch(function(){})}
+        });
+      }
+    }).catch(function(err){console.warn('[PWA] SW failed:',err)});
   });
 }
+// PWA Install Banner
+var _dp;window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();_dp=e;setTimeout(function(){if(_dp){var b=document.createElement('div');b.id='pwab';b.style.cssText='position:fixed;bottom:0;left:0;right:0;background:linear-gradient(135deg,#059669,#10b981);color:white;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;z-index:10000;box-shadow:0 -4px 20px rgba(0,0,0,.2);font-family:sans-serif';b.innerHTML='<div><strong style=font-size:15px>Install Comfort App</strong><p style=font-size:12px;margin:2px 0 0;opacity:.9>Add to home screen for faster access &amp; offline</p></div><div style=display:flex;gap:8px><button onclick=_ip() style=padding:8px 20px;border:2px solid white;background:white;color:#059669;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer>Install</button><button onclick=_dp=null;document.getElementById(\"pwab\").remove() style=padding:8px 12px;border:2px solid rgba(255,255,255,.5);background:transparent;color:white;border-radius:8px;font-size:13px;cursor:pointer>Later</button></div>';document.body.appendChild(b)}},3000)});
+function _ip(){if(_dp){_dp.prompt();_dp.userChoice.then(function(c){if(c.outcome==='accepted')console.log('[PWA] Installed');_dp=null});}var b=document.getElementById('pwab');if(b)b.remove();}
+window.addEventListener('appinstalled',function(){_dp=null;var b=document.getElementById('pwab');if(b)b.remove();});
 </script>
 </head><body>
 <a href="#main" style="position:absolute;top:-100px;left:0;background:#4f46e5;color:white;padding:8px;z-index:9999" onfocus="this.style.top=\"0\"" onblur="this.style.top=\"-100px\"">Skip to main content</a>
@@ -12291,11 +12301,7 @@ app.get('/personal/debt-calculator', requireAuth, requireNotBanned, (req, res) =
   `, req.session.user));
 });
 
-// === v5.0: PWA SERVICE WORKER ===
-app.get('/sw.js', (req, res) => {
-  res.setHeader('Content-Type', 'application/javascript');
-  res.send(`const CACHE='ssewasswa-v1';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/','/login','/manifest.json'])))});self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))});`);
-});
+// === v5.0: PWA SERVICE WORKER — REMOVED ===
 
 // === v6.0: UNEB RESULTS IMPORT ===
 app.get('/school/uneb', requireAuth, requireNotBanned, (req, res) => {
@@ -15004,25 +15010,23 @@ const trackEvent = (eventType, entityType, entityId) => async (req, res, next) =
 // =============================================
 app.get('/install', (req, res) => {
   res.send(renderPage('Install App', `
-    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)"><h1>Install Comfort</h1><p>Use as a native app on your device</p></div>
-    <div class="grid">
-      <div class="card" style="text-align:center">
-        <div style="font-size:48px;margin-bottom:15px">📱</div>
-        <h2>Android</h2>
-        <ol style="text-align:left;padding-left:20px"><li>Open this site in Chrome</li><li>Tap the 3-dot menu</li><li>Select "Add to Home Screen"</li><li>Tap "Add" to confirm</li></ol>
-      </div>
-      <div class="card" style="text-align:center">
-        <div style="font-size:48px;margin-bottom:15px">🍎</div>
-        <h2>iOS (iPhone/iPad)</h2>
-        <ol style="text-align:left;padding-left:20px"><li>Open this site in Safari</li><li>Tap the Share button (box with arrow)</li><li>Select "Add to Home Screen"</li><li>Tap "Add" to confirm</li></ol>
-      </div>
-      <div class="card" style="text-align:center">
-        <div style="font-size:48px;margin-bottom:15px">💻</div>
-        <h2>Desktop</h2>
-        <ol style="text-align:left;padding-left:20px"><li>Open this site in Chrome or Edge</li><li>Click the install icon in address bar</li><li>Or click Menu > "Install Comfort"</li><li>Click "Install" to confirm</li></ol>
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Install Comfort App</h1><p>Use Comfort like a native app on any device</p></div>
+    <div style="text-align:center;margin:20px 0"><div id="ist" style="display:inline-block;padding:12px 24px;border-radius:12px;font-weight:600;font-size:14px"></div></div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin-bottom:24px">
+      <div class="card" style="text-align:center;padding:30px 20px"><div style="font-size:56px;margin-bottom:15px">📱</div><h2 style="color:#1e293b;margin-bottom:12px">Android</h2><ol style="text-align:left;padding-left:20px;font-size:14px;line-height:2"><li>Open this site in <strong>Chrome</strong></li><li>Tap the <strong>3-dot menu</strong></li><li>Select <strong>"Add to Home Screen"</strong></li><li>Tap <strong>"Add"</strong> to confirm</li></ol></div>
+      <div class="card" style="text-align:center;padding:30px 20px"><div style="font-size:56px;margin-bottom:15px">🍎</div><h2 style="color:#1e293b;margin-bottom:12px">iPhone / iPad</h2><ol style="text-align:left;padding-left:20px;font-size:14px;line-height:2"><li>Open this site in <strong>Safari</strong></li><li>Tap the <strong>Share button</strong></li><li>Select <strong>"Add to Home Screen"</strong></li><li>Tap <strong>"Add"</strong> to confirm</li></ol></div>
+      <div class="card" style="text-align:center;padding:30px 20px"><div style="font-size:56px;margin-bottom:15px">💻</div><h2 style="color:#1e293b;margin-bottom:12px">Desktop</h2><ol style="text-align:left;padding-left:20px;font-size:14px;line-height:2"><li>Open in <strong>Chrome or Edge</strong></li><li>Click the <strong>install icon</strong> in address bar</li><li>Or click <strong>Menu > "Install"</strong></li><li>Click <strong>"Install"</strong> to confirm</li></ol></div>
+    </div>
+    <div class="card" style="text-align:center;border:2px solid #10b981">
+      <h3 style="color:#059669;margin-bottom:8px">Why Install?</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-top:16px">
+        <div><div style="font-size:28px">⚡</div><strong style="font-size:13px">Faster Access</strong><p style="font-size:11px;color:#64748b">Opens instantly</p></div>
+        <div><div style="font-size:28px">📡</div><strong style="font-size:13px">Offline Support</strong><p style="font-size:11px;color:#64748b">Works without internet</p></div>
+        <div><div style="font-size:28px">🔔</div><strong style="font-size:13px">Push Notifications</strong><p style="font-size:11px;color:#64748b">Real-time alerts</p></div>
+        <div><div style="font-size:28px">🔒</div><strong style="font-size:13px">Secure</strong><p style="font-size:11px;color:#64748b">Full HTTPS encryption</p></div>
       </div>
     </div>
-    <div class="card" style="text-align:center"><p class="muted">After installation, Comfort works like a native app with offline support and push notifications.</p></div>
+    <script>var s=document.getElementById('ist');if(window.matchMedia('(display-mode:standalone)').matches||window.navigator.standalone){s.textContent='App is already installed!';s.style.background='#dcfce7';s.style.color='#16a34a'}else if('serviceWorker' in navigator){s.innerHTML='Ready to install &mdash; follow the steps below';s.style.background='#dbeafe';s.style.color='#2563eb'}else{s.textContent='Browser not supported';s.style.background='#fef3c7';s.style.color='#92400e'}</script>
   `, req.session?.user));
 });
 
@@ -36937,10 +36941,17 @@ app.get('/manifest.json', (req, res) => {
     ],
     screenshots: [],
     shortcuts: [
-      { name: "Dashboard", url: "/dashboard", icons: [{ src: "/icon-96.png", sizes: "96x96" }] },
-      { name: "Students", url: "/school/students", icons: [{ src: "/icon-96.png", sizes: "96x96" }] },
-      { name: "Messages", url: "/messages", icons: [{ src: "/icon-96.png", sizes: "96x96" }] }
-    ]
+      { name: "Dashboard", url: "/dashboard", icons: [{ src: "/icon.png", sizes: "192x192" }] },
+      { name: "Students", url: "/school/students", icons: [{ src: "/icon.png", sizes: "192x192" }] },
+      { name: "Messages", url: "/notifications", icons: [{ src: "/icon.png", sizes: "192x192" }] },
+      { name: "Settings", url: "/settings", icons: [{ src: "/icon.png", sizes: "192x192" }] }
+    ],
+    share_target: {
+      action: "/share",
+      method: "POST",
+      enctype: "multipart/form-data",
+      params: { title: "title", text: "text", url: "url" }
+    }
   }));
 });
 
