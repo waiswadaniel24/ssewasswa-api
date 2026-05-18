@@ -57,7 +57,11 @@ module.exports = function(app, pool, bcrypt, ah, esc, renderPage, audit, sendEma
   // ============================================================
   app.get('/', (req, res) => {
     if (req.session && req.session.user) return res.redirect('/dashboard');
-    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Comfort — The Operating System for African Institutions</title>
 <meta name="description" content="All-in-one management platform for Schools, Hotels, Restaurants, Salons, Pharmacies, Clinics, Churches and Businesses in Africa">
 <meta property="og:title" content="Comfort Platform — Management Software for Africa">
@@ -66,196 +70,388 @@ module.exports = function(app, pool, bcrypt, ah, esc, renderPage, audit, sendEma
 <meta property="og:url" content="${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}">
 <link rel="canonical" href="${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}">
 <meta name="robots" content="index, follow">
-<link rel="icon" href="/favicon.png"><link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/favicon.png">
+<link rel="manifest" href="/manifest.json">
 <style>
-*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b;line-height:1.6}
-a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
-.nav{background:white;border-bottom:1px solid #e2e8f0;padding:12px 24px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,0.04)}
-.nav-logo{font-size:22px;font-weight:900;color:#4f46e5;display:flex;align-items:center;gap:8px}
-.nav-links{display:flex;gap:20px;align-items:center}
-.nav-links a{font-size:14px;font-weight:500;color:#475569;padding:8px 12px;border-radius:8px;transition:0.2s}
-.nav-links a:hover{background:#f1f5f9;color:#1e293b;text-decoration:none}
-.btn{display:inline-block;padding:10px 24px;border-radius:10px;font-weight:600;font-size:14px;border:none;cursor:pointer;transition:0.3s;text-decoration:none}
-.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,0.15);text-decoration:none}
-.btn-primary{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white}
-.btn-green{background:linear-gradient(135deg,#059669,#0d9488);color:white}
-.btn-outline{background:transparent;border:2px solid #e2e8f0;color:#475569}
-.btn-outline:hover{border-color:#4f46e5;color:#4f46e5}
-.container{max-width:1200px;margin:0 auto;padding:0 20px}
-.hero{background:linear-gradient(135deg,#059669 0%,#0d9488 40%,#0891b2 100%);padding:80px 20px;text-align:center;color:white;position:relative;overflow:hidden}
-.hero::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle,rgba(255,255,255,0.03) 1px,transparent 1px);background-size:30px 30px}
-.hero h1{font-size:clamp(28px,5vw,52px);font-weight:900;margin-bottom:16px;position:relative;line-height:1.15}
-.hero p{font-size:clamp(16px,2.5vw,20px);opacity:0.9;margin-bottom:8px;max-width:700px;margin-left:auto;margin-right:auto;position:relative}
-.hero-buttons{display:flex;gap:16px;justify-content:center;margin-top:32px;position:relative;flex-wrap:wrap}
-.trust-badges{display:flex;gap:24px;justify-content:center;margin-top:24px;position:relative;flex-wrap:wrap}
-.trust-badges span{font-size:13px;opacity:0.85}
-.section{padding:60px 20px}
-.section-title{text-align:center;font-size:32px;font-weight:800;margin-bottom:12px}
-.section-sub{text-align:center;color:#64748b;margin-bottom:48px;font-size:16px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:24px}
-.card{background:white;border-radius:16px;padding:28px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0;transition:0.3s;position:relative;overflow:hidden}
-.card:hover{transform:translateY(-4px);box-shadow:0 8px 30px rgba(0,0,0,0.1)}
-.card-top{position:absolute;top:0;left:0;right:0;height:5px}
-.card-emoji{font-size:36px;margin-bottom:12px}
-.card h3{font-size:20px;font-weight:700;margin-bottom:4px}
-.card-price{font-size:13px;font-weight:600;margin-bottom:16px;color:#64748b}
-.card ul{list-style:none;padding:0;font-size:13px;color:#475569;line-height:2}
-.card ul li::before{content:'✓ ';color:#059669;font-weight:700}
-.card .btn{margin-top:16px;display:block;text-align:center}
-.pricing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;max-width:1000px;margin:0 auto}
-.pricing-card{background:white;border-radius:16px;padding:32px;text-align:center;border:2px solid #e2e8f0;transition:0.3s}
-.pricing-card:hover{border-color:#4f46e5}
-.pricing-card.featured{border-color:#4f46e5;box-shadow:0 8px 30px rgba(79,70,229,0.15)}
-.pricing-card h3{font-size:22px;font-weight:800;margin-bottom:4px}
-.pricing-card .price{font-size:36px;font-weight:900;color:#4f46e5;margin:12px 0}
-.pricing-card .price span{font-size:14px;font-weight:400;color:#64748b}
-.pricing-card ul{list-style:none;text-align:left;font-size:14px;color:#475569;line-height:2.2;margin:16px 0}
-.pricing-card ul li::before{content:'✓ ';color:#059669;font-weight:700}
-.faq-item{background:white;border-radius:12px;padding:20px 24px;margin-bottom:12px;border:1px solid #e2e8f0;cursor:pointer}
-.faq-item h4{font-size:16px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
-.faq-item p{color:#475569;font-size:14px;margin-top:8px;display:none}
-.faq-item.open p{display:block}
-.faq-item h4::after{content:'+';font-size:20px;color:#94a3b8;transition:0.2s}
-.faq-item.open h4::after{content:'-'}
-.testimonials{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px}
-.testimonial{background:white;border-radius:16px;padding:28px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0}
-.testimonial-stars{color:#f59e0b;font-size:16px;margin-bottom:12px}
-.testimonial p{color:#475569;font-size:14px;line-height:1.8;font-style:italic;margin-bottom:16px}
-.testimonial-author{font-weight:700;font-size:14px;color:#1e293b}
-.testimonial-role{font-size:12px;color:#64748b}
-footer{background:#1e293b;color:white;padding:48px 20px 24px}
-.footer-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:32px;max-width:1200px;margin:0 auto}
-.footer-grid h4{margin-bottom:12px;font-size:15px}
-.footer-grid a{color:#94a3b8;font-size:13px;display:block;margin-bottom:8px}
-.footer-grid a:hover{color:white}
-.footer-bottom{text-align:center;margin-top:32px;padding-top:24px;border-top:1px solid #334155;font-size:13px;color:#64748b}
-.hamburger{display:none;background:none;border:none;font-size:28px;cursor:pointer;color:#1e293b;padding:4px 8px}.mobile-menu{display:none;position:absolute;top:100%;left:0;right:0;background:white;border-bottom:1px solid #e2e8f0;box-shadow:0 8px 20px rgba(0,0,0,0.08);z-index:99;padding:16px 24px;flex-direction:column;gap:4px}.mobile-menu.open{display:flex}.mobile-menu a{padding:12px 0;font-size:15px;color:#475569;text-decoration:none;font-weight:500;border-bottom:1px solid #f1f5f9}.mobile-menu a:last-child{border:none}.mobile-menu a:hover{color:#4f46e5}.whatsapp-float{position:fixed;bottom:24px;right:24px;width:60px;height:60px;background:#25d366;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(37,211,102,0.4);z-index:90;transition:0.3s;text-decoration:none;color:white;font-size:30px}.whatsapp-float:hover{transform:scale(1.1);box-shadow:0 6px 24px rgba(37,211,102,0.5);text-decoration:none}.cookie-banner{position:fixed;bottom:0;left:0;right:0;background:#1e293b;color:white;padding:16px 24px;z-index:200;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;font-size:14px;box-shadow:0 -4px 20px rgba(0,0,0,0.2)}.cookie-banner a{color:#93c5fd;text-decoration:underline}.cookie-banner button{padding:8px 20px;border-radius:8px;border:none;font-weight:700;font-size:13px;cursor:pointer}.cookie-accept{background:#059669;color:white}.cookie-dismiss{background:transparent;color:#94a3b8;border:1px solid #475569!important}.back-to-top{position:fixed;bottom:24px;left:24px;width:48px;height:48px;background:#4f46e5;border-radius:50%;display:none;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(79,70,229,0.3);z-index:90;cursor:pointer;color:white;font-size:20px;border:none;transition:0.3s}.back-to-top:hover{transform:scale(1.1)}.back-to-top.visible{display:flex}.counter-section{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;max-width:900px;margin:0 auto;padding:40px 20px}.counter-item{text-align:center}.counter-num{font-size:clamp(32px,5vw,48px);font-weight:900;color:#4f46e5}.counter-label{font-size:14px;color:#64748b;margin-top:4px}@media(max-width:768px){.nav-links{display:none}.hamburger{display:block}.mobile-menu{display:none}.hero{padding:40px 16px}.hero h1{font-size:28px}.section{padding:40px 16px}.section-title{font-size:24px}.grid{grid-template-columns:1fr}.hero-buttons{flex-direction:column;align-items:center}.counter-section{grid-template-columns:repeat(2,1fr);gap:16px}.cookie-banner{flex-direction:column;text-align:center;padding:20px}}
-</style></head><body>
+:root {
+  --navy-900: #0f172a;
+  --navy-800: #1e293b;
+  --navy-700: #334155;
+  --navy-600: #475569;
+  --navy-500: #64748b;
+  --navy-400: #94a3b8;
+  --navy-300: #cbd5e1;
+  --navy-200: #e2e8f0;
+  --navy-100: #f1f5f9;
+  --navy-50: #f8fafc;
+  --emerald: #059669;
+  --emerald-light: #d1fae5;
+  --radius: 12px;
+  --radius-lg: 20px;
+  --shadow-sm: 0 1px 3px rgba(15,23,42,0.06);
+  --shadow: 0 4px 16px rgba(15,23,42,0.08);
+  --shadow-lg: 0 12px 40px rgba(15,23,42,0.12);
+  --shadow-xl: 0 20px 60px rgba(15,23,42,0.15);
+  --transition: 0.3s cubic-bezier(0.4,0,0.2,1);
+}
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--navy-50); color: var(--navy-800); line-height: 1.7; overflow-x: hidden; }
+a { color: inherit; text-decoration: none; }
+ul { list-style: none; }
+.container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
 
-<nav class="nav">
-  <div class="nav-logo">◆ Comfort</div>
-  <div class="nav-links">
-    <a href="/#features">Features</a>
-    <a href="/#pricing">Pricing</a>
-    <a href="/#testimonials">Testimonials</a>
-    <a href="/#faq">FAQ</a>
-    <a href="/about">About</a>
-    <a href="/contact">Contact</a>
-    <a href="/login" class="btn btn-outline">Login</a>
-    <a href="/register" class="btn btn-primary">Start Free</a>
-  </div>
-  <button class="hamburger" id="hamburgerBtn" aria-label="Toggle menu">☰</button>
-  <div class="mobile-menu" id="mobileMenu">
-    <a href="/#features">Features</a>
-    <a href="/#pricing">Pricing</a>
-    <a href="/#testimonials">Testimonials</a>
-    <a href="/#faq">FAQ</a>
-    <a href="/about">About</a>
-    <a href="/contact">Contact</a>
-    <a href="/blog">Blog</a>
-    <a href="/help-center">Help Center</a>
-    <a href="/login">Login</a>
-    <a href="/register">Start Free →</a>
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(32px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes gradientShift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+
+.reveal { opacity: 0; transform: translateY(32px); transition: opacity 0.7s cubic-bezier(0.4,0,0.2,1), transform 0.7s cubic-bezier(0.4,0,0.2,1); }
+.reveal.visible { opacity: 1; transform: translateY(0); }
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
+.reveal-delay-4 { transition-delay: 0.4s; }
+
+.navbar { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; padding: 0 24px; transition: var(--transition); }
+.navbar.scrolled { background: rgba(255,255,255,0.82); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border-bottom: 1px solid rgba(15,23,42,0.06); box-shadow: 0 1px 12px rgba(15,23,42,0.04); }
+.navbar-inner { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; height: 72px; }
+.nav-logo { font-size: 22px; font-weight: 800; color: var(--navy-900); display: flex; align-items: center; gap: 10px; letter-spacing: -0.5px; }
+.nav-logo .logo-mark { width: 36px; height: 36px; background: linear-gradient(135deg, var(--navy-900), var(--navy-700)); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; font-size: 18px; font-weight: 900; }
+.nav-links { display: flex; align-items: center; gap: 4px; }
+.nav-links a { font-size: 14px; font-weight: 500; color: var(--navy-600); padding: 8px 16px; border-radius: 8px; transition: var(--transition); }
+.nav-links a:hover { color: var(--navy-900); background: var(--navy-100); }
+.nav-actions { display: flex; align-items: center; gap: 12px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; padding: 10px 24px; border-radius: var(--radius); font-weight: 600; font-size: 14px; border: none; cursor: pointer; transition: var(--transition); white-space: nowrap; }
+.btn:hover { transform: translateY(-1px); }
+.btn-ghost { background: transparent; color: var(--navy-600); font-weight: 500; }
+.btn-ghost:hover { color: var(--navy-900); background: var(--navy-100); transform: none; }
+.btn-primary { background: var(--navy-900); color: white; box-shadow: 0 2px 8px rgba(15,23,42,0.2); }
+.btn-primary:hover { background: var(--navy-800); box-shadow: 0 4px 16px rgba(15,23,42,0.25); }
+.btn-outline { background: transparent; color: var(--navy-600); border: 1.5px solid var(--navy-200); }
+.btn-outline:hover { border-color: var(--navy-900); color: var(--navy-900); }
+.btn-white { background: white; color: var(--navy-900); box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
+.btn-white:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
+.btn-glass { background: rgba(255,255,255,0.15); color: white; border: 1.5px solid rgba(255,255,255,0.3); backdrop-filter: blur(4px); }
+.btn-glass:hover { background: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.5); }
+.btn-lg { padding: 14px 32px; font-size: 16px; border-radius: var(--radius); }
+.hamburger { display: none; background: none; border: none; width: 40px; height: 40px; cursor: pointer; border-radius: 8px; align-items: center; justify-content: center; transition: var(--transition); position: relative; z-index: 1001; }
+.hamburger:hover { background: var(--navy-100); }
+.hamburger span { display: block; width: 20px; height: 2px; background: var(--navy-900); border-radius: 2px; transition: var(--transition); position: relative; }
+.hamburger span::before, .hamburger span::after { content: ''; position: absolute; width: 20px; height: 2px; background: var(--navy-900); border-radius: 2px; transition: var(--transition); }
+.hamburger span::before { top: -6px; }
+.hamburger span::after { bottom: -6px; }
+.hamburger.active span { background: transparent; }
+.hamburger.active span::before { top: 0; transform: rotate(45deg); }
+.hamburger.active span::after { bottom: 0; transform: rotate(-45deg); }
+.mobile-menu { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.98); backdrop-filter: blur(20px); z-index: 999; padding: 100px 32px 32px; flex-direction: column; gap: 4px; opacity: 0; transform: translateY(-10px); transition: opacity 0.3s, transform 0.3s; }
+.mobile-menu.open { display: flex; opacity: 1; transform: translateY(0); }
+.mobile-menu a { font-size: 18px; font-weight: 500; color: var(--navy-800); padding: 14px 16px; border-radius: var(--radius); transition: var(--transition); }
+.mobile-menu a:hover { background: var(--navy-100); color: var(--navy-900); }
+.mobile-menu .mobile-actions { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--navy-200); display: flex; flex-direction: column; gap: 12px; }
+.mobile-menu .mobile-actions .btn { width: 100%; justify-content: center; padding: 14px; }
+
+.hero { position: relative; min-height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 120px 24px 80px; }
+.hero-bg { position: absolute; inset: 0; background: linear-gradient(-45deg, #0f172a, #1e3a5f, #0f172a, #162544); background-size: 400% 400%; animation: gradientShift 15s ease infinite; z-index: 0; }
+.hero-bg::after { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(255,255,255,0.06), transparent), radial-gradient(circle at 20% 80%, rgba(5,150,105,0.15), transparent 50%), radial-gradient(circle at 80% 20%, rgba(14,165,233,0.12), transparent 50%); }
+.hero-grid-overlay { position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px); background-size: 60px 60px; z-index: 1; }
+.hero-content { position: relative; z-index: 2; text-align: center; max-width: 800px; margin: 0 auto; animation: fadeInUp 0.8s ease-out; }
+.hero-badge { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 100px; padding: 6px 18px 6px 8px; color: rgba(255,255,255,0.9); font-size: 13px; font-weight: 500; margin-bottom: 32px; backdrop-filter: blur(8px); }
+.hero-badge-dot { width: 8px; height: 8px; background: #22c55e; border-radius: 50%; animation: pulse 2s infinite; }
+.hero h1 { font-size: clamp(36px, 6vw, 68px); font-weight: 800; color: white; line-height: 1.08; letter-spacing: -1.5px; margin-bottom: 24px; }
+.hero h1 .highlight { background: linear-gradient(135deg, #22c55e, #14b8a6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.hero-subtitle { font-size: clamp(16px, 2.2vw, 20px); color: rgba(255,255,255,0.7); max-width: 600px; margin: 0 auto 40px; line-height: 1.7; font-weight: 400; }
+.hero-buttons { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin-bottom: 48px; }
+.hero-trust { display: flex; align-items: center; justify-content: center; gap: 32px; flex-wrap: wrap; color: rgba(255,255,255,0.5); font-size: 13px; font-weight: 500; }
+.hero-trust span { display: flex; align-items: center; gap: 6px; }
+.hero-trust .check { color: #22c55e; font-size: 15px; }
+.hero-visual { position: absolute; bottom: -2px; left: 0; right: 0; height: 120px; background: linear-gradient(to top, var(--navy-50), transparent); z-index: 3; }
+
+.stats-bar { position: relative; z-index: 10; margin-top: -60px; margin-bottom: 0; padding: 0 24px; }
+.stats-inner { max-width: 900px; margin: 0 auto; background: white; border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--navy-200); overflow: hidden; }
+.stat-item { padding: 36px 24px; text-align: center; position: relative; }
+.stat-item:not(:last-child)::after { content: ''; position: absolute; right: 0; top: 20%; height: 60%; width: 1px; background: var(--navy-200); }
+.stat-number { font-size: clamp(28px, 4vw, 42px); font-weight: 800; color: var(--navy-900); letter-spacing: -1px; line-height: 1.2; }
+.stat-label { font-size: 13px; font-weight: 500; color: var(--navy-500); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.section { padding: 120px 24px; }
+.section-header { text-align: center; max-width: 640px; margin: 0 auto 64px; }
+.section-label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--emerald); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 16px; }
+.section-label::before, .section-label::after { content: ''; width: 20px; height: 1.5px; background: var(--emerald); border-radius: 2px; opacity: 0.5; }
+.section-title { font-size: clamp(28px, 4vw, 44px); font-weight: 800; color: var(--navy-900); letter-spacing: -0.5px; line-height: 1.15; margin-bottom: 16px; }
+.section-desc { font-size: 17px; color: var(--navy-500); line-height: 1.7; }
+.section-bg-light { background: var(--navy-50); }
+.section-bg-dark { background: var(--navy-900); color: white; }
+
+.features-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px; }
+.feature-card { background: white; border-radius: var(--radius-lg); padding: 32px; border: 1px solid var(--navy-200); transition: var(--transition); position: relative; overflow: hidden; }
+.feature-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--card-accent, var(--emerald)); transform: scaleX(0); transform-origin: left; transition: transform 0.4s cubic-bezier(0.4,0,0.2,1); }
+.feature-card:hover { transform: translateY(-6px); box-shadow: var(--shadow-lg); border-color: transparent; }
+.feature-card:hover::before { transform: scaleX(1); }
+.feature-icon { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700; color: white; margin-bottom: 20px; position: relative; overflow: hidden; }
+.feature-icon::after { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(255,255,255,0.2), transparent); border-radius: inherit; }
+.feature-card h3 { font-size: 18px; font-weight: 700; color: var(--navy-900); margin-bottom: 4px; }
+.feature-price { font-size: 13px; font-weight: 600; color: var(--navy-500); margin-bottom: 16px; }
+.feature-list { font-size: 13.5px; color: var(--navy-600); line-height: 2.1; }
+.feature-list li { display: flex; align-items: center; gap: 8px; }
+.feature-list li::before { content: ''; width: 16px; height: 16px; min-width: 16px; background: var(--emerald-light); border-radius: 50%; display: flex; align-items: center; justify-content: center; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23059669' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: center; background-size: 10px; }
+.feature-cta { margin-top: 20px; display: block; text-align: center; width: 100%; font-size: 13px; font-weight: 600; padding: 10px 16px; border-radius: var(--radius); color: white; transition: var(--transition); text-decoration: none; }
+.feature-cta:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); text-decoration: none; color: white; }
+
+.pricing-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; max-width: 1100px; margin: 0 auto; }
+.pricing-card { background: white; border-radius: var(--radius-lg); padding: 36px 28px; border: 1.5px solid var(--navy-200); transition: var(--transition); position: relative; display: flex; flex-direction: column; }
+.pricing-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
+.pricing-card.featured { border-color: var(--navy-900); box-shadow: var(--shadow-lg); transform: scale(1.04); z-index: 1; }
+.pricing-card.featured:hover { transform: scale(1.04) translateY(-4px); box-shadow: var(--shadow-xl); }
+.pricing-popular { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); background: var(--navy-900); color: white; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; padding: 6px 20px; border-radius: 100px; }
+.pricing-tier { font-size: 16px; font-weight: 700; color: var(--navy-900); margin-bottom: 8px; }
+.pricing-amount { display: flex; align-items: baseline; gap: 4px; margin-bottom: 24px; }
+.pricing-currency { font-size: 18px; font-weight: 700; color: var(--navy-900); }
+.pricing-value { font-size: 44px; font-weight: 800; color: var(--navy-900); letter-spacing: -1px; line-height: 1; }
+.pricing-period { font-size: 14px; color: var(--navy-500); font-weight: 500; }
+.pricing-features { flex: 1; margin-bottom: 28px; }
+.pricing-features li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; color: var(--navy-600); padding: 6px 0; }
+.pricing-features li .check-icon { width: 18px; height: 18px; min-width: 18px; background: var(--emerald-light); border-radius: 50%; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23059669' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: center; background-size: 10px; margin-top: 2px; }
+.pricing-card .btn { width: 100%; justify-content: center; padding: 12px 24px; }
+
+.testimonials-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; max-width: 1100px; margin: 0 auto; }
+.testimonial-card { background: white; border-radius: var(--radius-lg); padding: 36px; border: 1px solid var(--navy-200); transition: var(--transition); position: relative; }
+.testimonial-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); border-color: transparent; }
+.testimonial-quote-mark { font-size: 48px; line-height: 1; color: var(--navy-200); font-family: Georgia, serif; margin-bottom: -8px; }
+.testimonial-stars { display: flex; gap: 2px; margin-bottom: 16px; }
+.testimonial-stars span { color: #f59e0b; font-size: 16px; }
+.testimonial-text { font-size: 15px; color: var(--navy-600); line-height: 1.8; margin-bottom: 24px; font-style: italic; }
+.testimonial-author { display: flex; align-items: center; gap: 12px; }
+.testimonial-avatar { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; color: white; }
+.testimonial-info h4 { font-size: 14px; font-weight: 700; color: var(--navy-900); }
+.testimonial-info p { font-size: 12px; color: var(--navy-500); font-weight: 500; }
+
+.faq-container { max-width: 760px; margin: 0 auto; }
+.faq-item { background: white; border-radius: var(--radius); margin-bottom: 12px; border: 1px solid var(--navy-200); overflow: hidden; transition: var(--transition); }
+.faq-item:hover { border-color: var(--navy-300); }
+.faq-item.open { border-color: var(--navy-400); box-shadow: var(--shadow-sm); }
+.faq-question { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; cursor: pointer; font-size: 15px; font-weight: 600; color: var(--navy-900); transition: var(--transition); gap: 16px; user-select: none; }
+.faq-question:hover { color: var(--navy-700); }
+.faq-icon { width: 28px; height: 28px; min-width: 28px; border-radius: 8px; background: var(--navy-100); display: flex; align-items: center; justify-content: center; transition: var(--transition); }
+.faq-icon svg { width: 14px; height: 14px; stroke: var(--navy-600); transition: transform 0.3s; }
+.faq-item.open .faq-icon { background: var(--navy-900); }
+.faq-item.open .faq-icon svg { stroke: white; transform: rotate(180deg); }
+.faq-answer { max-height: 0; overflow: hidden; transition: max-height 0.4s cubic-bezier(0.4,0,0.2,1), padding 0.3s; }
+.faq-item.open .faq-answer { max-height: 300px; }
+.faq-answer-inner { padding: 0 24px 20px; font-size: 14.5px; color: var(--navy-600); line-height: 1.8; }
+
+.cta-section { position: relative; padding: 120px 24px; text-align: center; overflow: hidden; }
+.cta-bg { position: absolute; inset: 0; background: linear-gradient(-45deg, #0f172a, #1a2744, #0f172a, #162a45); background-size: 400% 400%; animation: gradientShift 12s ease infinite; }
+.cta-bg::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 30% 50%, rgba(5,150,105,0.2), transparent 60%), radial-gradient(circle at 70% 50%, rgba(14,165,233,0.15), transparent 60%); }
+.cta-content { position: relative; z-index: 1; max-width: 640px; margin: 0 auto; }
+.cta-content h2 { font-size: clamp(28px, 4vw, 44px); font-weight: 800; color: white; letter-spacing: -0.5px; margin-bottom: 16px; }
+.cta-content p { font-size: 18px; color: rgba(255,255,255,0.65); margin-bottom: 40px; line-height: 1.7; }
+.cta-buttons { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+
+.footer { background: var(--navy-900); color: white; padding: 80px 24px 40px; }
+.footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 48px; max-width: 1200px; margin: 0 auto; padding-bottom: 48px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.footer-brand .footer-logo { font-size: 20px; font-weight: 800; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+.footer-brand .footer-logo .logo-mark { width: 32px; height: 32px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.footer-brand p { font-size: 14px; color: var(--navy-400); line-height: 1.8; max-width: 300px; }
+.footer-col h4 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--navy-300); margin-bottom: 20px; }
+.footer-col a { display: block; font-size: 14px; color: var(--navy-400); padding: 5px 0; transition: var(--transition); }
+.footer-col a:hover { color: white; transform: translateX(2px); }
+.footer-social { display: flex; gap: 12px; margin-top: 24px; }
+.footer-social a { width: 36px; height: 36px; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--navy-400); transition: var(--transition); padding: 0; }
+.footer-social a:hover { background: rgba(255,255,255,0.1); color: white; transform: none; }
+.footer-bottom { max-width: 1200px; margin: 0 auto; padding-top: 32px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--navy-500); flex-wrap: wrap; gap: 16px; }
+.footer-bottom-links { display: flex; gap: 24px; }
+.footer-bottom-links a { font-size: 13px; color: var(--navy-500); transition: var(--transition); }
+.footer-bottom-links a:hover { color: white; }
+
+.whatsapp-float { position: fixed; bottom: 28px; right: 28px; width: 56px; height: 56px; background: #25d366; border-radius: 16px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 20px rgba(37,211,102,0.4); z-index: 90; transition: var(--transition); text-decoration: none; color: white; }
+.whatsapp-float:hover { transform: translateY(-3px) scale(1.05); box-shadow: 0 8px 30px rgba(37,211,102,0.5); text-decoration: none; }
+.whatsapp-float svg { width: 28px; height: 28px; fill: white; }
+.back-to-top { position: fixed; bottom: 28px; left: 28px; width: 44px; height: 44px; background: var(--navy-900); border-radius: 12px; display: none; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(15,23,42,0.3); z-index: 90; cursor: pointer; color: white; border: none; transition: var(--transition); }
+.back-to-top:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(15,23,42,0.4); }
+.back-to-top.visible { display: flex; }
+.back-to-top svg { width: 20px; height: 20px; stroke: white; }
+.cookie-banner { position: fixed; bottom: 0; left: 0; right: 0; background: var(--navy-900); color: white; padding: 16px 32px; z-index: 200; display: flex; align-items: center; justify-content: center; gap: 24px; flex-wrap: wrap; font-size: 14px; box-shadow: 0 -4px 30px rgba(0,0,0,0.2); border-top: 1px solid rgba(255,255,255,0.05); }
+.cookie-banner a { color: #93c5fd; text-decoration: underline; }
+.cookie-actions { display: flex; gap: 8px; }
+.cookie-actions button { padding: 8px 20px; border-radius: 8px; border: none; font-weight: 600; font-size: 13px; cursor: pointer; transition: var(--transition); }
+.cookie-accept { background: var(--emerald); color: white; }
+.cookie-accept:hover { background: #047857; }
+.cookie-dismiss { background: transparent; color: var(--navy-400); border: 1px solid rgba(255,255,255,0.15) !important; }
+.cookie-dismiss:hover { background: rgba(255,255,255,0.05); }
+
+@media (max-width: 1024px) {
+  .pricing-grid { grid-template-columns: repeat(2, 1fr); }
+  .pricing-card.featured { transform: scale(1); }
+  .pricing-card.featured:hover { transform: translateY(-4px); }
+  .footer-grid { grid-template-columns: 1fr 1fr; gap: 40px; }
+}
+@media (max-width: 768px) {
+  .nav-links, .nav-actions { display: none; }
+  .hamburger { display: flex; }
+  .hero { padding: 100px 20px 80px; min-height: auto; }
+  .hero h1 { letter-spacing: -0.5px; }
+  .stats-inner { grid-template-columns: repeat(2, 1fr); }
+  .stat-item:nth-child(2)::after { display: none; }
+  .section { padding: 80px 20px; }
+  .section-header { margin-bottom: 48px; }
+  .features-grid { grid-template-columns: 1fr; }
+  .pricing-grid { grid-template-columns: 1fr; max-width: 420px; }
+  .testimonials-grid { grid-template-columns: 1fr; max-width: 500px; }
+  .footer-grid { grid-template-columns: 1fr; gap: 32px; }
+  .footer-bottom { flex-direction: column; text-align: center; }
+  .cta-section { padding: 80px 20px; }
+  .cookie-banner { flex-direction: column; text-align: center; padding: 20px; gap: 16px; }
+  .hero-buttons { flex-direction: column; align-items: stretch; }
+  .hero-buttons .btn { width: 100%; }
+  .cta-buttons { flex-direction: column; align-items: stretch; max-width: 320px; margin: 0 auto; }
+}
+</style>
+</head>
+<body>
+
+<nav class="navbar" id="navbar">
+  <div class="navbar-inner">
+    <a href="/" class="nav-logo"><span class="logo-mark">C</span> Comfort</a>
+    <div class="nav-links">
+      <a href="/#features">Features</a>
+      <a href="/#pricing">Pricing</a>
+      <a href="/#testimonials">Testimonials</a>
+      <a href="/#faq">FAQ</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+    </div>
+    <div class="nav-actions">
+      <a href="/login" class="btn btn-ghost">Login</a>
+      <a href="/register" class="btn btn-primary">Start Free</a>
+    </div>
+    <button class="hamburger" id="hamburger" aria-label="Toggle menu"><span></span></button>
   </div>
 </nav>
 
+<div class="mobile-menu" id="mobileMenu">
+  <a href="/#features">Features</a>
+  <a href="/#pricing">Pricing</a>
+  <a href="/#testimonials">Testimonials</a>
+  <a href="/#faq">FAQ</a>
+  <a href="/about">About</a>
+  <a href="/contact">Contact</a>
+  <a href="/blog">Blog</a>
+  <a href="/help-center">Help Center</a>
+  <div class="mobile-actions">
+    <a href="/login" class="btn btn-outline">Login</a>
+    <a href="/register" class="btn btn-primary">Start Free</a>
+  </div>
+</div>
+
 <section class="hero">
-  <h1>The Operating System for<br>Schools, Hotels, Restaurants,<br>Salons, Pharmacies &amp; More</h1>
-  <p>Stop juggling 12 different apps. One platform. All your operations. Built for Uganda, designed for Africa.</p>
-  <div class="hero-buttons">
-    <a href="/register" class="btn" style="background:white;color:#059669;padding:16px 36px;font-size:16px;font-weight:700">Start Free →</a>
-    <a href="/login" class="btn" style="background:rgba(255,255,255,0.15);color:white;border:2px solid rgba(255,255,255,0.4);padding:16px 36px;font-size:16px">Login</a>
+  <div class="hero-bg"></div>
+  <div class="hero-grid-overlay"></div>
+  <div class="hero-content">
+    <div class="hero-badge"><span class="hero-badge-dot"></span> Trusted by 500+ institutions across Africa</div>
+    <h1>The Operating System<br>for <span class="highlight">African</span> Institutions</h1>
+    <p class="hero-subtitle">Schools, hotels, restaurants, salons, pharmacies, clinics, churches and businesses &mdash; one platform to run them all. Built for Uganda, designed for Africa.</p>
+    <div class="hero-buttons">
+      <a href="/register" class="btn btn-white btn-lg">Get Started Free &rarr;</a>
+      <a href="/login" class="btn btn-glass btn-lg">Login</a>
+    </div>
+    <div class="hero-trust">
+      <span><span class="check">&#10003;</span> No credit card required</span>
+      <span><span class="check">&#10003;</span> Setup in 10 minutes</span>
+      <span><span class="check">&#10003;</span> Works offline</span>
+    </div>
   </div>
-  <div class="trust-badges">
-    <span>✓ No credit card required</span>
-    <span>✓ Setup in 10 minutes</span>
-    <span>✓ Works offline</span>
-    <span>✓ 500+ users across Africa</span>
-  </div>
+  <div class="hero-visual"></div>
 </section>
 
-<div class="counter-section" id="counters">
-  <div class="counter-item"><div class="counter-num" data-target="500">0</div><div class="counter-label">Active Institutions</div></div>
-  <div class="counter-item"><div class="counter-num" data-target="100">0</div><div class="counter-label">Features Built</div></div>
-  <div class="counter-item"><div class="counter-num" data-target="15">0</div><div class="counter-label">Institution Types</div></div>
-  <div class="counter-item"><div class="counter-num" data-target="99">0</div><div class="counter-label">Uptime %</div></div>
+<div class="stats-bar reveal" id="counters">
+  <div class="stats-inner">
+    <div class="stat-item"><div class="stat-number" data-target="500" data-suffix="+">0</div><div class="stat-label">Active Institutions</div></div>
+    <div class="stat-item"><div class="stat-number" data-target="159" data-suffix="+">0</div><div class="stat-label">Features Built</div></div>
+    <div class="stat-item"><div class="stat-number" data-target="15" data-suffix="+">0</div><div class="stat-label">Institution Types</div></div>
+    <div class="stat-item"><div class="stat-number" data-target="99" data-suffix=".9%">0</div><div class="stat-label">Uptime</div></div>
+  </div>
 </div>
 
 <section class="section" id="features">
   <div class="container">
-    <h2 class="section-title">Built For Your Institution</h2>
-    <p class="section-sub">Choose your sector. We handle the rest.</p>
-    <div class="grid">
-      ${PORTAL_TYPES.map(p => `
-      <div class="card">
-        <div class="card-top" style="background:${p.color}"></div>
-        <div class="card-emoji">${p.emoji}</div>
-        <h3 style="color:${p.color}">${p.label}</h3>
-        <div class="card-price">${p.price === 'FREE' ? 'FREE Forever' : 'UGX '+p.price+'/month'}</div>
-        <ul>${p.features.map(f => '<li>'+f+'</li>').join('')}</ul>
-        <a href="/register?type=${p.type}" class="btn btn-primary" style="background:${p.color}">Start Free Trial</a>
+    <div class="section-header reveal">
+      <div class="section-label">Sectors</div>
+      <h2 class="section-title">Built For Your Institution</h2>
+      <p class="section-desc">Choose your sector and get a specialized dashboard with everything you need to manage, grow, and succeed.</p>
+    </div>
+    <div class="features-grid">
+      ${PORTAL_TYPES.map((p, i) => `
+      <div class="feature-card reveal reveal-delay-${(i % 4) + 1}" style="--card-accent:${p.color}">
+        <div class="feature-icon" style="background:${p.color}">${p.label.charAt(0)}</div>
+        <h3>${p.label}</h3>
+        <div class="feature-price">${p.price === 'FREE' ? 'FREE Forever' : 'UGX '+p.price+'/month'}</div>
+        <ul class="feature-list">${p.features.map(f => '<li>'+f+'</li>').join('')}</ul>
+        <a href="/register?type=${p.type}" class="feature-cta" style="background:${p.color}">Start Free Trial</a>
       </div>`).join('')}
     </div>
   </div>
 </section>
 
-<section class="section" style="background:#f1f5f9" id="pricing">
+<section class="section section-bg-light" id="pricing">
   <div class="container">
-    <h2 class="section-title">Simple, Transparent Pricing</h2>
-    <p class="section-sub">Start free. Upgrade when you need more.</p>
+    <div class="section-header reveal">
+      <div class="section-label">Pricing</div>
+      <h2 class="section-title">Simple, Transparent Pricing</h2>
+      <p class="section-desc">Start free and upgrade when you need more. No hidden fees. Cancel anytime.</p>
+    </div>
     <div class="pricing-grid">
-      <div class="pricing-card">
-        <h3>Free</h3>
-        <div class="price">UGX 0<span>/month</span></div>
-        <ul>
-          <li>Up to 100 records</li>
-          <li>Up to 3 users</li>
-          <li>All features included</li>
-          <li>Comfort branding</li>
-          <li>Email support</li>
-          <li>Mobile app</li>
+      <div class="pricing-card reveal reveal-delay-1">
+        <div class="pricing-tier">Free</div>
+        <div class="pricing-amount"><span class="pricing-currency">UGX</span><span class="pricing-value">0</span><span class="pricing-period">/month</span></div>
+        <ul class="pricing-features">
+          <li><span class="check-icon"></span> Up to 100 records</li>
+          <li><span class="check-icon"></span> Up to 3 users</li>
+          <li><span class="check-icon"></span> All features included</li>
+          <li><span class="check-icon"></span> Comfort branding</li>
+          <li><span class="check-icon"></span> Email support</li>
+          <li><span class="check-icon"></span> Mobile app</li>
         </ul>
-        <a href="/register" class="btn btn-outline" style="width:100%;text-align:center">Get Started Free</a>
+        <a href="/register" class="btn btn-outline">Get Started Free</a>
       </div>
-      <div class="pricing-card featured">
-        <div style="background:#4f46e5;color:white;padding:4px 16px;border-radius:20px;font-size:12px;font-weight:700;display:inline-block;margin-bottom:12px">POPULAR</div>
-        <h3>Basic</h3>
-        <div class="price">UGX 100K<span>/month</span></div>
-        <ul>
-          <li>Up to 1,000 records</li>
-          <li>Up to 10 users</li>
-          <li>All features</li>
-          <li>Custom branding</li>
-          <li>Priority support</li>
-          <li>Advanced reports</li>
+      <div class="pricing-card featured reveal reveal-delay-2">
+        <div class="pricing-popular">Most Popular</div>
+        <div class="pricing-tier">Basic</div>
+        <div class="pricing-amount"><span class="pricing-currency">UGX</span><span class="pricing-value">100K</span><span class="pricing-period">/month</span></div>
+        <ul class="pricing-features">
+          <li><span class="check-icon"></span> Up to 1,000 records</li>
+          <li><span class="check-icon"></span> Up to 10 users</li>
+          <li><span class="check-icon"></span> All features</li>
+          <li><span class="check-icon"></span> Custom branding</li>
+          <li><span class="check-icon"></span> Priority support</li>
+          <li><span class="check-icon"></span> Advanced reports</li>
         </ul>
-        <a href="/register" class="btn btn-primary" style="width:100%;text-align:center">Start 30-Day Free Trial</a>
+        <a href="/register" class="btn btn-primary">Start 30-Day Free Trial</a>
       </div>
-      <div class="pricing-card">
-        <h3>Pro</h3>
-        <div class="price">UGX 200K<span>/month</span></div>
-        <ul>
-          <li>Up to 10,000 records</li>
-          <li>Up to 50 users</li>
-          <li>API access</li>
-          <li>White-label</li>
-          <li>Dedicated support</li>
-          <li>Analytics dashboard</li>
+      <div class="pricing-card reveal reveal-delay-3">
+        <div class="pricing-tier">Pro</div>
+        <div class="pricing-amount"><span class="pricing-currency">UGX</span><span class="pricing-value">200K</span><span class="pricing-period">/month</span></div>
+        <ul class="pricing-features">
+          <li><span class="check-icon"></span> Up to 10,000 records</li>
+          <li><span class="check-icon"></span> Up to 50 users</li>
+          <li><span class="check-icon"></span> API access</li>
+          <li><span class="check-icon"></span> White-label</li>
+          <li><span class="check-icon"></span> Dedicated support</li>
+          <li><span class="check-icon"></span> Analytics dashboard</li>
         </ul>
-        <a href="/register" class="btn btn-outline" style="width:100%;text-align:center">Start Free Trial</a>
+        <a href="/register" class="btn btn-outline">Start Free Trial</a>
       </div>
-      <div class="pricing-card">
-        <h3>Enterprise</h3>
-        <div class="price">UGX 500K<span>/month</span></div>
-        <ul>
-          <li>Unlimited records</li>
-          <li>Unlimited users</li>
-          <li>Custom domain</li>
-          <li>Custom integrations</li>
-          <li>SLA guarantee</li>
-          <li>Onboarding support</li>
+      <div class="pricing-card reveal reveal-delay-4">
+        <div class="pricing-tier">Enterprise</div>
+        <div class="pricing-amount"><span class="pricing-currency">UGX</span><span class="pricing-value">500K</span><span class="pricing-period">/month</span></div>
+        <ul class="pricing-features">
+          <li><span class="check-icon"></span> Unlimited records</li>
+          <li><span class="check-icon"></span> Unlimited users</li>
+          <li><span class="check-icon"></span> Custom domain</li>
+          <li><span class="check-icon"></span> Custom integrations</li>
+          <li><span class="check-icon"></span> SLA guarantee</li>
+          <li><span class="check-icon"></span> Onboarding support</li>
         </ul>
-        <a href="/register" class="btn btn-outline" style="width:100%;text-align:center">Contact Sales</a>
+        <a href="/contact" class="btn btn-outline">Contact Sales</a>
       </div>
     </div>
   </div>
@@ -263,149 +459,233 @@ footer{background:#1e293b;color:white;padding:48px 20px 24px}
 
 <section class="section" id="testimonials">
   <div class="container">
-    <h2 class="section-title">Trusted by Institutions Across Africa</h2>
-    <p class="section-sub">See what our users say about Comfort.</p>
-    <div class="testimonials">
-      <div class="testimonial">
-        <div class="testimonial-stars">★★★★★</div>
-        <p>"Comfort replaced 5 different tools we were using. Our school now runs everything from fees to report cards to parent communication in one place. The offline mode is a lifesaver when power goes out."</p>
-        <div class="testimonial-author">Grace Nakamya</div>
-        <div class="testimonial-role">Headteacher, Sunrise Primary School — Kampala</div>
+    <div class="section-header reveal">
+      <div class="section-label">Testimonials</div>
+      <h2 class="section-title">Trusted by Institutions Across Africa</h2>
+      <p class="section-desc">See what our users say about transforming their operations with Comfort.</p>
+    </div>
+    <div class="testimonials-grid">
+      <div class="testimonial-card reveal reveal-delay-1">
+        <div class="testimonial-quote-mark">&ldquo;</div>
+        <div class="testimonial-stars"><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span></div>
+        <p class="testimonial-text">Comfort replaced 5 different tools we were using. Our school now runs everything from fees to report cards to parent communication in one place. The offline mode is a lifesaver when power goes out.</p>
+        <div class="testimonial-author">
+          <div class="testimonial-avatar" style="background:#059669">G</div>
+          <div class="testimonial-info"><h4>Grace Nakamya</h4><p>Headteacher, Sunrise Primary School &mdash; Kampala</p></div>
+        </div>
       </div>
-      <div class="testimonial">
-        <div class="testimonial-stars">★★★★★</div>
-        <p>"Managing our hotel's 45 rooms, reservations, and housekeeping was a nightmare with spreadsheets. Comfort's hotel module has everything we need. Revenue is up 30% since we started using it."</p>
-        <div class="testimonial-author">Robert Mugisha</div>
-        <div class="testimonial-role">Manager, Pearl Gardens Hotel — Entebbe</div>
+      <div class="testimonial-card reveal reveal-delay-2">
+        <div class="testimonial-quote-mark">&ldquo;</div>
+        <div class="testimonial-stars"><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span></div>
+        <p class="testimonial-text">Managing our hotel's 45 rooms, reservations, and housekeeping was a nightmare with spreadsheets. Comfort's hotel module has everything we need. Revenue is up 30% since we started using it.</p>
+        <div class="testimonial-author">
+          <div class="testimonial-avatar" style="background:#dc2626">R</div>
+          <div class="testimonial-info"><h4>Robert Mugisha</h4><p>Manager, Pearl Gardens Hotel &mdash; Entebbe</p></div>
+        </div>
       </div>
-      <div class="testimonial">
-        <div class="testimonial-stars">★★★★★</div>
-        <p>"As a pharmacy, tracking expiry dates and prescriptions was critical. Comfort sends us alerts before drugs expire and the dispensing workflow is smooth. Our patients love the faster service."</p>
-        <div class="testimonial-author">Sarah Achieng</div>
-        <div class="testimonial-role">Pharmacist, HealthFirst Pharmacy — Jinja</div>
+      <div class="testimonial-card reveal reveal-delay-3">
+        <div class="testimonial-quote-mark">&ldquo;</div>
+        <div class="testimonial-stars"><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span></div>
+        <p class="testimonial-text">As a pharmacy, tracking expiry dates and prescriptions was critical. Comfort sends us alerts before drugs expire and the dispensing workflow is smooth. Our patients love the faster service.</p>
+        <div class="testimonial-author">
+          <div class="testimonial-avatar" style="background:#2563eb">S</div>
+          <div class="testimonial-info"><h4>Sarah Achieng</h4><p>Pharmacist, HealthFirst Pharmacy &mdash; Jinja</p></div>
+        </div>
       </div>
     </div>
   </div>
 </section>
 
-<section class="section" style="background:#f1f5f9" id="faq">
-  <div class="container" style="max-width:800px">
-    <h2 class="section-title">Frequently Asked Questions</h2>
-    <p class="section-sub">Everything you need to know about Comfort.</p>
-    <div class="faq-item"><h4>Is Comfort really free to start?</h4><p>Yes! The Free plan lets you manage up to 100 records with up to 3 users, forever. No credit card required. When you're ready to scale, upgrade to a paid plan.</p></div>
-    <div class="faq-item"><h4>Does it work offline?</h4><p>Absolutely. Comfort is a Progressive Web App (PWA) that works offline. You can add data, take attendance, record sales, and more — everything syncs when you're back online.</p></div>
-    <div class="faq-item"><h4>Is my data secure?</h4><p>Yes. All data is encrypted in transit (SSL/TLS) and at rest. We use role-based access control, audit logging, and two-factor authentication. Your data belongs to you.</p></div>
-    <div class="faq-item"><h4>Can I customize it for my business?</h4><p>Yes! Each business type (hotel, restaurant, salon, pharmacy, etc.) gets a specialized dashboard with features built specifically for that industry. You can also customize branding, colors, and logos.</p></div>
-    <div class="faq-item"><h4>What payment methods do you accept?</h4><p>We accept MTN Mobile Money, Airtel Money, bank transfers, and Flutterwave for card payments. All prices are in Uganda Shillings (UGX).</p></div>
-    <div class="faq-item"><h4>How long does setup take?</h4><p>Most institutions are up and running in under 10 minutes. Just register, pick your institution type, and start adding data. Our team can help with data migration for larger setups.</p></div>
-    <div class="faq-item"><h4>Can I switch between business types?</h4><p>Yes! If you start as a retail shop and later add a restaurant, you can enable multiple specializations. Each gets its own dedicated dashboard and features.</p></div>
-    <div class="faq-item"><h4>Do you offer support?</h4><p>Yes — Free plan gets email support (24-48hr response). Basic and above get priority support via email, WhatsApp, and phone. Enterprise gets a dedicated account manager.</p></div>
+<section class="section section-bg-light" id="faq">
+  <div class="container">
+    <div class="section-header reveal">
+      <div class="section-label">FAQ</div>
+      <h2 class="section-title">Frequently Asked Questions</h2>
+      <p class="section-desc">Everything you need to know about getting started with Comfort.</p>
+    </div>
+    <div class="faq-container">
+      <div class="faq-item reveal" onclick="toggleFaq(this)">
+        <div class="faq-question"><span>Is Comfort really free to start?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
+        <div class="faq-answer"><div class="faq-answer-inner">Yes! The Free plan lets you manage up to 100 records with up to 3 users, forever. No credit card required. When you're ready to scale, upgrade to a paid plan.</div></div>
+      </div>
+      <div class="faq-item reveal" onclick="toggleFaq(this)">
+        <div class="faq-question"><span>Does it work offline?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
+        <div class="faq-answer"><div class="faq-answer-inner">Absolutely. Comfort is a Progressive Web App (PWA) that works offline. You can add data, take attendance, record sales, and more &mdash; everything syncs when you're back online.</div></div>
+      </div>
+      <div class="faq-item reveal" onclick="toggleFaq(this)">
+        <div class="faq-question"><span>Is my data secure?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
+        <div class="faq-answer"><div class="faq-answer-inner">Yes. All data is encrypted in transit (SSL/TLS) and at rest. We use role-based access control, audit logging, and two-factor authentication. Your data belongs to you.</div></div>
+      </div>
+      <div class="faq-item reveal" onclick="toggleFaq(this)">
+        <div class="faq-question"><span>Can I customize it for my business?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
+        <div class="faq-answer"><div class="faq-answer-inner">Yes! Each business type gets a specialized dashboard with features built specifically for that industry. You can also customize branding, colors, and logos.</div></div>
+      </div>
+      <div class="faq-item reveal" onclick="toggleFaq(this)">
+        <div class="faq-question"><span>What payment methods do you accept?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
+        <div class="faq-answer"><div class="faq-answer-inner">We accept MTN Mobile Money, Airtel Money, bank transfers, and Flutterwave for card payments. All prices are in Uganda Shillings (UGX).</div></div>
+      </div>
+      <div class="faq-item reveal" onclick="toggleFaq(this)">
+        <div class="faq-question"><span>How long does setup take?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
+        <div class="faq-answer"><div class="faq-answer-inner">Most institutions are up and running in under 10 minutes. Just register, pick your institution type, and start adding data. Our team can help with data migration for larger setups.</div></div>
+      </div>
+      <div class="faq-item reveal" onclick="toggleFaq(this)">
+        <div class="faq-question"><span>Can I switch between business types?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
+        <div class="faq-answer"><div class="faq-answer-inner">Yes! If you start as a retail shop and later add a restaurant, you can enable multiple specializations. Each gets its own dedicated dashboard and features.</div></div>
+      </div>
+      <div class="faq-item reveal" onclick="toggleFaq(this)">
+        <div class="faq-question"><span>Do you offer support?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
+        <div class="faq-answer"><div class="faq-answer-inner">Yes &mdash; Free plan gets email support (24-48hr response). Basic and above get priority support via email, WhatsApp, and phone. Enterprise gets a dedicated account manager.</div></div>
+      </div>
+    </div>
   </div>
 </section>
 
-<section class="section" style="text-align:center;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:60px 20px">
-  <h2 style="font-size:32px;font-weight:800;margin-bottom:12px">Ready to Transform Your Institution?</h2>
-  <p style="font-size:18px;opacity:0.9;margin-bottom:32px">Join 500+ institutions already using Comfort across Africa.</p>
-  <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
-    <a href="/register" style="display:inline-block;padding:16px 40px;background:white;color:#4f46e5;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none">Start Free — No Credit Card</a>
-    <a href="/contact" style="display:inline-block;padding:16px 40px;background:rgba(255,255,255,0.15);color:white;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;border:2px solid rgba(255,255,255,0.4)">Talk to Sales</a>
+<section class="cta-section">
+  <div class="cta-bg"></div>
+  <div class="cta-content reveal">
+    <h2>Ready to Transform<br>Your Institution?</h2>
+    <p>Join 500+ institutions already using Comfort to streamline operations across Africa. Start free today.</p>
+    <div class="cta-buttons">
+      <a href="/register" class="btn btn-white btn-lg">Start Free &mdash; No Credit Card</a>
+      <a href="/contact" class="btn btn-glass btn-lg">Talk to Sales</a>
+    </div>
   </div>
 </section>
 
-<a href="https://wa.me/256700000000" class="whatsapp-float" target="_blank" rel="noopener" aria-label="Chat on WhatsApp">💬</a>
-<button class="back-to-top" id="backToTop" aria-label="Back to top">↑</button>
+<footer class="footer">
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <div class="footer-logo"><span class="logo-mark">C</span> Comfort</div>
+      <p>The Operating System for African Institutions. One platform, all your operations. Built with care in Uganda.</p>
+      <div class="footer-social">
+        <a href="#" aria-label="Twitter">X</a>
+        <a href="#" aria-label="Facebook">f</a>
+        <a href="#" aria-label="LinkedIn">in</a>
+        <a href="#" aria-label="Instagram">ig</a>
+        <a href="https://wa.me/256700000000" aria-label="WhatsApp">W</a>
+      </div>
+    </div>
+    <div class="footer-col"><h4>Product</h4><a href="/#features">Features</a><a href="/#pricing">Pricing</a><a href="/register">Register</a><a href="/login">Login</a><a href="/help-center">Help Center</a></div>
+    <div class="footer-col"><h4>Company</h4><a href="/about">About Us</a><a href="/contact">Contact</a><a href="/blog/posts">Blog</a><a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Service</a></div>
+    <div class="footer-col"><h4>Connect</h4><a href="#">Twitter / X</a><a href="#">Facebook</a><a href="#">LinkedIn</a><a href="#">Instagram</a><a href="https://wa.me/256700000000">WhatsApp</a></div>
+  </div>
+  <div class="footer-bottom">
+    <span>&copy; ${new Date().getFullYear()} Comfort Platform. Built with &#9829; in Uganda. All rights reserved.</span>
+    <div class="footer-bottom-links"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/contact">Support</a></div>
+  </div>
+</footer>
+
+<a href="https://wa.me/256700000000" class="whatsapp-float" target="_blank" rel="noopener" aria-label="Chat on WhatsApp">
+  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+</a>
+
+<button class="back-to-top" id="backToTop" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Back to top">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
+</button>
+
 <div class="cookie-banner" id="cookieBanner">
   <span>We use cookies to improve your experience. By continuing, you agree to our <a href="/privacy">Privacy Policy</a>.</span>
-  <div style="display:flex;gap:8px">
-    <button class="cookie-accept">Accept</button>
-    <button class="cookie-dismiss">Dismiss</button>
+  <div class="cookie-actions">
+    <button class="cookie-accept" onclick="acceptCookies()">Accept</button>
+    <button class="cookie-dismiss" onclick="dismissCookies()">Dismiss</button>
   </div>
 </div>
 
-<footer>
-  <div class="footer-grid">
-    <div><h4>◆ Comfort</h4><p style="color:#94a3b8;font-size:13px;line-height:1.8">The Operating System for African Institutions. One platform, all your operations.</p></div>
-    <div><h4>Product</h4><a href="/#features">Features</a><a href="/#pricing">Pricing</a><a href="/register">Register</a><a href="/login">Login</a><a href="/help-center">Help Center</a></div>
-    <div><h4>Company</h4><a href="/about">About Us</a><a href="/contact">Contact</a><a href="/blog/posts">Blog</a><a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Service</a></div>
-    <div><h4>Connect</h4><a href="#">Twitter / X</a><a href="#">Facebook</a><a href="#">LinkedIn</a><a href="#">Instagram</a><a href="https://wa.me/256700000000">WhatsApp</a></div>
-  </div>
-  <div class="footer-bottom">© ${new Date().getFullYear()} Comfort Platform. Built with ♥ in Uganda. All rights reserved.</div>
-</footer>
 <script>
-document.addEventListener('DOMContentLoaded', function(){
-  // Smooth scroll for anchor links
-  try { document.querySelectorAll('a[href^="#"]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); var t=document.querySelector(a.getAttribute('href')); if(t) t.scrollIntoView({behavior:'smooth'}); }); }); } catch(err){}
-
-  // Register service worker
-  if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
-
-  // Hamburger menu toggle
-  var hamburger = document.getElementById('hamburgerBtn');
-  var mobileMenu = document.getElementById('mobileMenu');
-  if(hamburger && mobileMenu){
-    hamburger.addEventListener('click', function(){ mobileMenu.classList.toggle('open'); });
-    mobileMenu.querySelectorAll('a').forEach(function(a){ a.addEventListener('click', function(){ mobileMenu.classList.remove('open'); }); });
-  }
-
-  // FAQ toggle
-  document.querySelectorAll('.faq-item').forEach(function(item){ item.addEventListener('click', function(){ item.classList.toggle('open'); }); });
-
-  // Animated counters
-  (function(){
-    var counters = document.querySelectorAll('.counter-num[data-target]');
-    var animated = false;
-    function animateCounters(){
-      if(animated) return;
-      animated = true;
-      counters.forEach(function(el){
-        var target = parseInt(el.getAttribute('data-target'));
-        var duration = 2000;
-        var startTime = null;
-        function step(ts){
-          if(!startTime) startTime = ts;
-          var progress = Math.min((ts - startTime) / duration, 1);
-          var eased = 1 - Math.pow(1 - progress, 3);
-          el.textContent = Math.floor(eased * target) + (target >= 99 && target <= 100 ? '%' : '+');
-          if(progress < 1) requestAnimationFrame(step);
-          else el.textContent = target + (target >= 99 && target <= 100 ? '%' : '+');
-        }
-        requestAnimationFrame(step);
-      });
-    }
-    if(counters.length > 0 && 'IntersectionObserver' in window){
-      var obs = new IntersectionObserver(function(entries){
-        entries.forEach(function(e){if(e.isIntersecting){animateCounters();obs.disconnect();}});
-      }, {threshold: 0.3});
-      obs.observe(document.getElementById('counters'));
-    }
-  })();
-
-  // Back to top button
-  (function(){
-    var btn = document.getElementById('backToTop');
-    if(!btn) return;
-    btn.addEventListener('click', function(){ window.scrollTo({top:0,behavior:'smooth'}); });
-    window.addEventListener('scroll', function(){
-      if(window.scrollY > 600) btn.classList.add('visible');
-      else btn.classList.remove('visible');
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
+(function(){
+  var navbar = document.getElementById('navbar');
+  if(!navbar) return;
+  window.addEventListener('scroll', function(){
+    if(window.scrollY > 20) navbar.classList.add('scrolled');
+    else navbar.classList.remove('scrolled');
+  });
+})();
+(function(){
+  var hamburger = document.getElementById('hamburger');
+  var menu = document.getElementById('mobileMenu');
+  if(!hamburger || !menu) return;
+  hamburger.addEventListener('click', function(){
+    hamburger.classList.toggle('active');
+    menu.classList.toggle('open');
+    document.body.style.overflow = menu.classList.contains('open') ? 'hidden' : '';
+  });
+  menu.querySelectorAll('a').forEach(function(a){
+    a.addEventListener('click', function(){
+      hamburger.classList.remove('active');
+      menu.classList.remove('open');
+      document.body.style.overflow = '';
     });
-  })();
-
-  // Cookie consent
-  (function(){
-    var banner = document.getElementById('cookieBanner');
-    if(!banner) return;
-    if(localStorage.getItem('cookieAccepted') || localStorage.getItem('cookieDismissed')){
-      banner.style.display = 'none';
-    }
-    var acceptBtn = banner.querySelector('.cookie-accept');
-    var dismissBtn = banner.querySelector('.cookie-dismiss');
-    if(acceptBtn) acceptBtn.addEventListener('click', function(){ localStorage.setItem('cookieAccepted','1'); banner.style.display='none'; });
-    if(dismissBtn) dismissBtn.addEventListener('click', function(){ localStorage.setItem('cookieDismissed','1'); banner.style.display='none'; });
-  })();
+  });
+})();
+document.querySelectorAll('a[href^="/#"]').forEach(function(a){
+  a.addEventListener('click', function(e){
+    var href = a.getAttribute('href');
+    var targetId = href.replace('/#', '');
+    var target = document.getElementById(targetId);
+    if(target){ e.preventDefault(); target.scrollIntoView({behavior:'smooth', block:'start'}); }
+  });
 });
+(function(){
+  var reveals = document.querySelectorAll('.reveal');
+  if(!reveals.length || !('IntersectionObserver' in window)) { reveals.forEach(function(el){ el.classList.add('visible'); }); return; }
+  var observer = new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){
+      if(entry.isIntersecting){ entry.target.classList.add('visible'); observer.unobserve(entry.target); }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+  reveals.forEach(function(el){ observer.observe(el); });
+})();
+(function(){
+  var counters = document.querySelectorAll('.stat-number[data-target]');
+  var animated = false;
+  function animateCounters(){
+    if(animated) return; animated = true;
+    counters.forEach(function(el){
+      var target = parseInt(el.getAttribute('data-target'));
+      var suffix = el.getAttribute('data-suffix') || '+';
+      var duration = 2000, startTime = null;
+      function step(ts){
+        if(!startTime) startTime = ts;
+        var progress = Math.min((ts - startTime) / duration, 1);
+        var eased = 1 - Math.pow(1 - progress, 3);
+        el.textContent = Math.floor(eased * target) + (progress >= 1 ? suffix : '');
+        if(progress < 1) requestAnimationFrame(step);
+        else el.textContent = target + suffix;
+      }
+      requestAnimationFrame(step);
+    });
+  }
+  if(counters.length > 0 && 'IntersectionObserver' in window){
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if(e.isIntersecting){ animateCounters(); obs.disconnect(); } });
+    }, {threshold: 0.3});
+    obs.observe(document.getElementById('counters'));
+  }
+})();
+(function(){
+  var btn = document.getElementById('backToTop');
+  if(!btn) return;
+  window.addEventListener('scroll', function(){
+    if(window.scrollY > 600) btn.classList.add('visible');
+    else btn.classList.remove('visible');
+  });
+})();
+(function(){
+  var banner = document.getElementById('cookieBanner');
+  if(!banner) return;
+  if(localStorage.getItem('cookieAccepted') || localStorage.getItem('cookieDismissed')){ banner.style.display = 'none'; return; }
+  window.acceptCookies = function(){ localStorage.setItem('cookieAccepted','1'); banner.style.display='none'; };
+  window.dismissCookies = function(){ localStorage.setItem('cookieDismissed','1'); banner.style.display='none'; };
+})();
+function toggleFaq(item){
+  var wasOpen = item.classList.contains('open');
+  document.querySelectorAll('.faq-item.open').forEach(function(el){ el.classList.remove('open'); });
+  if(!wasOpen) item.classList.add('open');
+}
 </script>
-</body></html>`;
+</body>
+</html>`;
     res.send(html);
   });
 
