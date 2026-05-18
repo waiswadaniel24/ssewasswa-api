@@ -598,12 +598,12 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const rType = reaction_type || 'like';
     const existing = (await pool.query('SELECT * FROM community_hub_reactions WHERE tenant_id=$1 AND post_id=$2 AND user_email=$3 AND reaction_type=$4', [t, postId, esc(req.session.user.email), rType])).rows[0];
     if (existing) {
-      await pool.query('DELETE FROM community_hub_reactions WHERE id=$1', [existing.id]);
-      await pool.query('UPDATE community_hub_posts SET likes_count = GREATEST(likes_count - 1, 0) WHERE id=$1', [postId]);
+      await pool.query('DELETE FROM community_hub_reactions WHERE id=$1 AND tenant_id=$2', [existing.id, t]);
+      await pool.query('UPDATE community_hub_posts SET likes_count = GREATEST(likes_count - 1, 0) WHERE id=$1 AND tenant_id=$2', [postId, t]);
       res.json({ action: 'removed', reaction_type: rType });
     } else {
       await pool.query('INSERT INTO community_hub_reactions (tenant_id, post_id, user_email, reaction_type) VALUES ($1,$2,$3,$4)', [t, postId, esc(req.session.user.email), rType]);
-      await pool.query('UPDATE community_hub_posts SET likes_count = likes_count + 1 WHERE id=$1', [postId]);
+      await pool.query('UPDATE community_hub_posts SET likes_count = likes_count + 1 WHERE id=$1 AND tenant_id=$2', [postId, t]);
       res.json({ action: 'added', reaction_type: rType });
     }
   }));
@@ -1344,7 +1344,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const rType = reaction_type || 'like';
     const existing = (await pool.query('SELECT * FROM impact_story_reactions WHERE tenant_id=$1 AND story_id=$2 AND user_email=$3 AND reaction_type=$4', [t, storyId, esc(req.session.user.email), rType])).rows[0];
     if (existing) {
-      await pool.query('DELETE FROM impact_story_reactions WHERE id=$1', [existing.id]);
+      await pool.query('DELETE FROM impact_story_reactions WHERE id=$1 AND tenant_id=$2', [existing.id, t]);
       res.json({ action: 'removed', reaction_type: rType });
     } else {
       await pool.query('INSERT INTO impact_story_reactions (tenant_id, story_id, user_email, reaction_type) VALUES ($1,$2,$3,$4)', [t, storyId, esc(req.session.user.email), rType]);
@@ -1565,7 +1565,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const memberCount = parseInt(members.cnt) || 1;
 
     if (yesCount > memberCount / 2) {
-      await pool.query("UPDATE giving_circle_nominations SET status='approved' WHERE id=$1", [nominationId]);
+      await pool.query("UPDATE giving_circle_nominations SET status='approved' WHERE id=$1 AND tenant_id=$2", [nominationId, t]);
       // Auto-add as member
       const alreadyMember = (await pool.query('SELECT * FROM giving_circle_members WHERE tenant_id=$1 AND circle_id=$2 AND member_email=$3', [t, nomination.circle_id, nomination.nominee_email])).rows[0];
       if (!alreadyMember) {
@@ -1573,7 +1573,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         await pool.query('UPDATE giving_circles SET total_members = total_members + 1 WHERE id=$1 AND tenant_id=$2', [nomination.circle_id, t]);
       }
     } else if (noCount > memberCount / 2) {
-      await pool.query("UPDATE giving_circle_nominations SET status='rejected' WHERE id=$1", [nominationId]);
+      await pool.query("UPDATE giving_circle_nominations SET status='rejected' WHERE id=$1 AND tenant_id=$2", [nominationId, t]);
     }
 
     await audit(req.session.user.email, 'giving_circle_vote', 'Voted ' + vote + ' on nomination #' + nominationId);

@@ -543,15 +543,15 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const config = (await pool.query('SELECT * FROM integration_configs WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
     if (!config) return res.status(404).json({ error: 'Integration not found' });
     // Update config sync status
-    await pool.query('UPDATE integration_configs SET sync_status=$1 WHERE id=$2', ['syncing', config.id]);
+    await pool.query('UPDATE integration_configs SET sync_status=$1 WHERE id=$2 AND tenant_id=$3', ['syncing', config.id, t]);
     // Create sync log
     const log = await pool.query(
       'INSERT INTO integration_sync_log (tenant_id, config_id, sync_type, status) VALUES ($1,$2,$3,$4) RETURNING *',
       [t, config.id, esc(sync_type || 'full'), 'running']
     );
     // Simulate sync completion
-    await pool.query('UPDATE integration_configs SET sync_status=$1, last_sync_at=NOW() WHERE id=$2', ['success', config.id]);
-    await pool.query('UPDATE integration_sync_log SET status=$1, records_processed=$2, completed_at=NOW() WHERE id=$3', ['completed', 0, log.rows[0].id]);
+    await pool.query('UPDATE integration_configs SET sync_status=$1, last_sync_at=NOW() WHERE id=$2 AND tenant_id=$3', ['success', config.id, t]);
+    await pool.query('UPDATE integration_sync_log SET status=$1, records_processed=$2, completed_at=NOW() WHERE id=$3 AND tenant_id=$4', ['completed', 0, log.rows[0].id, t]);
     await audit(req.session.user.email, 'integration_sync_triggered', 'Triggered sync for integration #' + req.params.id);
     res.json({ success: true, log: log.rows[0] });
   }));
@@ -628,9 +628,9 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [t, config.id, 'donor', 0, 'sync', 'pending']
     );
     // Update last_sync
-    await pool.query('UPDATE crm_sync_configs SET last_sync=NOW() WHERE id=$1', [config.id]);
+    await pool.query('UPDATE crm_sync_configs SET last_sync=NOW() WHERE id=$1 AND tenant_id=$2', [config.id, t]);
     // Process the queue item
-    await pool.query('UPDATE crm_sync_queue SET status=$1, attempts=attempts+1 WHERE id=$2', ['completed', queueResult.rows[0].id]);
+    await pool.query('UPDATE crm_sync_queue SET status=$1, attempts=attempts+1 WHERE id=$2 AND tenant_id=$3', ['completed', queueResult.rows[0].id, t]);
     await audit(req.session.user.email, 'crm_sync_triggered', 'Triggered CRM sync for config #' + req.params.id);
     res.json({ success: true, queue_item: queueResult.rows[0] });
   }));
@@ -703,7 +703,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     // Count donors to sync
     const donorCount = (await pool.query('SELECT COUNT(*) as cnt FROM donors WHERE tenant_id=$1', [t])).rows[0].cnt;
     // Update last_sync
-    await pool.query('UPDATE email_marketing_configs SET last_sync=NOW() WHERE id=$1', [config.id]);
+    await pool.query('UPDATE email_marketing_configs SET last_sync=NOW() WHERE id=$1 AND tenant_id=$2', [config.id, t]);
     await audit(req.session.user.email, 'email_marketing_sync', 'Synced ' + donorCount + ' donors to ' + config.provider);
     res.json({ success: true, donors_synced: parseInt(donorCount), provider: config.provider });
   }));
@@ -758,8 +758,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [t, config.id, esc(record_type || 'donation'), local_id ? parseInt(local_id) : null, 'pending']
     );
     // Simulate push completion
-    await pool.query('UPDATE accounting_sync_records SET status=$1, external_id=$2 WHERE id=$3', ['synced', 'EXT-' + Date.now(), syncRecord.rows[0].id]);
-    await pool.query('UPDATE accounting_sync_configs SET last_sync=NOW() WHERE id=$1', [config.id]);
+    await pool.query('UPDATE accounting_sync_records SET status=$1, external_id=$2 WHERE id=$3 AND tenant_id=$4', ['synced', 'EXT-' + Date.now(), syncRecord.rows[0].id, t]);
+    await pool.query('UPDATE accounting_sync_configs SET last_sync=NOW() WHERE id=$1 AND tenant_id=$2', [config.id, t]);
     await audit(req.session.user.email, 'accounting_push', 'Pushed ' + (record_type || 'donation') + ' to ' + config.software_type);
     res.json({ success: true, record: syncRecord.rows[0] });
   }));
@@ -770,7 +770,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const config = (await pool.query('SELECT * FROM accounting_sync_configs WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
     if (!config) return res.status(404).json({ error: 'Accounting sync config not found' });
     if (!config.is_active) return res.status(400).json({ error: 'Config is not active' });
-    await pool.query('UPDATE accounting_sync_configs SET last_sync=NOW() WHERE id=$1', [config.id]);
+    await pool.query('UPDATE accounting_sync_configs SET last_sync=NOW() WHERE id=$1 AND tenant_id=$2', [config.id, t]);
     await audit(req.session.user.email, 'accounting_pull', 'Pulled data from ' + config.software_type);
     res.json({ success: true, message: 'Data pull initiated from ' + config.software_type });
   }));
@@ -870,8 +870,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO webhook_deliveries (tenant_id, endpoint_id, event, payload_json, response_code, duration_ms, success) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
       [t, endpoint.id, 'test', JSON.stringify(testPayload), responseCode, duration, success]
     );
-    await pool.query('UPDATE webhook_endpoints_pro SET last_delivery_at=NOW() WHERE id=$1', [endpoint.id]);
-    if (!success) await pool.query('UPDATE webhook_endpoints_pro SET failure_count=failure_count+1 WHERE id=$1', [endpoint.id]);
+    await pool.query('UPDATE webhook_endpoints_pro SET last_delivery_at=NOW() WHERE id=$1 AND tenant_id=$2', [endpoint.id, t]);
+    if (!success) await pool.query('UPDATE webhook_endpoints_pro SET failure_count=failure_count+1 WHERE id=$1 AND tenant_id=$2', [endpoint.id, t]);
     res.json({ success, response_code: responseCode, duration_ms: duration, delivery: delivery.rows[0] });
   }));
 
@@ -1033,14 +1033,14 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!job) return res.status(404).json({ error: 'Import job not found' });
     if (job.status === 'processing') return res.status(400).json({ error: 'Import already in progress' });
     // Update status to processing
-    await pool.query('UPDATE data_import_jobs SET status=$1, started_at=NOW() WHERE id=$2', ['processing', job.id]);
+    await pool.query('UPDATE data_import_jobs SET status=$1, started_at=NOW() WHERE id=$2 AND tenant_id=$3', ['processing', job.id, t]);
     // Simulate processing completion
     const processedRows = job.total_rows || 0;
     const errorCount = 0;
-    await pool.query('UPDATE data_import_jobs SET status=$1, processed_rows=$2, errors_count=$3, completed_at=NOW() WHERE id=$4',
-      ['completed', processedRows, errorCount, job.id]);
+    await pool.query('UPDATE data_import_jobs SET status=$1, processed_rows=$2, errors_count=$3, completed_at=NOW() WHERE id=$4 AND tenant_id=$5',
+      ['completed', processedRows, errorCount, job.id, t]);
     await audit(req.session.user.email, 'import_job_executed', 'Executed import job #' + req.params.id + ' (' + processedRows + ' rows)');
-    const updated = (await pool.query('SELECT * FROM data_import_jobs WHERE id=$1', [job.id])).rows[0];
+    const updated = (await pool.query('SELECT * FROM data_import_jobs WHERE id=$1 AND tenant_id=$2', [job.id, t])).rows[0];
     res.json(updated);
   }));
 
@@ -1065,10 +1065,10 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     );
     // Simulate export completion
     const fileUrl = '/downloads/export_' + result.rows[0].id + '.' + (format || 'csv');
-    await pool.query('UPDATE data_export_jobs SET status=$1, file_url=$2, started_at=NOW(), completed_at=NOW() WHERE id=$3',
-      ['completed', fileUrl, result.rows[0].id]);
+    await pool.query('UPDATE data_export_jobs SET status=$1, file_url=$2, started_at=NOW(), completed_at=NOW() WHERE id=$3 AND tenant_id=$4',
+      ['completed', fileUrl, result.rows[0].id, t]);
     await audit(req.session.user.email, 'export_job_created', 'Created export job for ' + esc(export_type));
-    const updated = (await pool.query('SELECT * FROM data_export_jobs WHERE id=$1', [result.rows[0].id])).rows[0];
+    const updated = (await pool.query('SELECT * FROM data_export_jobs WHERE id=$1 AND tenant_id=$2', [result.rows[0].id, t])).rows[0];
     res.json(updated);
   }));
 
@@ -1200,8 +1200,8 @@ ${config.custom_css || ''}
     )).rows[0];
     if (existing) {
       const result = await pool.query(
-        'UPDATE translations SET translated_text=$1 WHERE id=$2 RETURNING *',
-        [esc(translated_text), existing.id]
+        'UPDATE translations SET translated_text=$1 WHERE id=$2 AND tenant_id=$3 RETURNING *',
+        [esc(translated_text), existing.id, t]
       );
       return res.json(result.rows[0]);
     }
@@ -1272,9 +1272,9 @@ ${config.custom_css || ''}
     if (!domain) return res.status(404).json({ error: 'Custom domain not found' });
     // Simulate DNS verification
     const dnsVerified = true; // In production, would actually check DNS records
-    await pool.query('UPDATE custom_domains SET dns_verified=$1 WHERE id=$2', [dnsVerified, domain.id]);
+    await pool.query('UPDATE custom_domains SET dns_verified=$1 WHERE id=$2 AND tenant_id=$3', [dnsVerified, domain.id, t]);
     if (dnsVerified) {
-      await pool.query('UPDATE custom_domains SET is_active=true WHERE id=$1', [domain.id]);
+      await pool.query('UPDATE custom_domains SET is_active=true WHERE id=$1 AND tenant_id=$2', [domain.id, t]);
     }
     await audit(req.session.user.email, 'dns_verification', 'DNS verification for ' + domain.domain + ': ' + (dnsVerified ? 'success' : 'failed'));
     res.json({ success: true, dns_verified: dnsVerified, domain: domain.domain });
@@ -1288,7 +1288,7 @@ ${config.custom_css || ''}
     if (!domain.dns_verified) return res.status(400).json({ error: 'DNS must be verified before SSL can be enabled' });
     // Simulate SSL verification
     const sslActive = true;
-    await pool.query('UPDATE custom_domains SET ssl_status=$1 WHERE id=$2', [sslActive ? 'active' : 'error', domain.id]);
+    await pool.query('UPDATE custom_domains SET ssl_status=$1 WHERE id=$2 AND tenant_id=$3', [sslActive ? 'active' : 'error', domain.id, t]);
     await audit(req.session.user.email, 'ssl_verification', 'SSL verification for ' + domain.domain + ': ' + (sslActive ? 'active' : 'failed'));
     res.json({ success: true, ssl_status: sslActive ? 'active' : 'error', domain: domain.domain });
   }));
@@ -1384,8 +1384,8 @@ ${config.custom_css || ''}
     }
     if (existing) {
       await pool.query(
-        'UPDATE donor_2fa_configs SET method=$1, secret_encrypted=$2, backup_codes_json=$3, is_enabled=false WHERE id=$4',
-        [selectedMethod, esc(secret), JSON.stringify(backupCodes), existing.id]
+        'UPDATE donor_2fa_configs SET method=$1, secret_encrypted=$2, backup_codes_json=$3, is_enabled=false WHERE id=$4 AND tenant_id=$5',
+        [selectedMethod, esc(secret), JSON.stringify(backupCodes), existing.id, t]
       );
     } else {
       await pool.query(
@@ -1417,12 +1417,12 @@ ${config.custom_css || ''}
     if (isValid) {
       // Enable 2FA if not already enabled
       if (!config.is_enabled) {
-        await pool.query('UPDATE donor_2fa_configs SET is_enabled=true WHERE id=$1', [config.id]);
+        await pool.query('UPDATE donor_2fa_configs SET is_enabled=true WHERE id=$1 AND tenant_id=$2', [config.id, t]);
       }
       // Remove used backup code
       if (isBackupCode) {
         const updatedCodes = backupCodes.filter(c => c !== code);
-        await pool.query('UPDATE donor_2fa_configs SET backup_codes_json=$1 WHERE id=$2', [JSON.stringify(updatedCodes), config.id]);
+        await pool.query('UPDATE donor_2fa_configs SET backup_codes_json=$1 WHERE id=$2 AND tenant_id=$3', [JSON.stringify(updatedCodes), config.id, t]);
       }
       await audit(req.session.user.email, 'donor_2fa_verified', '2FA verified for ' + esc(donor_email));
       res.json({ success: true, is_enabled: true });
@@ -1448,7 +1448,7 @@ ${config.custom_css || ''}
       [t, esc(donor_email), code ? esc(code) : '', isValid, req.ip || null]
     );
     if (!isValid) return res.status(400).json({ error: 'Valid verification code required to disable 2FA' });
-    await pool.query('UPDATE donor_2fa_configs SET is_enabled=false WHERE id=$1', [config.id]);
+    await pool.query('UPDATE donor_2fa_configs SET is_enabled=false WHERE id=$1 AND tenant_id=$2', [config.id, t]);
     await audit(req.session.user.email, 'donor_2fa_disabled', '2FA disabled for ' + esc(donor_email));
     // Notify donor
     notify(t, donor_email, '2FA Disabled', 'Two-factor authentication has been disabled on your account', 'security');
@@ -1488,7 +1488,7 @@ ${config.custom_css || ''}
         [t, esc(donor_email), esc(consent_type)]
       )).rows[0];
       if (existing) {
-        await pool.query('UPDATE privacy_consent_records SET withdrawn_at=NOW() WHERE id=$1', [existing.id]);
+        await pool.query('UPDATE privacy_consent_records SET withdrawn_at=NOW() WHERE id=$1 AND tenant_id=$2', [existing.id, t]);
         await audit(req.session.user.email, 'consent_withdrawn', 'Consent withdrawn for ' + esc(donor_email) + ' (' + consent_type + ')');
         return res.json({ success: true, action: 'withdrawn', record_id: existing.id });
       }
@@ -1649,7 +1649,7 @@ ${config.custom_css || ''}
         [t, policy.id, processedCount, deletedCount, archivedCount]
       );
       // Update last_cleanup_at
-      await pool.query('UPDATE data_retention_policies SET last_cleanup_at=NOW() WHERE id=$1', [policy.id]);
+      await pool.query('UPDATE data_retention_policies SET last_cleanup_at=NOW() WHERE id=$1 AND tenant_id=$2', [policy.id, t]);
       results.push({
         policy_id: policy.id,
         data_category: policy.data_category,
@@ -1700,8 +1700,8 @@ ${config.custom_css || ''}
     let result;
     if (existing) {
       result = await pool.query(
-        'UPDATE platform_plugins SET is_installed=true, version=$1 WHERE id=$2 RETURNING *',
-        [plugin.version, existing.id]
+        'UPDATE platform_plugins SET is_installed=true, version=$1 WHERE id=$2 AND tenant_id=$3 RETURNING *',
+        [plugin.version, existing.id, t]
       );
     } else {
       result = await pool.query(

@@ -860,7 +860,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [t, surveyId, esc(respondent_email), JSON.stringify(responses_json)]
     );
     // Increment responses_count
-    await pool.query('UPDATE donor_surveys SET responses_count = responses_count + 1 WHERE id=$1', [surveyId]);
+    await pool.query('UPDATE donor_surveys SET responses_count = responses_count + 1 WHERE id=$1 AND tenant_id=$2', [surveyId, t]);
     res.json({ response: result.rows[0] });
   }));
 

@@ -677,7 +677,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       totalActual += parseFloat(item.actual);
       // Mark matched items
       const matched = parseFloat(item.expected) === parseFloat(item.actual);
-      await pool.query('UPDATE reconciliation_items SET is_matched=$1 WHERE id=$2', [matched, item.id]);
+      await pool.query('UPDATE reconciliation_items SET is_matched=$1 WHERE id=$2 AND tenant_id=$3', [matched, item.id, t]);
     }
 
     const discrepancy = totalExpected - totalActual;
@@ -842,7 +842,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     } else if (transaction_type === 'adjustment') {
       newCurrentValue = amt; // adjustment sets the value directly
     }
-    await pool.query('UPDATE endowments SET current_value=$1 WHERE id=$2', [newCurrentValue, req.params.id]);
+    await pool.query('UPDATE endowments SET current_value=$1 WHERE id=$2 AND tenant_id=$3', [newCurrentValue, req.params.id, t]);
     await audit(req.session.user.email, 'endowment_transaction_added', 'Added ' + transaction_type + ' to endowment #' + req.params.id);
     res.json(result.rows[0]);
   }));
@@ -905,7 +905,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO currency_transactions (tenant_id, wallet_id, type, amount, exchange_rate, reference) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [t, parseInt(req.params.id), type, amt, parseFloat(exchange_rate) || 1.0, reference ? esc(reference) : null]
     );
-    await pool.query('UPDATE currency_wallets SET balance=$1 WHERE id=$2', [newBalance, req.params.id]);
+    await pool.query('UPDATE currency_wallets SET balance=$1 WHERE id=$2 AND tenant_id=$3', [newBalance, req.params.id, t]);
     await audit(req.session.user.email, 'currency_transaction', type + ' ' + amt + ' ' + wallet.currency);
     res.json(result.rows[0]);
   }));
@@ -928,14 +928,14 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const convertedAmount = amt * rate;
 
     // Debit source
-    await pool.query('UPDATE currency_wallets SET balance=balance-$1 WHERE id=$2', [amt, from_wallet_id]);
+    await pool.query('UPDATE currency_wallets SET balance=balance-$1 WHERE id=$2 AND tenant_id=$3', [amt, from_wallet_id, t]);
     await pool.query(
       'INSERT INTO currency_transactions (tenant_id, wallet_id, type, amount, exchange_rate, reference) VALUES ($1,$2,$3,$4,$5,$6)',
       [t, from_wallet_id, 'transfer_out', amt, rate, reference ? esc(reference) : 'Transfer to ' + toWallet.currency]
     );
 
     // Credit destination
-    await pool.query('UPDATE currency_wallets SET balance=balance+$1 WHERE id=$2', [convertedAmount, to_wallet_id]);
+    await pool.query('UPDATE currency_wallets SET balance=balance+$1 WHERE id=$2 AND tenant_id=$3', [convertedAmount, to_wallet_id, t]);
     await pool.query(
       'INSERT INTO currency_transactions (tenant_id, wallet_id, type, amount, exchange_rate, reference) VALUES ($1,$2,$3,$4,$5,$6)',
       [t, to_wallet_id, 'transfer_in', convertedAmount, rate, reference ? esc(reference) : 'Transfer from ' + fromWallet.currency]
@@ -985,8 +985,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         [batch.id, t]
       );
       await pool.query(
-        'UPDATE receipt_batches SET total_receipts=$1, total_amount=$2 WHERE id=$3',
-        [parseInt(totals.rows[0].cnt), parseFloat(totals.rows[0].total), batch.id]
+        'UPDATE receipt_batches SET total_receipts=$1, total_amount=$2 WHERE id=$3 AND tenant_id=$4',
+        [parseInt(totals.rows[0].cnt), parseFloat(totals.rows[0].total), batch.id, t]
       );
     }
 
@@ -1006,7 +1006,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     for (const item of items.rows) {
       if (!item.receipt_number || item.receipt_number === '') {
         const newNum = 'RCT-' + batch.id + '-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-        await pool.query('UPDATE receipt_batch_items SET receipt_number=$1 WHERE id=$2', [newNum, item.id]);
+        await pool.query('UPDATE receipt_batch_items SET receipt_number=$1 WHERE id=$2 AND tenant_id=$3', [newNum, item.id, t]);
       }
     }
 
@@ -1066,8 +1066,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
           [t, split.id, esc(item.fund_category), parseFloat(item.amount), item.percentage !== undefined ? parseFloat(item.percentage) : 0]
         );
       }
-      const count = (await pool.query('SELECT COUNT(*) as cnt FROM donation_split_items WHERE split_id=$1', [split.id])).rows[0].cnt;
-      await pool.query('UPDATE donation_splits SET split_count=$1 WHERE id=$2', [parseInt(count), split.id]);
+      const count = (await pool.query('SELECT COUNT(*) as cnt FROM donation_split_items WHERE split_id=$1 AND tenant_id=$2', [split.id, t])).rows[0].cnt;
+      await pool.query('UPDATE donation_splits SET split_count=$1 WHERE id=$2 AND tenant_id=$3', [parseInt(count), split.id, t]);
     }
 
     await audit(req.session.user.email, 'donation_split_created', 'Created split for donation #' + donation_id);
@@ -1382,10 +1382,10 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       const now = new Date();
       const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
       if (expDate <= thirtyDaysFromNow) {
-        await pool.query("UPDATE compliance_docs SET status='expiring_soon' WHERE id=$1", [result.rows[0].id]);
+        await pool.query("UPDATE compliance_docs SET status='expiring_soon' WHERE id=$1 AND tenant_id=$2", [result.rows[0].id, t]);
       }
       if (expDate <= now) {
-        await pool.query("UPDATE compliance_docs SET status='expired' WHERE id=$1", [result.rows[0].id]);
+        await pool.query("UPDATE compliance_docs SET status='expired' WHERE id=$1 AND tenant_id=$2", [result.rows[0].id, t]);
       }
     }
 
@@ -1579,8 +1579,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       if (existing) {
         const endBal = parseFloat(existing.beginning_balance) + total - parseFloat(existing.deductions);
         const r = await pool.query(
-          'UPDATE fund_balances SET additions=$1, ending_balance=$2, calculated_at=NOW() WHERE id=$3 RETURNING *',
-          [total, endBal, existing.id]
+          'UPDATE fund_balances SET additions=$1, ending_balance=$2, calculated_at=NOW() WHERE id=$3 AND tenant_id=$4 RETURNING *',
+          [total, endBal, existing.id, t]
         );
         recalculated.push(r.rows[0]);
       } else {
@@ -1618,8 +1618,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
       if (existing) {
         const r = await pool.query(
-          'UPDATE fund_balances SET beginning_balance=$1, additions=$2, deductions=$3, ending_balance=$4, calculated_at=NOW() WHERE id=$5 RETURNING *',
-          [begBal, additions, deductions, endBal, existing.id]
+          'UPDATE fund_balances SET beginning_balance=$1, additions=$2, deductions=$3, ending_balance=$4, calculated_at=NOW() WHERE id=$5 AND tenant_id=$6 RETURNING *',
+          [begBal, additions, deductions, endBal, existing.id, t]
         );
         recalculated.push(r.rows[0]);
       } else {
@@ -1641,8 +1641,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       const currentBal = parseFloat(wallet.balance);
       if (existing) {
         const r = await pool.query(
-          'UPDATE fund_balances SET ending_balance=$1, calculated_at=NOW() WHERE id=$2 RETURNING *',
-          [currentBal, existing.id]
+          'UPDATE fund_balances SET ending_balance=$1, calculated_at=NOW() WHERE id=$2 AND tenant_id=$3 RETURNING *',
+          [currentBal, existing.id, t]
         );
         recalculated.push(r.rows[0]);
       } else {

@@ -1082,7 +1082,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [t, formId, donor_email ? esc(donor_email) : null, responses ? JSON.stringify(responses) : '{}', parseInt(amount) || 0]
     );
     // Increment submissions count
-    await pool.query('UPDATE donation_forms SET submissions_count = submissions_count + 1 WHERE id=$1', [formId]);
+    await pool.query('UPDATE donation_forms SET submissions_count = submissions_count + 1 WHERE id=$1 AND tenant_id=$2', [formId, t]);
     res.json({ submission: result.rows[0] });
   }));
 
@@ -1519,7 +1519,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       let nextDate = null;
       if (freq === 'once') {
         // Mark as completed
-        await pool.query('UPDATE scheduled_donations SET status=$1 WHERE id=$2', ['completed', d.id]);
+        await pool.query('UPDATE scheduled_donations SET status=$1 WHERE id=$2 AND tenant_id=$3', ['completed', d.id, t]);
       } else {
         const current = new Date(d.next_date || d.scheduled_date);
         switch (freq) {
@@ -1530,7 +1530,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
           case 'yearly': current.setFullYear(current.getFullYear() + 1); break;
         }
         nextDate = current.toISOString().split('T')[0];
-        await pool.query('UPDATE scheduled_donations SET next_date=$1 WHERE id=$2', [nextDate, d.id]);
+        await pool.query('UPDATE scheduled_donations SET next_date=$1 WHERE id=$2 AND tenant_id=$3', [nextDate, d.id, t]);
       }
 
       // Notify donor
@@ -1963,16 +1963,16 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
     // Also update the legacy tracking on campaign_ab_tests
     if (event_type === 'impression') {
-      await pool.query('UPDATE campaign_ab_tests SET views = views + 1 WHERE id=$1', [parseInt(test_id)]);
+      await pool.query('UPDATE campaign_ab_tests SET views = views + 1 WHERE id=$1 AND tenant_id=$2', [parseInt(test_id), t]);
     } else if (event_type === 'donation') {
       const amount = metadata ? (parseInt(metadata.amount) || 0) : 0;
-      await pool.query('UPDATE campaign_ab_tests SET donations = donations + 1, total_raised = total_raised + $1 WHERE id=$2', [amount, parseInt(test_id)]);
+      await pool.query('UPDATE campaign_ab_tests SET donations = donations + 1, total_raised = total_raised + $1 WHERE id=$2 AND tenant_id=$3', [amount, parseInt(test_id), t]);
     }
 
     // Recalculate conversion rate
     await pool.query(
-      'UPDATE campaign_ab_tests SET conversion_rate = CASE WHEN views > 0 THEN (donations::NUMERIC / views::NUMERIC) * 100 ELSE 0 END WHERE id=$1',
-      [parseInt(test_id)]
+      'UPDATE campaign_ab_tests SET conversion_rate = CASE WHEN views > 0 THEN (donations::NUMERIC / views::NUMERIC) * 100 ELSE 0 END WHERE id=$1 AND tenant_id=$2',
+      [parseInt(test_id), t]
     );
 
     res.json({ success: true, event_type, test_id: parseInt(test_id) });

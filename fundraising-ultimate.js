@@ -812,8 +812,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     let result;
     if (existing) {
       result = await pool.query(
-        'UPDATE campaign_grades SET grade=$1, score=$2, metrics_json=$3, graded_at=NOW() WHERE id=$4 RETURNING *',
-        [grade, totalScore, JSON.stringify(metricsJson), existing.id]
+        'UPDATE campaign_grades SET grade=$1, score=$2, metrics_json=$3, graded_at=NOW() WHERE id=$4 AND tenant_id=$5 RETURNING *',
+        [grade, totalScore, JSON.stringify(metricsJson), existing.id, t]
       );
     } else {
       result = await pool.query(
@@ -951,8 +951,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
     // Update pool totals
     await pool.query(
-      'UPDATE harambee_pools SET total_contributed=total_contributed+$1, contributor_count=contributor_count+1 WHERE id=$2',
-      [parseInt(amount), req.params.id]
+      'UPDATE harambee_pools SET total_contributed=total_contributed+$1, contributor_count=contributor_count+1 WHERE id=$2 AND tenant_id=$3',
+      [parseInt(amount), req.params.id, t]
     );
 
     await audit(contributor_name, 'harambee_contribution', 'Contributed UGX ' + amount + ' to harambee pool #' + req.params.id);
@@ -977,8 +977,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
     // Deduct from pool balance
     await pool.query(
-      'UPDATE harambee_pools SET total_contributed=GREATEST(0, total_contributed-$1) WHERE id=$2',
-      [parseInt(amount), req.params.id]
+      'UPDATE harambee_pools SET total_contributed=GREATEST(0, total_contributed-$1) WHERE id=$2 AND tenant_id=$3',
+      [parseInt(amount), req.params.id, t]
     );
 
     await audit(req.session.user.email, 'harambee_distribution', 'Distributed UGX ' + amount + ' from harambee pool #' + req.params.id + ' to ' + esc(recipient_name));
@@ -1089,7 +1089,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!session || msgUpper === 'DONATE' || msgUpper === 'START' || msgUpper === 'HI' || msgUpper === 'HELLO') {
       // Start new session
       if (session) {
-        await pool.query("UPDATE whatsapp_donate_sessions SET status='expired' WHERE id=$1", [session.id]);
+        await pool.query("UPDATE whatsapp_donate_sessions SET status='expired' WHERE id=$1 AND tenant_id=$2", [session.id, t]);
       }
 
       // Get active campaigns
@@ -1123,8 +1123,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         reply = 'Invalid selection. Please reply with a campaign number (1-' + campaigns.length + ').';
       } else {
         await pool.query(
-          'UPDATE whatsapp_donate_sessions SET current_step=$1, campaign_id=$2, session_data_json=$3 WHERE id=$4',
-          ['enter_amount', selectedCampaign.id, JSON.stringify(sessionData), session.id]
+          'UPDATE whatsapp_donate_sessions SET current_step=$1, campaign_id=$2, session_data_json=$3 WHERE id=$4 AND tenant_id=$5',
+          ['enter_amount', selectedCampaign.id, JSON.stringify(sessionData), session.id, t]
         );
         reply = 'You selected: ' + esc(selectedCampaign.title) + '\n\nHow much would you like to donate? (Enter amount in UGX)';
       }
@@ -1134,8 +1134,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         reply = 'Please enter a valid amount in UGX (e.g., 50000).';
       } else {
         await pool.query(
-          'UPDATE whatsapp_donate_sessions SET current_step=$1, amount=$2 WHERE id=$3',
-          ['confirm', amount, session.id]
+          'UPDATE whatsapp_donate_sessions SET current_step=$1, amount=$2 WHERE id=$3 AND tenant_id=$4',
+          ['confirm', amount, session.id, t]
         );
         reply = 'You want to donate UGX ' + amount.toLocaleString() + '.\n\nReply YES to confirm or NO to cancel.';
       }
@@ -1153,10 +1153,10 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
             await awardLoyaltyPoints(t, phone_number + '@whatsapp', points, 'whatsapp_donation_UGX_' + session.amount);
           } catch(e) { console.warn('[WhatsApp Donate]', e.message); }
         }
-        await pool.query("UPDATE whatsapp_donate_sessions SET status='completed' WHERE id=$1", [session.id]);
+        await pool.query("UPDATE whatsapp_donate_sessions SET status='completed' WHERE id=$1 AND tenant_id=$2", [session.id, t]);
         reply = 'Thank you for your donation of UGX ' + (session.amount || 0).toLocaleString() + '! Your generosity makes a difference. 🙏\n\nReply DONATE to make another donation.';
       } else {
-        await pool.query("UPDATE whatsapp_donate_sessions SET status='cancelled' WHERE id=$1", [session.id]);
+        await pool.query("UPDATE whatsapp_donate_sessions SET status='cancelled' WHERE id=$1 AND tenant_id=$2", [session.id, t]);
         reply = 'Donation cancelled. Reply DONATE to start again anytime.';
       }
     } else {
@@ -1287,8 +1287,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
     // Update fund balance
     await pool.query(
-      'UPDATE funeral_funds SET total_balance=total_balance+$1 WHERE id=$2',
-      [parseInt(amount), req.params.id]
+      'UPDATE funeral_funds SET total_balance=total_balance+$1 WHERE id=$2 AND tenant_id=$3',
+      [parseInt(amount), req.params.id, t]
     );
 
     // Award loyalty points

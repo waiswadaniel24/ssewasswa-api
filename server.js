@@ -32910,234 +32910,93 @@ try {
 }
 
 // ============================================================
-// NEW MODULE: ATTENDANCE TRACKER (QR, Manual, Reports)
+// STAGGERED MODULE LOADING — batches of 5, 2s delay between batches
+// Prevents DB pool exhaustion on startup
 // ============================================================
+
+// Batch 1 — immediate
 try { const m = require('./attendance-tracker'); m(app, db, pool, renderPage, esc); console.log('[Attendance] Module loaded'); } catch(e) { console.warn('[Attendance] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: HELPDESK / TICKET SYSTEM
-// ============================================================
 try { const m = require('./helpdesk'); m(app, db, pool, renderPage, esc); console.log('[Helpdesk] Module loaded'); } catch(e) { console.warn('[Helpdesk] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: ONLINE EXAMS & QUIZZES
-// ============================================================
 try { const m = require('./online-exams'); m(app, db, pool, renderPage, esc); console.log('[Exams] Module loaded'); } catch(e) { console.warn('[Exams] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: EVENT MANAGEMENT & RSVP
-// ============================================================
 try { const m = require('./event-manager'); m(app, db, pool, renderPage, esc); console.log('[Events] Module loaded'); } catch(e) { console.warn('[Events] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: ADVANCED INVENTORY MANAGEMENT
-// ============================================================
 try { const m = require('./inventory-pro'); m(app, db, pool, renderPage, esc); console.log('[Inventory] Module loaded'); } catch(e) { console.warn('[Inventory] Error:', e.message); }
 
-// ============================================================
-// NEW MODULE: VISITOR MANAGEMENT
-// ============================================================
-try { const m = require('./visitor-log'); m(app, db, pool, renderPage, esc); console.log('[Visitors] Module loaded'); } catch(e) { console.warn('[Visitors] Error:', e.message); }
+// Batch 2 — 2s delay
+setTimeout(() => {
+  try { const m = require('./visitor-log'); m(app, db, pool, renderPage, esc); console.log('[Visitors] Module loaded'); } catch(e) { console.warn('[Visitors] Error:', e.message); }
+  try { const m = require('./library'); m(app, db, pool, renderPage, esc); console.log('[Library] Module loaded'); } catch(e) { console.warn('[Library] Error:', e.message); }
+  try { const m = require('./payroll'); m(app, db, pool, renderPage, esc); console.log('[Payroll] Module loaded'); } catch(e) { console.warn('[Payroll] Error:', e.message); }
+  try { const m = require('./alumni-network'); m(app, db, pool, renderPage, esc); console.log('[Alumni] Module loaded'); } catch(e) { console.warn('[Alumni] Error:', e.message); }
+  try { const m = require('./hostel-manager'); m(app, db, pool, renderPage, esc); console.log('[Hostel] Module loaded'); } catch(e) { console.warn('[Hostel] Error:', e.message); }
+}, 2000);
 
-// ============================================================
-// NEW MODULE: LIBRARY MANAGEMENT
-// ============================================================
-try { const m = require('./library'); m(app, db, pool, renderPage, esc); console.log('[Library] Module loaded'); } catch(e) { console.warn('[Library] Error:', e.message); }
+// Batch 3 — 4s delay
+setTimeout(() => {
+  try { const m = require('./transport'); m(app, db, pool, renderPage, esc); console.log('[Transport] Module loaded'); } catch(e) { console.warn('[Transport] Error:', e.message); }
+  try { const m = require('./canteen'); m(app, db, pool, renderPage, esc); console.log('[Canteen] Module loaded'); } catch(e) { console.warn('[Canteen] Error:', e.message); }
+  try { const m = require('./sports'); m(app, db, pool, renderPage, esc); console.log('[Sports] Module loaded'); } catch(e) { console.warn('[Sports] Error:', e.message); }
+  try { const m = require('./certificates'); m(app, db, pool, renderPage, esc); console.log('[Certificates] Module loaded'); } catch(e) { console.warn('[Certificates] Error:', e.message); }
+  try { const m = require('./feedback'); m(app, db, pool, renderPage, esc); console.log('[Feedback] Module loaded'); } catch(e) { console.warn('[Feedback] Error:', e.message); }
+}, 4000);
 
-// ============================================================
-// NEW MODULE: PAYROLL MANAGEMENT
-// ============================================================
-try { const m = require('./payroll'); m(app, db, pool, renderPage, esc); console.log('[Payroll] Module loaded'); } catch(e) { console.warn('[Payroll] Error:', e.message); }
+// Batch 4 — 6s delay
+setTimeout(() => {
+  try { const m = require('./asset-tracker'); m(app, db, pool, renderPage, esc); console.log('[Assets] Module loaded'); } catch(e) { console.warn('[Assets] Error:', e.message); }
+  try { const m = require('./crm'); m(app, db, pool, renderPage, esc); console.log('[CRM] Module loaded'); } catch(e) { console.warn('[CRM] Error:', e.message); }
+  try { const m = require('./blog-cms'); m(app, db, pool, renderPage, esc); console.log('[Blog] Module loaded'); } catch(e) { console.warn('[Blog] Error:', e.message); }
+  try { const m = require('./sms-blast'); m(app, db, pool, renderPage, esc); console.log('[SMS] Module loaded'); } catch(e) { console.warn('[SMS] Error:', e.message); }
+  try { const m = require('./ai-assistant'); m(app, db, pool, renderPage, esc); console.log('[AI] Module loaded'); } catch(e) { console.warn('[AI] Error:', e.message); }
+}, 6000);
 
-// ============================================================
-// NEW MODULE: ALUMNI NETWORK
-// ============================================================
-try { const m = require('./alumni-network'); m(app, db, pool, renderPage, esc); console.log('[Alumni] Module loaded'); } catch(e) { console.warn('[Alumni] Error:', e.message); }
+// Batch 5 — 8s delay
+setTimeout(() => {
+  try { const m = require('./student-id-cards'); m(app, db, pool, renderPage, esc); console.log('[IDCards] Student ID card generator loaded'); } catch(e) { console.warn('[IDCards] Error:', e.message); }
+  try { const m = require('./qr-payments'); m(app, db, pool, renderPage, esc); console.log('[QRPayments] QR code payment system loaded'); } catch(e) { console.warn('[QRPayments] Error:', e.message); }
+  try { const m = require('./fee-installments'); m(app, db, pool, renderPage, esc); console.log('[FeeInstallments] Fee installment plans loaded'); } catch(e) { console.warn('[FeeInstallments] Error:', e.message); }
+  try { const m = require('./whatsapp-receipts'); m(app, db, pool, renderPage, esc); console.log('[WhatsAppReceipts] WhatsApp receipt sharing loaded'); } catch(e) { console.warn('[WhatsAppReceipts] Error:', e.message); }
+  try { const m = require('./ussd-portal'); m(app, db, pool, renderPage, esc); console.log('[USSD] USSD portal loaded'); } catch(e) { console.warn('[USSD] Error:', e.message); }
+}, 8000);
 
-// ============================================================
-// NEW MODULE: HOSTEL / ACCOMMODATION MANAGEMENT
-// ============================================================
-try { const m = require('./hostel-manager'); m(app, db, pool, renderPage, esc); console.log('[Hostel] Module loaded'); } catch(e) { console.warn('[Hostel] Error:', e.message); }
+// Batch 6 — 10s delay
+setTimeout(() => {
+  try { const m = require('./email-campaigns'); m(app, db, pool, renderPage, esc); console.log('[EmailCampaigns] Email campaign builder loaded'); } catch(e) { console.warn('[EmailCampaigns] Error:', e.message); }
+  try { const m = require('./ptc-booking'); m(app, db, pool, renderPage, esc); console.log('[PTCBooking] Parent-teacher conference booking loaded'); } catch(e) { console.warn('[PTCBooking] Error:', e.message); }
+  try { const m = require('./inventory-reorder'); m(app, db, pool, renderPage, esc); console.log('[InventoryReorder] Inventory auto-reorder loaded'); } catch(e) { console.warn('[InventoryReorder] Error:', e.message); }
+  try { const m = require('./staff-appraisals'); m(app, db, pool, renderPage, esc); console.log('[StaffAppraisals] Staff appraisals loaded'); } catch(e) { console.warn('[StaffAppraisals] Error:', e.message); }
+  try { const m = require('./student-health'); m(app, db, pool, renderPage, esc); console.log('[StudentHealth] Student health records loaded'); } catch(e) { console.warn('[StudentHealth] Error:', e.message); }
+}, 10000);
 
-// ============================================================
-// NEW MODULE: TRANSPORT MANAGEMENT
-// ============================================================
-try { const m = require('./transport'); m(app, db, pool, renderPage, esc); console.log('[Transport] Module loaded'); } catch(e) { console.warn('[Transport] Error:', e.message); }
+// Batch 7 — 12s delay
+setTimeout(() => {
+  try { const m = require('./scholarship-manager'); m(app, db, pool, renderPage, esc); console.log('[Scholarships] Scholarship & bursary manager loaded'); } catch(e) { console.warn('[Scholarships] Error:', e.message); }
+  try { const m = require('./leave-manager'); m(app, db, pool, renderPage, esc); console.log('[LeaveManager] Leave management loaded'); } catch(e) { console.warn('[LeaveManager] Error:', e.message); }
+  try { const m = require('./discipline-tracker'); m(app, db, pool, renderPage, esc); console.log('[Discipline] Discipline & behavior tracker loaded'); } catch(e) { console.warn('[Discipline] Error:', e.message); }
+  try { const m = require('./budget-manager'); m(app, db, pool, renderPage, esc); console.log('[Budget] Department & budget manager loaded'); } catch(e) { console.warn('[Budget] Error:', e.message); }
+  try { const m = require('./volunteer-manager'); m(app, db, pool, renderPage, esc); console.log('[Volunteers] Volunteer manager loaded'); } catch(e) { console.warn('[Volunteers] Error:', e.message); }
+}, 12000);
 
-// ============================================================
-// NEW MODULE: CANTEEN / MEAL MANAGEMENT
-// ============================================================
-try { const m = require('./canteen'); m(app, db, pool, renderPage, esc); console.log('[Canteen] Module loaded'); } catch(e) { console.warn('[Canteen] Error:', e.message); }
+// Batch 8 — 14s delay
+setTimeout(() => {
+  try { const m = require('./dev-team-manager'); m(app, db, pool, renderPage, esc); console.log('[DevTeam] Dev team manager loaded'); } catch(e) { console.warn('[DevTeam] Error:', e.message); }
+  try { const m = require('./staff-access-control'); m(app, db, pool, renderPage, esc); console.log('[StaffAccess] Staff & access control loaded'); } catch(e) { console.warn('[StaffAccess] Error:', e.message); }
+  try { const m = require('./tithes-offerings'); m(app, db, pool, renderPage, esc); console.log('[Tithes] Tithes & offerings module loaded'); } catch(e) { console.warn('[Tithes] Error:', e.message); }
+  try { const m = require('./analytics-dashboard'); m(app, db, pool, renderPage, esc); console.log('[Analytics] Analytics dashboard module loaded'); } catch(e) { console.warn('[Analytics] Error:', e.message); }
+  try { const m = require('./student-portal'); m(app, db, pool, renderPage, esc); console.log('[StudentPortal] Student portal module loaded'); } catch(e) { console.warn('[StudentPortal] Error:', e.message); }
+}, 14000);
 
-// ============================================================
-// NEW MODULE: SPORTS LEAGUE MANAGEMENT
-// ============================================================
-try { const m = require('./sports'); m(app, db, pool, renderPage, esc); console.log('[Sports] Module loaded'); } catch(e) { console.warn('[Sports] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: CERTIFICATE GENERATOR
-// ============================================================
-try { const m = require('./certificates'); m(app, db, pool, renderPage, esc); console.log('[Certificates] Module loaded'); } catch(e) { console.warn('[Certificates] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: FEEDBACK & RATING SYSTEM
-// ============================================================
-try { const m = require('./feedback'); m(app, db, pool, renderPage, esc); console.log('[Feedback] Module loaded'); } catch(e) { console.warn('[Feedback] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: ASSET TRACKER
-// ============================================================
-try { const m = require('./asset-tracker'); m(app, db, pool, renderPage, esc); console.log('[Assets] Module loaded'); } catch(e) { console.warn('[Assets] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: CRM & CONTACT MANAGEMENT
-// ============================================================
-try { const m = require('./crm'); m(app, db, pool, renderPage, esc); console.log('[CRM] Module loaded'); } catch(e) { console.warn('[CRM] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: BLOG CMS
-// ============================================================
-try { const m = require('./blog-cms'); m(app, db, pool, renderPage, esc); console.log('[Blog] Module loaded'); } catch(e) { console.warn('[Blog] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: BULK SMS & COMMUNICATION
-// ============================================================
-try { const m = require('./sms-blast'); m(app, db, pool, renderPage, esc); console.log('[SMS] Module loaded'); } catch(e) { console.warn('[SMS] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: AI ASSISTANT
-// ============================================================
-try { const m = require('./ai-assistant'); m(app, db, pool, renderPage, esc); console.log('[AI] Module loaded'); } catch(e) { console.warn('[AI] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: STUDENT ID CARD GENERATOR
-// ============================================================
-try { const m = require('./student-id-cards'); m(app, db, pool, renderPage, esc); console.log('[IDCards] Student ID card generator loaded'); } catch(e) { console.warn('[IDCards] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: QR CODE PAYMENT SYSTEM
-// ============================================================
-try { const m = require('./qr-payments'); m(app, db, pool, renderPage, esc); console.log('[QRPayments] QR code payment system loaded'); } catch(e) { console.warn('[QRPayments] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: FEE INSTALLMENT PLANS
-// ============================================================
-try { const m = require('./fee-installments'); m(app, db, pool, renderPage, esc); console.log('[FeeInstallments] Fee installment plans loaded'); } catch(e) { console.warn('[FeeInstallments] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: WHATSAPP RECEIPT SHARING
-// ============================================================
-try { const m = require('./whatsapp-receipts'); m(app, db, pool, renderPage, esc); console.log('[WhatsAppReceipts] WhatsApp receipt sharing loaded'); } catch(e) { console.warn('[WhatsAppReceipts] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: USSD PORTAL (Feature Phone Access)
-// ============================================================
-try { const m = require('./ussd-portal'); m(app, db, pool, renderPage, esc); console.log('[USSD] USSD portal loaded'); } catch(e) { console.warn('[USSD] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: EMAIL CAMPAIGN BUILDER
-// ============================================================
-try { const m = require('./email-campaigns'); m(app, db, pool, renderPage, esc); console.log('[EmailCampaigns] Email campaign builder loaded'); } catch(e) { console.warn('[EmailCampaigns] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: PARENT-TEACHER CONFERENCE BOOKING
-// ============================================================
-try { const m = require('./ptc-booking'); m(app, db, pool, renderPage, esc); console.log('[PTCBooking] Parent-teacher conference booking loaded'); } catch(e) { console.warn('[PTCBooking] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: INVENTORY AUTO-REORDER & ALERTS
-// ============================================================
-try { const m = require('./inventory-reorder'); m(app, db, pool, renderPage, esc); console.log('[InventoryReorder] Inventory auto-reorder loaded'); } catch(e) { console.warn('[InventoryReorder] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: STAFF PERFORMANCE APPRAISALS
-// ============================================================
-try { const m = require('./staff-appraisals'); m(app, db, pool, renderPage, esc); console.log('[StaffAppraisals] Staff appraisals loaded'); } catch(e) { console.warn('[StaffAppraisals] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: STUDENT HEALTH RECORDS
-// ============================================================
-try { const m = require('./student-health'); m(app, db, pool, renderPage, esc); console.log('[StudentHealth] Student health records loaded'); } catch(e) { console.warn('[StudentHealth] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: SCHOLARSHIP & BURSARY MANAGER
-// ============================================================
-try { const m = require('./scholarship-manager'); m(app, db, pool, renderPage, esc); console.log('[Scholarships] Scholarship & bursary manager loaded'); } catch(e) { console.warn('[Scholarships] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: LEAVE MANAGEMENT (Staff & Student)
-// ============================================================
-try { const m = require('./leave-manager'); m(app, db, pool, renderPage, esc); console.log('[LeaveManager] Leave management loaded'); } catch(e) { console.warn('[LeaveManager] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: DISCIPLINE & BEHAVIOR TRACKER
-// ============================================================
-try { const m = require('./discipline-tracker'); m(app, db, pool, renderPage, esc); console.log('[Discipline] Discipline & behavior tracker loaded'); } catch(e) { console.warn('[Discipline] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: DEPARTMENT & BUDGET MANAGER
-// ============================================================
-try { const m = require('./budget-manager'); m(app, db, pool, renderPage, esc); console.log('[Budget] Department & budget manager loaded'); } catch(e) { console.warn('[Budget] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: VOLUNTEER MANAGER
-// ============================================================
-try { const m = require('./volunteer-manager'); m(app, db, pool, renderPage, esc); console.log('[Volunteers] Volunteer manager loaded'); } catch(e) { console.warn('[Volunteers] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: DEV TEAM MANAGER
-// ============================================================
-try { const m = require('./dev-team-manager'); m(app, db, pool, renderPage, esc); console.log('[DevTeam] Dev team manager loaded'); } catch(e) { console.warn('[DevTeam] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: STAFF & ACCESS CONTROL (RBAC for Subscribers)
-// ============================================================
-try { const m = require('./staff-access-control'); m(app, db, pool, renderPage, esc); console.log('[StaffAccess] Staff & access control loaded'); } catch(e) { console.warn('[StaffAccess] Error:', e.message); }
-
-// ============================================================
-// MODULE: TITHES & OFFERINGS (Church Giving Management)
-// ============================================================
-try { const m = require('./tithes-offerings'); m(app, db, pool, renderPage, esc); console.log('[Tithes] Tithes & offerings module loaded'); } catch(e) { console.warn('[Tithes] Error:', e.message); }
-
-// ============================================================
-// MODULE: ANALYTICS DASHBOARD (Platform-wide Analytics)
-// ============================================================
-try { const m = require('./analytics-dashboard'); m(app, db, pool, renderPage, esc); console.log('[Analytics] Analytics dashboard module loaded'); } catch(e) { console.warn('[Analytics] Error:', e.message); }
-
-// ============================================================
-// MODULE: STUDENT PORTAL (Student Self-Service)
-// ============================================================
-try { const m = require('./student-portal'); m(app, db, pool, renderPage, esc); console.log('[StudentPortal] Student portal module loaded'); } catch(e) { console.warn('[StudentPortal] Error:', e.message); }
-
-// ============================================================
-// MODULE: GRADEBOOK (Academic Grades Management)
-// ============================================================
+// Batch 9 — 16s delay (table allowlists registered synchronously; module loading deferred)
 ['grades','marks','marksheets','grading_scales','class_subjects'].forEach(t => VALID_TABLES.add(t));
-try { const m = require('./gradebook'); m(app, db, pool, renderPage, esc); console.log('[Gradebook] Gradebook module loaded'); } catch(e) { console.warn('[Gradebook] Error:', e.message); }
-
-// ============================================================
-// MODULE: FEE MANAGEMENT (Fee Structures, Collection, Receipts)
-// ============================================================
 ['fee_structures','fees_structure','fee_receipts','fee_reminder_settings','class_payments','payment_methods','payment_requests','payment_transactions'].forEach(t => VALID_TABLES.add(t));
-try { const m = require('./fee-management'); m(app, db, pool, renderPage, esc); console.log('[FeeManagement] Fee management module loaded'); } catch(e) { console.warn('[FeeManagement] Error:', e.message); }
-
-// ============================================================
-// MODULE: POS TERMINAL (Point of Sale, Inventory, Reports)
-// ============================================================
 ['retail_products','retail_sales','retail_sale_items','school_shop_sales','supermarket_daily_sales','supermarket_products','stock_adjustments','stock_movements','stock_takes','stock_take_items','stock_transfers'].forEach(t => VALID_TABLES.add(t));
-try { const m = require('./pos-terminal'); m(app, db, pool, renderPage, esc); console.log('[POS] POS terminal module loaded'); } catch(e) { console.warn('[POS] Error:', e.message); }
-
-// ============================================================
-// MODULE: TIMETABLE BUILDER (Scheduling, Lessons, Conflicts)
-// ============================================================
 ['timetable_periods','timetable_conflicts','lesson_plans','live_classes'].forEach(t => VALID_TABLES.add(t));
-try { const m = require('./timetable-builder'); m(app, db, pool, renderPage, esc); console.log('[Timetable] Timetable builder module loaded'); } catch(e) { console.warn('[Timetable] Error:', e.message); }
-
-// ============================================================
-// MODULE: LMS (Learning Management System)
-// ============================================================
 ['lms_enrollments','lms_content','lms_assignments','lms_submissions','courses','quiz_questions','quizzes','quiz_attempts'].forEach(t => VALID_TABLES.add(t));
-try { const m = require('./lms'); m(app, db, pool, renderPage, esc); console.log('[LMS] Learning management system loaded'); } catch(e) { console.warn('[LMS] Error:', e.message); }
+setTimeout(() => {
+  try { const m = require('./gradebook'); m(app, db, pool, renderPage, esc); console.log('[Gradebook] Gradebook module loaded'); } catch(e) { console.warn('[Gradebook] Error:', e.message); }
+  try { const m = require('./fee-management'); m(app, db, pool, renderPage, esc); console.log('[FeeManagement] Fee management module loaded'); } catch(e) { console.warn('[FeeManagement] Error:', e.message); }
+  try { const m = require('./pos-terminal'); m(app, db, pool, renderPage, esc); console.log('[POS] POS terminal module loaded'); } catch(e) { console.warn('[POS] Error:', e.message); }
+  try { const m = require('./timetable-builder'); m(app, db, pool, renderPage, esc); console.log('[Timetable] Timetable builder module loaded'); } catch(e) { console.warn('[Timetable] Error:', e.message); }
+  try { const m = require('./lms'); m(app, db, pool, renderPage, esc); console.log('[LMS] Learning management system loaded'); } catch(e) { console.warn('[LMS] Error:', e.message); }
+}, 16000);
 
 // ============================================================
 // MODULE: ADMISSIONS (Application, Review, Enrollment)
@@ -33173,7 +33032,7 @@ const _tenantMw = (req, res, next) => {
   req.user = req.session.user;
   next();
 };
-const _newModOpts = { tenantMiddleware: _tenantMw, requireAuth: requireAuth, wsBroadcast, redis: redisCache };
+const _newModOpts = { tenantMiddleware: _tenantMw, requireAuth, requireNotBanned, requireSuperAdmin, ah, esc, renderPage, audit, notify, notifyAll, sendEmail, sendSMS, wsBroadcast, redis: redisCache };
 
 // Batch 1: Old-style modules (app, db, pool, renderPage, esc)
 ['approval_requests','approval_actions','approval_notifications','approval_steps','approval_workflow_templates','approval_workflows'].forEach(t => VALID_TABLES.add(t));
@@ -33328,12 +33187,13 @@ loadSelfExec('revenue-quickstart', 'Revenue');
 // 10. GLOBAL VIRAL ENGINE (search, chat, QR, link shortener, contests, gallery, embeddable widgets, badges, translate)
 loadSelfExec('global-viral-engine', 'GlobalViral');
 
-// Clean up globals — remove temporary bridges
-Object.keys(_scopeBridge).forEach(k => { delete global[k]; });
-delete global.trackRevenue;
-delete global.awardPoints;
-delete global.creditDeveloperRevenue;
-delete global.queueEmail;
+// Clean up globals — DISABLED: self-executing modules reference these at request time
+// Removing them causes ReferenceError in route handlers after startup.
+// Object.keys(_scopeBridge).forEach(k => { delete global[k]; });
+// delete global.trackRevenue;
+// delete global.awardPoints;
+// delete global.creditDeveloperRevenue;
+// delete global.queueEmail;
 
 // ============================================================
 // === FUNDRAISING ENHANCEMENTS — Professional Features ===
@@ -33345,7 +33205,7 @@ delete global.queueEmail;
 let _processDonationEffects = null;
 try {
   const fundraisingEnhancements = require('./fundraising-enhancements');
-  fundraisingEnhancements(app, pool, ah, requireAuth, requireNotBanned, requireFundraisingSubscription, renderPage, esc, notify, notifyAll, sendEmail, sendSMS);
+  fundraisingEnhancements(app, pool, ah, requireAuth, requireNotBanned, requireFundraisingSubscription, renderPage, esc, notify, notifyAll, sendEmail, sendSMS, audit);
   _processDonationEffects = fundraisingEnhancements.processDonationEffects;
   console.log('[FundraisingEnhancements] Professional fundraising features loaded - Social Sharing, Donor Dashboard, Payouts, Donor Wall, QR Codes, Refunds, Embed Widget, Matching Donations, Comments, Thank You, Following, Testimonials, Milestones, Impact, SEO, Trending');
 } catch(e) { console.warn('[FundraisingEnhancements] Error:', e.message); }

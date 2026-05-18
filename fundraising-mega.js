@@ -277,12 +277,12 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     try {
       const camp = (await pool.query('SELECT target FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [campaignId, tenantId])).rows[0];
       if (!camp) return;
-      const raised = (await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM campaign_donations WHERE campaign_id=$1', [campaignId])).rows[0]?.total || 0;
+      const raised = (await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM campaign_donations WHERE campaign_id=$1 AND tenant_id=$2', [campaignId, tenantId])).rows[0]?.total || 0;
       const totalRaised = parseInt(raised);
       const goals = (await pool.query('SELECT * FROM campaign_stretch_goals WHERE campaign_id=$1 AND tenant_id=$2 AND unlocked=false ORDER BY goal_amount ASC', [campaignId, tenantId])).rows;
       for (const g of goals) {
         if (totalRaised >= parseInt(g.goal_amount)) {
-          await pool.query('UPDATE campaign_stretch_goals SET unlocked=true, unlocked_at=NOW() WHERE id=$1', [g.id]);
+          await pool.query('UPDATE campaign_stretch_goals SET unlocked=true, unlocked_at=NOW() WHERE id=$1 AND tenant_id=$2', [g.id, tenantId]);
           // Notify
           const admins = (await pool.query("SELECT email FROM users WHERE tenant_id=$1 AND role IN ('admin','super_admin')", [tenantId])).rows;
           for (const a of admins) {
@@ -592,7 +592,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     );
     // Auto-update status if fulfilled matches pledged
     if (parseInt(result.rows[0].amount_fulfilled) >= parseInt(result.rows[0].amount_pledged)) {
-      await pool.query("UPDATE campaign_pledges_mega SET status='fulfilled' WHERE id=$1", [pledge_id]);
+      await pool.query("UPDATE campaign_pledges_mega SET status='fulfilled' WHERE id=$1 AND tenant_id=$2", [pledge_id, t]);
       result.rows[0].status = 'fulfilled';
     }
     await audit(req.session.user.email, 'pledge_updated', 'Updated pledge #' + pledge_id, t);
@@ -619,12 +619,12 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!pledge) return res.status(404).json({ error: 'Pledge not found' });
     const remaining = parseInt(pledge.amount_pledged) - parseInt(pledge.amount_fulfilled);
     // Update reminded_at
-    await pool.query('UPDATE campaign_pledges_mega SET reminded_at=NOW() WHERE id=$1', [pledge.id]);
+    await pool.query('UPDATE campaign_pledges_mega SET reminded_at=NOW() WHERE id=$1 AND tenant_id=$2', [pledge.id, t]);
     // Send email if available
     if (pledge.donor_email && sendEmail) {
       let campaignTitle = 'our campaign';
       try {
-        const camp = (await pool.query('SELECT title FROM fundraising_campaigns WHERE id=$1', [pledge.campaign_id])).rows[0];
+        const camp = (await pool.query('SELECT title FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [pledge.campaign_id, t])).rows[0];
         if (camp) campaignTitle = camp.title;
       } catch(e) {}
       try {
@@ -753,7 +753,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const template = (await pool.query('SELECT * FROM campaign_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
     if (!template) return res.status(404).json({ error: 'Template not found' });
     // Increment usage count
-    await pool.query('UPDATE campaign_templates SET usage_count=usage_count+1 WHERE id=$1', [template.id]);
+    await pool.query('UPDATE campaign_templates SET usage_count=usage_count+1 WHERE id=$1 AND tenant_id=$2', [template.id, t]);
     // Return the template data so the client can use it to create a campaign
     const { title, story, customizations } = req.body;
     const finalTitle = title || template.title_template;
@@ -941,7 +941,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     // Include current raised amount
     let raised = 0;
     try {
-      const raisedResult = (await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM campaign_donations WHERE campaign_id=$1', [campaignId])).rows[0];
+      const raisedResult = (await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM campaign_donations WHERE campaign_id=$1 AND tenant_id=$2', [campaignId, t])).rows[0];
       raised = parseInt(raisedResult.total);
     } catch(e) {}
     res.json({ raised, goals });
@@ -993,7 +993,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
             [t, segment.id, esc(m.donor_email), esc(m.donor_name || '')]);
         }
       }
-      await pool.query('UPDATE donor_segments SET member_count=$1 WHERE id=$2', [members.length, segment.id]);
+      await pool.query('UPDATE donor_segments SET member_count=$1 WHERE id=$2 AND tenant_id=$3', [members.length, segment.id, t]);
     }
     await audit(req.session.user.email, 'donor_segment_created', 'Created segment: ' + name, t);
     res.json(segment);
@@ -1083,7 +1083,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     }
 
     // Update member count
-    await pool.query('UPDATE donor_segments SET member_count=$1 WHERE id=$2', [addedCount, segment.id]);
+    await pool.query('UPDATE donor_segments SET member_count=$1 WHERE id=$2 AND tenant_id=$3', [addedCount, segment.id, t]);
     await audit(req.session.user.email, 'donor_segment_refreshed', 'Refreshed segment: ' + segment.name + ' (' + addedCount + ' members)', t);
     res.json({ success: true, member_count: addedCount });
   }));
@@ -1161,7 +1161,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     }
 
     // Update batch total
-    await pool.query('UPDATE bulk_donation_batches SET total_rows=$1 WHERE id=$2', [validCount, batch.id]);
+    await pool.query('UPDATE bulk_donation_batches SET total_rows=$1 WHERE id=$2 AND tenant_id=$3', [validCount, batch.id, t]);
 
     await audit(req.session.user.email, 'bulk_donation_created', 'Created bulk donation batch #' + batch.id + ' (' + validCount + ' items)', t);
     res.json({ batch_id: batch.id, total_items: validCount });
@@ -1188,7 +1188,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (batch.status === 'completed') return res.status(400).json({ error: 'Batch already processed' });
 
     // Mark as processing
-    await pool.query("UPDATE bulk_donation_batches SET status='processing' WHERE id=$1", [batchId]);
+    await pool.query("UPDATE bulk_donation_batches SET status='processing' WHERE id=$1 AND tenant_id=$2", [batchId, t]);
 
     const items = (await pool.query('SELECT * FROM bulk_donation_items WHERE batch_id=$1 AND tenant_id=$2 AND status=$3', [batchId, t, 'pending'])).rows;
     let processed = 0;
@@ -1206,7 +1206,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
           } catch(e) {}
         }
         if (!campaignId) {
-          await pool.query("UPDATE bulk_donation_items SET status='error' WHERE id=$1", [item.id]);
+          await pool.query("UPDATE bulk_donation_items SET status='error' WHERE id=$1 AND tenant_id=$2", [item.id, t]);
           errors++;
           continue;
         }
@@ -1215,18 +1215,18 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5,$6)',
           [t, campaignId, item.donor_name, item.amount, item.method || 'cash', 'Bulk import - Batch #' + batchId]);
 
-        await pool.query("UPDATE bulk_donation_items SET status='processed' WHERE id=$1", [item.id]);
+        await pool.query("UPDATE bulk_donation_items SET status='processed' WHERE id=$1 AND tenant_id=$2", [item.id, t]);
         processed++;
       } catch(e) {
-        await pool.query("UPDATE bulk_donation_items SET status='error' WHERE id=$1", [item.id]);
+        await pool.query("UPDATE bulk_donation_items SET status='error' WHERE id=$1 AND tenant_id=$2", [item.id, t]);
         errors++;
       }
     }
 
     // Update batch status
     const finalStatus = errors === 0 ? 'completed' : (processed > 0 ? 'completed' : 'failed');
-    await pool.query('UPDATE bulk_donation_batches SET processed=$1,errors=$2,status=$3 WHERE id=$4',
-      [processed, errors, finalStatus, batchId]);
+    await pool.query('UPDATE bulk_donation_batches SET processed=$1,errors=$2,status=$3 WHERE id=$4 AND tenant_id=$5',
+      [processed, errors, finalStatus, batchId, t]);
 
     await audit(req.session.user.email, 'bulk_donation_processed', 'Processed batch #' + batchId + ': ' + processed + ' processed, ' + errors + ' errors', t);
     res.json({ batch_id: batchId, processed, errors, status: finalStatus });
@@ -1417,10 +1417,10 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       // Update contribution instead
       const contrib = parseInt(amount_contributed) || 0;
       if (contrib > 0) {
-        await pool.query('UPDATE challenge_participants SET amount_contributed=amount_contributed+$1 WHERE id=$2', [contrib, existing.id]);
-        await pool.query('UPDATE donation_challenges SET current_amount=current_amount+$1 WHERE id=$2', [contrib, challengeId]);
+        await pool.query('UPDATE challenge_participants SET amount_contributed=amount_contributed+$1 WHERE id=$2 AND tenant_id=$3', [contrib, existing.id, t]);
+        await pool.query('UPDATE donation_challenges SET current_amount=current_amount+$1 WHERE id=$2 AND tenant_id=$3', [contrib, challengeId, t]);
         // Check if challenge target reached
-        const updated = (await pool.query('SELECT * FROM donation_challenges WHERE id=$1', [challengeId])).rows[0];
+        const updated = (await pool.query('SELECT * FROM donation_challenges WHERE id=$1 AND tenant_id=$2', [challengeId, t])).rows[0];
         if (parseInt(updated.current_amount) >= parseInt(updated.target_amount)) {
           notify(t, email, 'Challenge Target Reached!', 'The challenge "' + updated.name + '" has reached its target of UGX ' + parseInt(updated.target_amount).toLocaleString() + '!', 'fundraising');
         }
@@ -1437,11 +1437,11 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
     // Update challenge current_amount
     if (contrib > 0) {
-      await pool.query('UPDATE donation_challenges SET current_amount=current_amount+$1 WHERE id=$2', [contrib, challengeId]);
+      await pool.query('UPDATE donation_challenges SET current_amount=current_amount+$1 WHERE id=$2 AND tenant_id=$3', [contrib, challengeId, t]);
     }
 
     // Check if challenge target reached
-    const updatedChallenge = (await pool.query('SELECT * FROM donation_challenges WHERE id=$1', [challengeId])).rows[0];
+    const updatedChallenge = (await pool.query('SELECT * FROM donation_challenges WHERE id=$1 AND tenant_id=$2', [challengeId, t])).rows[0];
     if (parseInt(updatedChallenge.current_amount) >= parseInt(updatedChallenge.target_amount)) {
       // Notify all participants
       const participants = (await pool.query('SELECT donor_email FROM challenge_participants WHERE challenge_id=$1 AND tenant_id=$2', [challengeId, t])).rows;
@@ -1462,7 +1462,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // Public: Get stretch goals for a campaign
   app.get('/api/public/campaigns/:id/stretch-goals', ah(async (req, res) => {
     const campaignId = req.params.id;
-    const goals = (await pool.query('SELECT sg.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=$1) as raised FROM campaign_stretch_goals sg WHERE sg.campaign_id=$1 ORDER BY sg.goal_amount ASC', [campaignId])).rows;
+    const goals = (await pool.query('SELECT sg.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=sg.campaign_id AND tenant_id=sg.tenant_id) as raised FROM campaign_stretch_goals sg WHERE sg.campaign_id=$1 ORDER BY sg.goal_amount ASC', [campaignId])).rows;
     res.json(goals.map(g => ({
       id: g.id,
       goal_amount: parseInt(g.goal_amount),

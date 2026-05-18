@@ -398,16 +398,16 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!test) return res.status(404).json({ error: 'A/B test variant not found' });
 
     if (event_type === 'view') {
-      await pool.query('UPDATE campaign_ab_tests SET views = views + 1 WHERE id=$1', [testId]);
+      await pool.query('UPDATE campaign_ab_tests SET views = views + 1 WHERE id=$1 AND tenant_id=$2', [testId, t]);
     } else if (event_type === 'donation') {
       const donationAmount = parseInt(amount) || 0;
-      await pool.query('UPDATE campaign_ab_tests SET donations = donations + 1, total_raised = total_raised + $1 WHERE id=$2', [donationAmount, testId]);
+      await pool.query('UPDATE campaign_ab_tests SET donations = donations + 1, total_raised = total_raised + $1 WHERE id=$2 AND tenant_id=$3', [donationAmount, testId, t]);
     }
 
     // Recalculate conversion rate
-    await pool.query('UPDATE campaign_ab_tests SET conversion_rate = CASE WHEN views > 0 THEN (donations::NUMERIC / views::NUMERIC) * 100 ELSE 0 END WHERE id=$1', [testId]);
+    await pool.query('UPDATE campaign_ab_tests SET conversion_rate = CASE WHEN views > 0 THEN (donations::NUMERIC / views::NUMERIC) * 100 ELSE 0 END WHERE id=$1 AND tenant_id=$2', [testId, t]);
 
-    const updated = (await pool.query('SELECT * FROM campaign_ab_tests WHERE id=$1', [testId])).rows[0];
+    const updated = (await pool.query('SELECT * FROM campaign_ab_tests WHERE id=$1 AND tenant_id=$2', [testId, t])).rows[0];
     res.json(updated);
   }));
 
@@ -666,7 +666,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     await pool.query('UPDATE campaign_endorsements_mega2 SET is_verified=true WHERE id=$1 AND tenant_id=$2', [endorsementId, t]);
     await audit(req.session.user.email, 'endorsement_verified', 'Verified endorsement #' + endorsementId + ' from "' + endorsement.endorser_name + '"');
 
-    const updated = (await pool.query('SELECT * FROM campaign_endorsements_mega2 WHERE id=$1', [endorsementId])).rows[0];
+    const updated = (await pool.query('SELECT * FROM campaign_endorsements_mega2 WHERE id=$1 AND tenant_id=$2', [endorsementId, t])).rows[0];
     res.json(updated);
   }));
 
@@ -741,7 +741,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     // Update quantity fulfilled
     const newFulfilled = item.quantity_fulfilled + 1;
     const isFullyFulfilled = newFulfilled >= item.quantity_needed;
-    await pool.query('UPDATE donation_wishlists SET quantity_fulfilled=$1 WHERE id=$2', [newFulfilled, wishlistId]);
+    await pool.query('UPDATE donation_wishlists SET quantity_fulfilled=$1 WHERE id=$2 AND tenant_id=$3', [newFulfilled, wishlistId, t]);
 
     if (donor_name && sendEmail) {
       try {
@@ -883,7 +883,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     );
 
     const newFulfilled = item.quantity_fulfilled + 1;
-    await pool.query('UPDATE donation_wishlists SET quantity_fulfilled=$1 WHERE id=$2', [newFulfilled, parseInt(wishlist_id)]);
+    await pool.query('UPDATE donation_wishlists SET quantity_fulfilled=$1 WHERE id=$2 AND tenant_id=$3', [newFulfilled, parseInt(wishlist_id), t]);
 
     res.redirect('/wishlist');
   }));
@@ -935,7 +935,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     );
 
     // Update current year matched
-    await pool.query('UPDATE corporate_matchers SET current_year_matched = current_year_matched + $1 WHERE id=$2', [matchAmount, matcherId]);
+    await pool.query('UPDATE corporate_matchers SET current_year_matched = current_year_matched + $1 WHERE id=$2 AND tenant_id=$3', [matchAmount, matcherId, t]);
 
     await audit(req.session.user.email, 'match_claim_submitted', 'Submitted match claim for ' + matcher.company_name + ': UGX ' + matchAmount);
 
@@ -964,7 +964,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
     // If rejecting, refund the matched amount
     if (status === 'rejected' && claim.status !== 'rejected') {
-      await pool.query('UPDATE corporate_matchers SET current_year_matched = GREATEST(0, current_year_matched - $1) WHERE id=$2', [claim.matched_amount, claim.matcher_id]);
+      await pool.query('UPDATE corporate_matchers SET current_year_matched = GREATEST(0, current_year_matched - $1) WHERE id=$2 AND tenant_id=$3', [claim.matched_amount, claim.matcher_id, t]);
     }
 
     await pool.query('UPDATE corporate_match_claims SET status=$1 WHERE id=$2 AND tenant_id=$3', [status, claimId, t]);
@@ -976,7 +976,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         'Your corporate match claim of UGX ' + (parseInt(claim.matched_amount)||0).toLocaleString() + ' has been ' + status, 'fundraising');
     }
 
-    const updated = (await pool.query('SELECT * FROM corporate_match_claims WHERE id=$1', [claimId])).rows[0];
+    const updated = (await pool.query('SELECT * FROM corporate_match_claims WHERE id=$1 AND tenant_id=$2', [claimId, t])).rows[0];
     res.json(updated);
   }));
 
@@ -1067,8 +1067,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
     const campaign = (await pool.query(`
       SELECT fc.*, t.name AS org_name,
-        (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id) AS raised,
-        (SELECT COUNT(*) FROM campaign_donations WHERE campaign_id=fc.id) AS donor_count
+        (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id AND tenant_id=fc.tenant_id) AS raised,
+        (SELECT COUNT(*) FROM campaign_donations WHERE campaign_id=fc.id AND tenant_id=fc.tenant_id) AS donor_count
       FROM fundraising_campaigns fc
       JOIN tenants t ON fc.tenant_id = t.id
       WHERE fc.id = $1 AND fc.tenant_id = $2
@@ -1115,7 +1115,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
     const campaigns = (await pool.query(`
       SELECT fc.id, fc.title, fc.target,
-        (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id) AS raised
+        (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id AND tenant_id=fc.tenant_id) AS raised
       FROM fundraising_campaigns fc
       WHERE fc.tenant_id = $1
       ORDER BY fc.created_at DESC LIMIT 50
