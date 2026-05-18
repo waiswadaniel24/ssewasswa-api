@@ -4759,13 +4759,28 @@ app.get('/org/projects', requireAuth, requireNotBanned, ah(async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = 20;
   const offset = (page - 1) * limit;
-  const total = (await pool.query('SELECT COUNT(*) FROM projects WHERE tenant_id=$1', [t])).rows[0].count;
-  const projects = (await pool.query('SELECT * FROM projects WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const search = req.query.search || '';
+  const statusFilter = req.query.status || '';
+  let whereClauses = ['tenant_id=$1'];
+  let params = [t];
+  let paramIdx = 2;
+  if (search) { whereClauses.push(`(name ILIKE $${paramIdx} OR description ILIKE $${paramIdx})`); params.push('%'+search+'%'); paramIdx++; }
+  if (statusFilter) { whereClauses.push(`status=$${paramIdx}`); params.push(statusFilter); paramIdx++; }
+  const whereStr = whereClauses.join(' AND ');
+  const total = (await pool.query(`SELECT COUNT(*) FROM projects WHERE ${whereStr}`, params)).rows[0].count;
+  const projects = (await pool.query(`SELECT * FROM projects WHERE ${whereStr} ORDER BY created_at DESC LIMIT $${paramIdx} OFFSET $${paramIdx+1}`, [...params, limit, offset])).rows;
   const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Projects', `
     <div class="card"><h3>All Projects (${total})</h3>
-      <a href="/org/projects/new" class="btn btn-sm">+ New Project</a>
-      <div class="grid" style="margin-top:15px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;align-items:center">
+        <a href="/org/projects/new" class="btn btn-sm btn-green">+ New Project</a>
+      </div>
+      <form method="GET" action="/org/projects" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px">
+        <input name="search" placeholder="Search projects..." value="${esc(search)}" style="flex:2;min-width:200px;padding:8px">
+        <select name="status" style="flex:1;min-width:120px;padding:8px"><option value="">All Status</option><option value="active" ${statusFilter==='active'?'selected':''}>Active</option><option value="planning" ${statusFilter==='planning'?'selected':''}>Planning</option><option value="completed" ${statusFilter==='completed'?'selected':''}>Completed</option><option value="on-hold" ${statusFilter==='on-hold'?'selected':''}>On Hold</option></select>
+        <button class="btn btn-sm">Search</button>
+      </form>
+      <div class="grid">
         ${projects.map(p => {
           const pct = p.budget > 0 ? Math.min(100, (p.spent / p.budget) * 100) : 0;
           return `
@@ -4782,9 +4797,9 @@ app.get('/org/projects', requireAuth, requireNotBanned, ah(async (req, res) => {
               <form method="POST" action="/org/projects/${p.id}/status" style="display:inline"><select name="status" style="width:auto;display:inline-block;padding:8px"><option>active</option><option>planning</option><option>completed</option><option>on-hold</option></select><button class="btn btn-sm">Set</button></form>
             </div>
           </div>`;
-        }).join('') || '<p>No projects yet</p>'}
+        }).join('') || '<p>No projects found</p>'}
       </div>
-      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/projects?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/projects?page=${i+1}&search=${esc(search)}&status=${esc(statusFilter)}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -4880,18 +4895,30 @@ app.get('/org/meetings', requireAuth, requireNotBanned, ah(async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = 25;
   const offset = (page - 1) * limit;
-  const total = (await pool.query('SELECT COUNT(*) FROM meeting_minutes WHERE tenant_id=$1', [t])).rows[0].count;
-  const meetings = (await pool.query('SELECT * FROM meeting_minutes WHERE tenant_id=$1 ORDER BY meeting_date DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const search = req.query.search || '';
+  let whereClauses = ['tenant_id=$1'];
+  let params = [t];
+  let paramIdx = 2;
+  if (search) { whereClauses.push(`(title ILIKE $${paramIdx} OR content ILIKE $${paramIdx})`); params.push('%'+search+'%'); paramIdx++; }
+  const whereStr = whereClauses.join(' AND ');
+  const total = (await pool.query(`SELECT COUNT(*) FROM meeting_minutes WHERE ${whereStr}`, params)).rows[0].count;
+  const meetings = (await pool.query(`SELECT * FROM meeting_minutes WHERE ${whereStr} ORDER BY meeting_date DESC LIMIT $${paramIdx} OFFSET $${paramIdx+1}`, [...params, limit, offset])).rows;
   const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Meeting Minutes', `
     <div class="card"><h3>Meeting Minutes (${total})</h3>
-      <a href="/org/meetings/new" class="btn btn-sm" style="margin-bottom:15px">+ New Minutes</a>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;align-items:center">
+        <a href="/org/meetings/new" class="btn btn-sm btn-green">+ New Minutes</a>
+      </div>
+      <form method="GET" action="/org/meetings" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px">
+        <input name="search" placeholder="Search meetings..." value="${esc(search)}" style="flex:1;min-width:200px;padding:8px">
+        <button class="btn btn-sm">Search</button>
+      </form>
       <table><tr><th>Title</th><th>Date</th><th>Actions</th></tr>
       ${meetings.map(m => `<tr><td>${esc(m.title)}</td><td>${m.meeting_date ? new Date(m.meeting_date).toLocaleDateString() : ''}</td>
         <td><a href="/org/meetings/${m.id}" class="btn btn-sm">View</a> <form method="POST" action="/org/meetings/${m.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</button></form></td>
-      </tr>`).join('') || '<tr><td colspan="3">No meetings yet</td></tr>'}
+      </tr>`).join('') || '<tr><td colspan="3">No meetings found</td></tr>'}
       </table>
-      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/meetings?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/meetings?page=${i+1}&search=${esc(search)}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -4917,13 +4944,25 @@ app.post('/org/meetings/save', requireAuth, requireNotBanned, ah(async (req, res
 }));
 
 app.get('/org/meetings/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const m = (await pool.query('SELECT * FROM meeting_minutes WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  const t = req.session.user.tenant_id;
+  const m = (await pool.query('SELECT * FROM meeting_minutes WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!m) return res.status(404).send('Not found');
+  // Fetch agenda items inline
+  const agendaItems = (await pool.query('SELECT * FROM meeting_agendas WHERE meeting_id=$1 AND tenant_id=$2 ORDER BY order_no', [m.id, t])).rows;
+  const agendaSection = agendaItems.length ? `
+    <h3 style="margin-top:25px">Agenda (${agendaItems.length} items)</h3>
+    <table><tr><th>#</th><th>Item</th><th>Status</th></tr>
+    ${agendaItems.map(a => `<tr><td>${a.order_no}</td><td>${esc(a.item_text)}</td><td><span class="tag" style="background:${a.completed?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e'}">${a.completed?'Done':'Pending'}</span></td></tr>`).join('')}
+    </table>` : '';
   res.send(renderPage(m.title, `
     <div class="card"><h3>${esc(m.title)}</h3>
       <p class="muted">${m.meeting_date ? new Date(m.meeting_date).toLocaleDateString() : ''}</p>
       <div style="margin-top:20px;white-space:pre-wrap">${esc(m.content)}</div>
-      <a href="/org/meetings" class="btn btn-sm" style="margin-top:15px">Back to Minutes</a>
+      ${agendaSection}
+      <div style="margin-top:15px;display:flex;gap:8px;flex-wrap:wrap">
+        <a href="/org/meetings/${m.id}/agenda" class="btn btn-sm">Manage Agenda</a>
+        <a href="/org/meetings" class="btn btn-sm">Back to Minutes</a>
+      </div>
     </div>
   `, req.session.user));
 }));
@@ -4991,10 +5030,20 @@ app.get('/org/finance', requireAuth, requireNotBanned, ah(async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = 50;
   const offset = (page - 1) * limit;
-  const total = (await pool.query('SELECT COUNT(*) FROM org_finance WHERE tenant_id=$1', [t])).rows[0].count;
-  const records = (await pool.query('SELECT * FROM org_finance WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
-  // Get totals across ALL records (not just current page)
-  const totals = (await pool.query("SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE 0 END),0) as income, COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) as expense FROM org_finance WHERE tenant_id=$1", [t])).rows[0];
+  const dateFrom = req.query.date_from || '';
+  const dateTo = req.query.date_to || '';
+  const typeFilter = req.query.type || '';
+  let whereClauses = ['tenant_id=$1'];
+  let params = [t];
+  let paramIdx = 2;
+  if (dateFrom) { whereClauses.push(`created_at >= $${paramIdx}`); params.push(dateFrom); paramIdx++; }
+  if (dateTo) { whereClauses.push(`created_at <= $${paramIdx}::timestamp + interval '1 day'`); params.push(dateTo); paramIdx++; }
+  if (typeFilter) { whereClauses.push(`type=$${paramIdx}`); params.push(typeFilter); paramIdx++; }
+  const whereStr = whereClauses.join(' AND ');
+  const total = (await pool.query(`SELECT COUNT(*) FROM org_finance WHERE ${whereStr}`, params)).rows[0].count;
+  const records = (await pool.query(`SELECT * FROM org_finance WHERE ${whereStr} ORDER BY created_at DESC LIMIT $${paramIdx} OFFSET $${paramIdx+1}`, [...params, limit, offset])).rows;
+  // Get totals for filtered range
+  const totals = (await pool.query(`SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE 0 END),0) as income, COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) as expense FROM org_finance WHERE ${whereStr}`, params)).rows[0];
   const income = parseInt(totals.income);
   const expense = parseInt(totals.expense);
   const totalPages = Math.ceil(parseInt(total) / limit);
@@ -5005,8 +5054,8 @@ app.get('/org/finance', requireAuth, requireNotBanned, ah(async (req, res) => {
   const expenseCats = finCats.filter(c => c.type === 'expense').map(c => c.name);
   res.send(renderPage('Org Finance', `
     <div class="stats">
-      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${income.toLocaleString()}</div><div>Total Income</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${expense.toLocaleString()}</div><div>Total Expense</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${income.toLocaleString()}</div><div>Income (filtered)</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${expense.toLocaleString()}</div><div>Expense (filtered)</div></div>
       <div class="stat-card"><div class="stat-num" style="color:${income - expense >= 0 ? '#059669' : '#dc2626'}">UGX ${(income - expense).toLocaleString()}</div><div>Balance</div></div>
     </div>
     <div class="card"><h3>Record Transaction</h3>
@@ -5021,11 +5070,18 @@ app.get('/org/finance', requireAuth, requireNotBanned, ah(async (req, res) => {
       </form>
       <a href="/org/finance/categories" class="btn btn-sm" style="margin-top:8px">Manage Categories & Budget</a>
     </div>
-    <div class="card"><h3>Recent Transactions (${total} total)</h3>
+    <div class="card"><h3>Transactions (${total} total)</h3>
+      <form method="GET" action="/org/finance" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px">
+        <input name="date_from" type="date" value="${esc(dateFrom)}" style="padding:8px" title="From date">
+        <input name="date_to" type="date" value="${esc(dateTo)}" style="padding:8px" title="To date">
+        <select name="type" style="padding:8px"><option value="">All Types</option><option value="income" ${typeFilter==='income'?'selected':''}>Income</option><option value="expense" ${typeFilter==='expense'?'selected':''}>Expense</option></select>
+        <button class="btn btn-sm">Filter</button>
+        <a href="/org/finance" class="btn btn-sm">Reset</a>
+      </form>
       <table><tr><th>Type</th><th>Category</th><th>Amount</th><th>Description</th><th>Date</th></tr>
       ${records.map(r => `<tr><td><span style="color:${r.type === 'income' ? '#059669' : '#dc2626'}">${r.type}</span></td><td>${esc(r.category||'-')}</td><td>UGX ${parseInt(r.amount).toLocaleString()}</td><td>${esc(r.description)}</td><td>${new Date(r.created_at).toLocaleDateString()}</td></tr>`).join('')}
       </table>
-      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/finance?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/finance?page=${i+1}&date_from=${esc(dateFrom)}&date_to=${esc(dateTo)}&type=${esc(typeFilter)}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
     <script>
     var incomeCats = ${JSON.stringify(incomeCats)};
@@ -12342,16 +12398,55 @@ app.get('/business/forecast', requireAuth, requireNotBanned, ah(async (req, res)
   `, req.session.user));
 }));
 
-// === v7.0: CHURN PREDICTION ===
+// === v7.0: CHURN PREDICTION (Enhanced) ===
 app.get('/org/churn-prediction', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const members = (await pool.query('SELECT * FROM members WHERE tenant_id=$1', [t])).rows;
-  const atRisk = members.filter(m => { const daysSince = (Date.now() - new Date(m.joined_at).getTime()) / (1000*60*60*24); return daysSince > 180 && !m.role; }).slice(0, 20);
+  // Get attendance data for engagement scoring
+  const attendanceData = (await pool.query('SELECT student_id, COUNT(*) as total, SUM(CASE WHEN status=\'present\' THEN 1 ELSE 0 END) as present FROM attendance WHERE tenant_id=$1 GROUP BY student_id', [t])).rows;
+  const attendanceMap = {};
+  attendanceData.forEach(a => { attendanceMap[a.student_id] = { total: parseInt(a.total), present: parseInt(a.present) }; });
+  // Score each member for churn risk
+  const scored = members.map(m => {
+    let riskScore = 0;
+    let riskFactors = [];
+    const daysSince = (Date.now() - new Date(m.joined_at).getTime()) / (1000*60*60*24);
+    // Factor 1: No contact info
+    if (!m.email && !m.phone) { riskScore += 2; riskFactors.push('No contact info'); }
+    // Factor 2: Inactive for long time (no role = less engaged)
+    if (daysSince > 180 && (!m.role || m.role === 'Member')) { riskScore += 2; riskFactors.push('Inactive > 6 months'); }
+    if (daysSince > 365) { riskScore += 1; riskFactors.push('Member > 1 year, no promotion'); }
+    // Factor 3: Low attendance
+    const att = attendanceMap[m.id];
+    if (att && att.total > 0) {
+      const rate = att.present / att.total;
+      if (rate < 0.3) { riskScore += 3; riskFactors.push(`Attendance ${Math.round(rate*100)}%`); }
+      else if (rate < 0.5) { riskScore += 2; riskFactors.push(`Attendance ${Math.round(rate*100)}%`); }
+      else if (rate < 0.7) { riskScore += 1; riskFactors.push(`Attendance ${Math.round(rate*100)}%`); }
+    } else if (!att && daysSince > 30) {
+      riskScore += 2; riskFactors.push('No attendance recorded');
+    }
+    // Factor 4: Basic member with no distinguishing features
+    if (m.role === 'Member' && !m.email) { riskScore += 1; riskFactors.push('Basic member, no email'); }
+    const level = riskScore >= 5 ? 'Critical' : riskScore >= 3 ? 'High' : riskScore >= 1 ? 'Medium' : 'Low';
+    return { ...m, riskScore, level, riskFactors, daysSince: Math.round(daysSince), attendanceRate: att && att.total > 0 ? Math.round((att.present/att.total)*100) : null };
+  });
+  const atRisk = scored.filter(m => m.riskScore >= 3).sort((a,b) => b.riskScore - a.riskScore);
+  const critical = scored.filter(m => m.level === 'Critical').length;
+  const high = scored.filter(m => m.level === 'High').length;
+  const medium = scored.filter(m => m.level === 'Medium').length;
+  const low = scored.filter(m => m.level === 'Low').length;
   res.send(renderPage('Churn Prediction', `
     <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#ef4444)"><h1>Churn Prediction</h1><p>Identify members at risk of leaving</p></div>
-    <div class="stats"><div class="stat-card"><div class="stat-num">${members.length}</div><div>Total Members</div></div><div class="stat-card"><div class="stat-num" style="color:#f59e0b">${atRisk.length}</div><div>At Risk</div></div></div>
-    <div class="card"><h2>Members at Risk</h2>
-      ${atRisk.length ? `<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Days Since Join</th></tr>${atRisk.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.email||'-')}</td><td>${esc(m.phone||'-')}</td><td>${new Date(m.joined_at).toLocaleDateString()}</td><td>${Math.round((Date.now()-new Date(m.joined_at).getTime())/(1000*60*60*24))}</td></tr>`).join('')}</table>` : '<div class="alert alert-success">No members currently at risk of churning.</div>'}
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${members.length}</div><div>Total Members</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${critical}</div><div>Critical Risk</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${high}</div><div>High Risk</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${medium}</div><div>Medium Risk</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${low}</div><div>Low Risk</div></div>
+    </div>
+    <div class="card"><h2>Members at Risk (${atRisk.length})</h2>
+      ${atRisk.length ? `<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Attendance</th><th>Days</th><th>Risk</th><th>Factors</th></tr>${atRisk.map(m => `<tr><td><strong>${esc(m.name)}</strong></td><td>${esc(m.email||'-')}</td><td>${esc(m.phone||'-')}</td><td><span class="tag">${esc(m.role||'-')}</span></td><td>${m.attendanceRate !== null ? m.attendanceRate+'%' : 'N/A'}</td><td>${m.daysSince}</td><td><span class="tag" style="background:${m.level==='Critical'?'#fee2e2;color:#991b1b':m.level==='High'?'#fef3c7;color:#92400e':'#dbeafe;color:#1e40af'}">${m.level} (${m.riskScore})</span></td><td style="font-size:0.85em">${m.riskFactors.map(f => `<span style="display:inline-block;background:#f1f5f9;padding:2px 6px;border-radius:4px;margin:1px">${esc(f)}</span>`).join(' ')}</td></tr>`).join('')}</table>` : '<div class="alert alert-success">No members currently at risk of churning.</div>'}
     </div>
   `, req.session.user));
 }));
@@ -15982,11 +16077,17 @@ app.get('/business/warranties/:id/delete', requireAuth, requireNotBanned, ah(asy
 // =============================================
 app.get('/org/resolutions', requireAuth, requireNotBanned, requireFeature('board_resolutions'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const resolutions = (await pool.query('SELECT * FROM board_resolutions WHERE tenant_id=$1 ORDER BY meeting_date DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 25;
+  const offset = (page - 1) * limit;
+  const total = (await pool.query('SELECT COUNT(*) FROM board_resolutions WHERE tenant_id=$1', [t])).rows[0].count;
+  const resolutions = (await pool.query('SELECT * FROM board_resolutions WHERE tenant_id=$1 ORDER BY meeting_date DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Board Resolutions', `
     <div class="hero" style="background:linear-gradient(135deg,#1e40af,#1e3a8a)"><h1>Board Resolutions</h1><p>Decisions, votes and meeting minutes</p></div>
     <div class="card"><a href="/org/resolutions/new" class="btn" style="margin-bottom:15px">+ New Resolution</a>
-      ${resolutions.length?`<table><tr><th>Title</th><th>Proposed By</th><th>Meeting Date</th><th>Votes (For/Against/Abstain)</th><th>Status</th><th>Actions</th></tr>${resolutions.map(r=>`<tr><td><strong>${esc(r.title)}</strong></td><td>${esc(r.proposed_by||'-')}</td><td>${r.meeting_date||'-'}</td><td>${r.vote_for}/${r.vote_against}/${r.vote_abstain}</td><td><span class="tag">${esc(r.status)}</span></td><td><a href="/org/resolutions/${r.id}/vote" class="btn btn-sm">Vote</a> <form method="POST" action="/org/resolutions/${r.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>`:'<p class="muted">No resolutions</p>'}
+      ${resolutions.length?`<table><tr><th>Title</th><th>Proposed By</th><th>Date</th><th>Votes (For/Against/Abstain)</th><th>Status</th><th>Actions</th></tr>${resolutions.map(r=>{const statusColor=r.status==='passed'?'#059669':r.status==='rejected'?'#dc2626':'#4f46e5';return `<tr><td><strong>${esc(r.title)}</strong></td><td>${esc(r.proposed_by||'-')}</td><td>${r.meeting_date||'-'}</td><td>${r.vote_for}/${r.vote_against}/${r.vote_abstain}</td><td><span class="tag" style="background:${statusColor}20;color:${statusColor}">${esc(r.status)}</span></td><td>${r.status==='open'?`<a href="/org/resolutions/${r.id}/vote" class="btn btn-sm">Vote</a>`:''} <form method="POST" action="/org/resolutions/${r.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`;}).join('')}</table>`:'<p class="muted">No resolutions</p>'}
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/resolutions?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -16049,13 +16150,25 @@ app.post('/org/resolutions/:id/vote/:direction', requireAuth, requireNotBanned, 
   // Check for duplicate vote
   const existingVote = (await pool.query('SELECT id FROM resolution_votes WHERE resolution_id=$1 AND voter_email=$2 AND tenant_id=$3', [req.params.id, voterEmail, t])).rows[0];
   if (existingVote) return res.status(400).send('You have already voted on this resolution.');
-  // Race condition fix: use transaction with FOR UPDATE
+  // Race condition fix: use transaction with FOR UPDATE + auto-status
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('SELECT id FROM board_resolutions WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [req.params.id, t]);
+    const locked = (await client.query('SELECT * FROM board_resolutions WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [req.params.id, t])).rows[0];
+    if (!locked) { await client.query('ROLLBACK'); client.release(); return res.status(404).send('Not found'); }
     await client.query(`UPDATE board_resolutions SET ${col}=${col}+1 WHERE id=$1 AND tenant_id=$2`, [req.params.id, t]);
     await client.query('INSERT INTO resolution_votes(tenant_id,resolution_id,voter_email,direction) VALUES($1,$2,$3,$4)', [t, req.params.id, voterEmail, req.params.direction]);
+    // Auto-update status: if majority of votes are "for" or "against", update accordingly
+    const newFor = locked.vote_for + (col === 'vote_for' ? 1 : 0);
+    const newAgainst = locked.vote_against + (col === 'vote_against' ? 1 : 0);
+    const totalVotes = newFor + newAgainst + locked.vote_abstain + (col === 'vote_abstain' ? 1 : 0);
+    if (totalVotes >= 3) { // Need at least 3 votes to auto-resolve
+      if (newFor > newAgainst && newFor > totalVotes * 0.5) {
+        await client.query("UPDATE board_resolutions SET status='passed' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+      } else if (newAgainst > newFor && newAgainst > totalVotes * 0.5) {
+        await client.query("UPDATE board_resolutions SET status='rejected' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+      }
+    }
     await client.query('COMMIT');
   } catch(e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
   await audit(voterEmail, 'resolution_vote', `Voted ${req.params.direction} on resolution ID: ${req.params.id}`);
@@ -16132,8 +16245,16 @@ app.get('/org/partners', requireAuth, requireNotBanned, requireFeature('partners
   const page = parseInt(req.query.page) || 1;
   const limit = 25;
   const offset = (page - 1) * limit;
-  const total = (await pool.query('SELECT COUNT(*) FROM partners WHERE tenant_id=$1', [t])).rows[0].count;
-  const partners = (await pool.query('SELECT * FROM partners WHERE tenant_id=$1 ORDER BY total_contributions DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const search = req.query.search || '';
+  const typeFilter = req.query.type || '';
+  let whereClauses = ['tenant_id=$1'];
+  let params = [t];
+  let paramIdx = 2;
+  if (search) { whereClauses.push(`(name ILIKE $${paramIdx} OR email ILIKE $${paramIdx} OR organization ILIKE $${paramIdx})`); params.push('%'+search+'%'); paramIdx++; }
+  if (typeFilter) { whereClauses.push(`type=$${paramIdx}`); params.push(typeFilter); paramIdx++; }
+  const whereStr = whereClauses.join(' AND ');
+  const total = (await pool.query(`SELECT COUNT(*) FROM partners WHERE ${whereStr}`, params)).rows[0].count;
+  const partners = (await pool.query(`SELECT * FROM partners WHERE ${whereStr} ORDER BY total_contributions DESC LIMIT $${paramIdx} OFFSET $${paramIdx+1}`, [...params, limit, offset])).rows;
   const totalPages = Math.ceil(parseInt(total) / limit);
   const donors = partners.filter(p=>p.type==='donor');
   const sponsors = partners.filter(p=>p.type==='sponsor');
@@ -16142,8 +16263,13 @@ app.get('/org/partners', requireAuth, requireNotBanned, requireFeature('partners
     <div class="hero" style="background:linear-gradient(135deg,#059669,#047857)"><h1>Partners & Donors</h1><p>Donor profiles and engagement</p></div>
     <div class="stats"><div class="stat-card"><div class="stat-num">${donors.length}</div><div>Donors</div></div><div class="stat-card"><div class="stat-num">${sponsors.length}</div><div>Sponsors</div></div><div class="stat-card"><div class="stat-num">${partners_.length}</div><div>Partners</div></div><div class="stat-card"><div class="stat-num">UGX ${partners.reduce((a,p)=>a+(p.total_contributions||0),0).toLocaleString()}</div><div>Total Contributions</div></div></div>
     <div class="card"><a href="/org/partners/new" class="btn" style="margin-bottom:15px">+ Add Partner/Donor</a>
-      ${partners.length?`<table><tr><th>Name</th><th>Type</th><th>Organization</th><th>Engagement</th><th>Total Given</th><th>Last Contact</th><th>Actions</th></tr>${partners.map(p=>`<tr><td><strong>${esc(p.name)}</strong><br><span class="muted">${esc(p.email||'')} ${esc(p.phone||'')}</span></td><td><span class="tag">${esc(p.type)}</span></td><td>${esc(p.organization||'-')}</td><td>${p.engagement_score||0}/100</td><td>UGX ${parseInt(p.total_contributions).toLocaleString()}</td><td>${p.last_contact||'-'}</td><td><form method="POST" action="/org/partners/${p.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>`:'<p class="muted">No partners yet</p>'}
-      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/partners?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
+      <form method="GET" action="/org/partners" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px">
+        <input name="search" placeholder="Search partners..." value="${esc(search)}" style="flex:2;min-width:200px;padding:8px">
+        <select name="type" style="flex:1;min-width:120px;padding:8px"><option value="">All Types</option><option value="donor" ${typeFilter==='donor'?'selected':''}>Donor</option><option value="sponsor" ${typeFilter==='sponsor'?'selected':''}>Sponsor</option><option value="partner" ${typeFilter==='partner'?'selected':''}>Partner</option></select>
+        <button class="btn btn-sm">Search</button>
+      </form>
+      ${partners.length?`<table><tr><th>Name</th><th>Type</th><th>Organization</th><th>Engagement</th><th>Total Given</th><th>Last Contact</th><th>Actions</th></tr>${partners.map(p=>`<tr><td><strong>${esc(p.name)}</strong><br><span class="muted">${esc(p.email||'')} ${esc(p.phone||'')}</span></td><td><span class="tag">${esc(p.type)}</span></td><td>${esc(p.organization||'-')}</td><td>${p.engagement_score||0}/100</td><td>UGX ${parseInt(p.total_contributions).toLocaleString()}</td><td>${p.last_contact||'-'}</td><td><a href="/org/partners/${p.id}/edit" class="btn btn-sm">Edit</a> <form method="POST" action="/org/partners/${p.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>`:'<p class="muted">No partners yet</p>'}
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/partners?page=${i+1}&search=${esc(search)}&type=${esc(typeFilter)}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -16165,6 +16291,30 @@ app.post('/org/partners/save', requireAuth, requireNotBanned, ah(async (req, res
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO partners(tenant_id,name,type,email,phone,organization,engagement_score,last_contact,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, req.body.name, req.body.type, req.body.email, req.body.phone, req.body.organization, req.body.engagement_score||0, req.body.last_contact||null, req.body.notes]);
   await audit(req.session.user.email, 'create_partner', `Added partner: ${req.body.name} (${req.body.type})`);
+  res.redirect('/org/partners');
+}));
+
+app.get('/org/partners/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const p = (await pool.query('SELECT * FROM partners WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!p) return res.status(404).send('Not found');
+  res.send(renderPage('Edit Partner', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Edit Partner: ${esc(p.name)}</h2>
+    <form method="POST" action="/org/partners/${p.id}/update">
+      <label>Name</label><input name="name" value="${esc(p.name)}" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Email</label><input name="email" type="email" value="${esc(p.email||'')}"></div><div><label>Phone</label><input name="phone" value="${esc(p.phone||'')}"></div><div><label>Type</label><select name="type"><option value="donor" ${p.type==='donor'?'selected':''}>Donor</option><option value="sponsor" ${p.type==='sponsor'?'selected':''}>Sponsor</option><option value="partner" ${p.type==='partner'?'selected':''}>Partner</option></select></div></div>
+      <label>Organization</label><input name="organization" value="${esc(p.organization||'')}">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Engagement Score (0-100)</label><input name="engagement_score" type="number" min="0" max="100" value="${p.engagement_score||0}"></div><div><label>Last Contact</label><input name="last_contact" type="date" value="${p.last_contact||''}"></div></div>
+      <label>Notes</label><textarea name="notes" rows="2">${esc(p.notes||'')}</textarea>
+      <button class="btn btn-green">Update Partner</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/org/partners/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, email, phone, type, organization, engagement_score, last_contact, notes } = req.body;
+  await pool.query('UPDATE partners SET name=$1,email=$2,phone=$3,type=$4,organization=$5,engagement_score=$6,last_contact=$7,notes=$8 WHERE id=$9 AND tenant_id=$10', [name, email, phone, type, organization, engagement_score||0, last_contact||null, notes, req.params.id, t]);
+  await audit(req.session.user.email, 'update_partner', `Updated partner: ${name}`);
   res.redirect('/org/partners');
 }));
 
