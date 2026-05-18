@@ -644,6 +644,12 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     const newsTickerHTML = allNews.slice(0, 5).map(n => `<span style="margin-right:40px"><a href="${esc(n.url)}" style="color:white;text-decoration:none">${esc(n.title)}</a> <span style="opacity:0.7;font-size:11px">[${esc(n.source)}]</span></span>`).join('');
 
     const content = `
+      ${loggedIn ? `<div style="background:linear-gradient(135deg,#059669,#0d9488);padding:12px 20px;text-align:center;color:white;font-size:14px;display:flex;justify-content:center;align-items:center;gap:16px;flex-wrap:wrap">
+        <span>You are logged in as <strong>${esc(req.session.user.email)}</strong> (Current Portal: <strong>${esc(currentType.charAt(0).toUpperCase()+currentType.slice(1)}</strong>)</span>
+        <a href="/portal/${currentType}" style="background:white;color:#059669;padding:6px 16px;border-radius:8px;font-weight:700;text-decoration:none;font-size:13px">My Dashboard</a>
+        <a href="/switch-portal" style="background:rgba(255,255,255,0.2);color:white;padding:6px 16px;border-radius:8px;font-weight:600;text-decoration:none;font-size:13px;border:1px solid rgba(255,255,255,0.4)">Switch Portal</a>
+        <a href="/logout" style="background:rgba(255,255,255,0.2);color:white;padding:6px 16px;border-radius:8px;font-weight:600;text-decoration:none;font-size:13px;border:1px solid rgba(255,255,255,0.4)">Logout</a>
+      </div>` : ''}
       ${advertHTML}
 
       <!-- NEWS TICKER -->

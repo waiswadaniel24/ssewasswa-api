@@ -2708,6 +2708,11 @@ document.addEventListener('DOMContentLoaded',function(){var imgs=document.queryS
 // Do NOT define a fallback here — Express uses first-match, so this would
 // intercept before launch-routes gets a chance to serve the landing page.
 
+// === HOME ROUTE (always shows landing page, even for logged-in users) ===
+app.get('/home', ah(async (req, res) => {
+  return res.redirect('/');
+}));
+
 app.get('/login', (req, res) => {
   res.send(renderPage('Login', `
     <div class="card" style="max-width:450px;margin:40px auto">
