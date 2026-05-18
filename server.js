@@ -188,17 +188,64 @@ app.use(helmet({
 }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
-// === SERVICE WORKER ROUTE — Must be BEFORE express.static to set proper headers ===
+// === SERVICE WORKER ROUTE — Must be BEFORE session & express.static to set proper headers ===
 app.get('/sw.js', (req, res) => {
-  const swPath = path.join(__dirname, 'public', 'sw.js');
+  const _path = require('path');
+  const _fs = require('fs');
+  const swPath = _path.resolve(__dirname, 'public', 'sw.js');
   res.set('Content-Type', 'application/javascript');
   res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.set('Service-Worker-Allowed', '/');
-  if (fs.existsSync(swPath)) {
+  if (_fs.existsSync(swPath)) {
     res.sendFile(swPath);
   } else {
     res.send(`const CACHE_NAME='comfort-v8.0';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/login','/offline'])).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));self.clients.claim()});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{if(r.status===200){const rc=r.clone();caches.open(CACHE_NAME).then(c=>c.put(e.request,rc))}return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))))});`);
   }
+});
+
+// === MANIFEST.JSON — Must be BEFORE session middleware for reliable PWA install ===
+app.get('/manifest.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/manifest+json');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(JSON.stringify({
+    name: "Comfort Zone - All-in-One Management Platform",
+    short_name: "ComfortZone",
+    description: "The Operating System for African Institutions. Manage schools, churches, clinics, businesses and organizations all in one place.",
+    start_url: "/?source=pwa",
+    scope: "/",
+    display: "standalone",
+    background_color: "#ffffff",
+    theme_color: "#059669",
+    orientation: "any",
+    dir: "ltr",
+    lang: "en",
+    categories: ["business", "education", "health", "finance", "productivity", "medical", "lifestyle"],
+    prefer_related_applications: false,
+    icons: [
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
+      { src: "/icon-512-sized.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
+    ],
+    screenshots: [
+      { src: "/og-image.png", sizes: "1200x630", type: "image/png", form_factor: "wide", label: "Comfort Zone Dashboard" }
+    ],
+    shortcuts: [
+      { name: "Dashboard", short_name: "Dashboard", url: "/dashboard?source=pwa", icons: [{ src: "/icon-96.png", sizes: "96x96" }] },
+      { name: "Students", short_name: "Students", url: "/school/students?source=pwa", icons: [{ src: "/icon-96.png", sizes: "96x96" }] },
+      { name: "Messages", short_name: "Messages", url: "/notifications?source=pwa", icons: [{ src: "/icon-96.png", sizes: "96x96" }] },
+      { name: "Settings", short_name: "Settings", url: "/settings?source=pwa", icons: [{ src: "/icon-96.png", sizes: "96x96" }] }
+    ],
+    share_target: {
+      action: "/share",
+      method: "POST",
+      enctype: "multipart/form-data",
+      params: { title: "title", text: "text", url: "url" }
+    },
+    display_override: ["standalone", "minimal-ui"],
+    edge_side_panel: { preferred_width: 400 },
+    launch_handler: { client_mode: "auto" }
+  }));
 });
 app.use(express.static('public'));
 
@@ -37936,60 +37983,8 @@ app.get('/pricing', ah(async (req, res) => {
 // ============================================================
 // === 4. PWA MANIFEST & SERVICE WORKER ===
 // ============================================================
-app.get('/manifest.json', (req, res) => {
-  res.setHeader('Content-Type', 'application/manifest+json');
-  res.setHeader('Cache-Control', 'public, max-age=3600');
-  res.send(JSON.stringify({
-    name: "Comfort Zone - All-in-One Management Platform",
-    short_name: "ComfortZone",
-    description: "The Operating System for African Institutions. Manage schools, churches, clinics, businesses and organizations all in one place. Students to invoices. Patients to prescriptions. Members to ministry. Staff to salaries.",
-    start_url: "/?source=pwa",
-    scope: "/",
-    display: "standalone",
-    background_color: "#ffffff",
-    theme_color: "#059669",
-    orientation: "any",
-    dir: "ltr",
-    lang: "en",
-    categories: ["business", "education", "health", "finance", "productivity", "medical", "lifestyle"],
-    prefer_related_applications: false,
-    icons: [
-      { src: "/icon-16.png", sizes: "16x16", type: "image/png", purpose: "any" },
-      { src: "/icon-32.png", sizes: "32x32", type: "image/png", purpose: "any" },
-      { src: "/icon-48.png", sizes: "48x48", type: "image/png", purpose: "any" },
-      { src: "/icon-72.png", sizes: "72x72", type: "image/png", purpose: "any" },
-      { src: "/icon-96.png", sizes: "96x96", type: "image/png", purpose: "any" },
-      { src: "/icon-120.png", sizes: "120x120", type: "image/png", purpose: "any" },
-      { src: "/icon-152.png", sizes: "152x152", type: "image/png", purpose: "any" },
-      { src: "/icon-167.png", sizes: "167x167", type: "image/png", purpose: "any" },
-      { src: "/icon-180.png", sizes: "180x180", type: "image/png", purpose: "any" },
-      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-      { src: "/icon-512-sized.png", sizes: "512x512", type: "image/png", purpose: "any" },
-      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
-      { src: "/icon-512-sized.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
-      { src: "/icon.png", sizes: "1024x1024", type: "image/png", purpose: "any" }
-    ],
-    screenshots: [
-      { src: "/og-image.png", sizes: "1200x630", type: "image/png", form_factor: "wide", label: "Comfort Zone Dashboard" }
-    ],
-    shortcuts: [
-      { name: "Dashboard", short_name: "Dashboard", url: "/dashboard?source=pwa", icons: [{ src: "/icon-96.png", sizes: "96x96" }] },
-      { name: "Students", short_name: "Students", url: "/school/students?source=pwa", icons: [{ src: "/icon-96.png", sizes: "96x96" }] },
-      { name: "Messages", short_name: "Messages", url: "/notifications?source=pwa", icons: [{ src: "/icon-96.png", sizes: "96x96" }] },
-      { name: "Settings", short_name: "Settings", url: "/settings?source=pwa", icons: [{ src: "/icon-96.png", sizes: "96x96" }] }
-    ],
-    share_target: {
-      action: "/share",
-      method: "POST",
-      enctype: "multipart/form-data",
-      params: { title: "title", text: "text", url: "url" }
-    },
-    display_override: ["standalone", "minimal-ui"],
-    edge_side_panel: { preferred_width: 400 },
-    launch_handler: { client_mode: "auto" }
-  }));
-});
+// NOTE: manifest.json and sw.js routes are now defined BEFORE session middleware
+// at the top of the file to ensure reliable PWA install prompts.
 
 // ============================================================
 // PWA OFFLINE PAGE
