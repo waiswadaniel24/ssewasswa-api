@@ -4756,9 +4756,14 @@ app.post('/org/members/:id/delete', requireAuth, requireNotBanned, ah(async (req
 // === ORG: PROJECTS (with progress update) ===
 app.get('/org/projects', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const projects = (await pool.query('SELECT * FROM projects WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 20;
+  const offset = (page - 1) * limit;
+  const total = (await pool.query('SELECT COUNT(*) FROM projects WHERE tenant_id=$1', [t])).rows[0].count;
+  const projects = (await pool.query('SELECT * FROM projects WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Projects', `
-    <div class="card"><h3>All Projects</h3>
+    <div class="card"><h3>All Projects (${total})</h3>
       <a href="/org/projects/new" class="btn btn-sm">+ New Project</a>
       <div class="grid" style="margin-top:15px">
         ${projects.map(p => {
@@ -4779,6 +4784,7 @@ app.get('/org/projects', requireAuth, requireNotBanned, ah(async (req, res) => {
           </div>`;
         }).join('') || '<p>No projects yet</p>'}
       </div>
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/projects?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -4821,9 +4827,14 @@ app.post('/org/projects/:id/status', requireAuth, requireNotBanned, ah(async (re
 // === ORG: EVENTS ===
 app.get('/org/events', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const events = (await pool.query('SELECT * FROM events WHERE tenant_id=$1 ORDER BY event_date DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 20;
+  const offset = (page - 1) * limit;
+  const total = (await pool.query('SELECT COUNT(*) FROM events WHERE tenant_id=$1', [t])).rows[0].count;
+  const events = (await pool.query('SELECT * FROM events WHERE tenant_id=$1 ORDER BY event_date DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Events', `
-    <div class="card"><h3>Events</h3>
+    <div class="card"><h3>Events (${total})</h3>
       <a href="/org/events/new" class="btn btn-sm" style="margin-bottom:15px">+ New Event</a>
       <div class="grid">
         ${events.map(e => `
@@ -4836,6 +4847,7 @@ app.get('/org/events', requireAuth, requireNotBanned, ah(async (req, res) => {
           </div>
         `).join('') || '<p>No events yet</p>'}
       </div>
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/events?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -4865,15 +4877,21 @@ app.post('/org/events/save', requireAuth, requireNotBanned, ah(async (req, res) 
 // === ORG: MEETING MINUTES ===
 app.get('/org/meetings', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const meetings = (await pool.query('SELECT * FROM meeting_minutes WHERE tenant_id=$1 ORDER BY meeting_date DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 25;
+  const offset = (page - 1) * limit;
+  const total = (await pool.query('SELECT COUNT(*) FROM meeting_minutes WHERE tenant_id=$1', [t])).rows[0].count;
+  const meetings = (await pool.query('SELECT * FROM meeting_minutes WHERE tenant_id=$1 ORDER BY meeting_date DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Meeting Minutes', `
-    <div class="card"><h3>Meeting Minutes</h3>
+    <div class="card"><h3>Meeting Minutes (${total})</h3>
       <a href="/org/meetings/new" class="btn btn-sm" style="margin-bottom:15px">+ New Minutes</a>
       <table><tr><th>Title</th><th>Date</th><th>Actions</th></tr>
       ${meetings.map(m => `<tr><td>${esc(m.title)}</td><td>${m.meeting_date ? new Date(m.meeting_date).toLocaleDateString() : ''}</td>
         <td><a href="/org/meetings/${m.id}" class="btn btn-sm">View</a> <form method="POST" action="/org/meetings/${m.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</button></form></td>
       </tr>`).join('') || '<tr><td colspan="3">No meetings yet</td></tr>'}
       </table>
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/meetings?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -4919,9 +4937,14 @@ app.post('/org/meetings/:id/delete', requireAuth, requireNotBanned, ah(async (re
 // === ORG: NOTICE BOARD ===
 app.get('/org/notices', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const notices = (await pool.query('SELECT * FROM notice_board WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 25;
+  const offset = (page - 1) * limit;
+  const total = (await pool.query('SELECT COUNT(*) FROM notice_board WHERE tenant_id=$1', [t])).rows[0].count;
+  const notices = (await pool.query('SELECT * FROM notice_board WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Notice Board', `
-    <div class="card"><h3>Notice Board</h3>
+    <div class="card"><h3>Notice Board (${total})</h3>
       <a href="/org/notices/new" class="btn btn-sm" style="margin-bottom:15px">+ Post Notice</a>
       ${notices.map(n => `
         <div class="card" style="border-left:4px solid ${n.priority === 'urgent' ? '#dc2626' : n.priority === 'important' ? '#f59e0b' : '#4f46e5'}">
@@ -4931,6 +4954,7 @@ app.get('/org/notices', requireAuth, requireNotBanned, ah(async (req, res) => {
           <form method="POST" action="/org/notices/${n.id}/delete" style="display:inline;margin-top:8px"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Delete</button></form>
         </div>
       `).join('') || '<p>No notices yet</p>'}
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/notices?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -4964,9 +4988,16 @@ app.post('/org/notices/:id/delete', requireAuth, requireNotBanned, ah(async (req
 // === ORG: FINANCE ===
 app.get('/org/finance', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const records = (await pool.query('SELECT * FROM org_finance WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [t])).rows;
-  const income = records.filter(r => r.type === 'income').reduce((a, b) => a + parseInt(b.amount), 0);
-  const expense = records.filter(r => r.type === 'expense').reduce((a, b) => a + parseInt(b.amount), 0);
+  const page = parseInt(req.query.page) || 1;
+  const limit = 50;
+  const offset = (page - 1) * limit;
+  const total = (await pool.query('SELECT COUNT(*) FROM org_finance WHERE tenant_id=$1', [t])).rows[0].count;
+  const records = (await pool.query('SELECT * FROM org_finance WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  // Get totals across ALL records (not just current page)
+  const totals = (await pool.query("SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE 0 END),0) as income, COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) as expense FROM org_finance WHERE tenant_id=$1", [t])).rows[0];
+  const income = parseInt(totals.income);
+  const expense = parseInt(totals.expense);
+  const totalPages = Math.ceil(parseInt(total) / limit);
   // Get finance categories for dropdown
   await pool.query(`ALTER TABLE org_finance ADD COLUMN IF NOT EXISTS category VARCHAR(255)`).catch(() => {});
   const finCats = (await pool.query('SELECT * FROM finance_categories WHERE tenant_id=$1 ORDER BY type, name', [t])).rows;
@@ -4990,10 +5021,11 @@ app.get('/org/finance', requireAuth, requireNotBanned, ah(async (req, res) => {
       </form>
       <a href="/org/finance/categories" class="btn btn-sm" style="margin-top:8px">Manage Categories & Budget</a>
     </div>
-    <div class="card"><h3>Recent Transactions</h3>
+    <div class="card"><h3>Recent Transactions (${total} total)</h3>
       <table><tr><th>Type</th><th>Category</th><th>Amount</th><th>Description</th><th>Date</th></tr>
       ${records.map(r => `<tr><td><span style="color:${r.type === 'income' ? '#059669' : '#dc2626'}">${r.type}</span></td><td>${esc(r.category||'-')}</td><td>UGX ${parseInt(r.amount).toLocaleString()}</td><td>${esc(r.description)}</td><td>${new Date(r.created_at).toLocaleDateString()}</td></tr>`).join('')}
       </table>
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/finance?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
     <script>
     var incomeCats = ${JSON.stringify(incomeCats)};
@@ -11917,7 +11949,7 @@ app.get('/org/meetings/:id/agenda', requireAuth, requireNotBanned, ah(async (req
   const t = req.session.user.tenant_id;
   const meeting = (await pool.query('SELECT * FROM meeting_minutes WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!meeting) return res.status(404).send('Meeting not found');
-  const agendaItems = (await pool.query('SELECT * FROM meeting_agendas WHERE meeting_id=$1 ORDER BY order_no', [meeting.id])).rows;
+  const agendaItems = (await pool.query('SELECT * FROM meeting_agendas WHERE meeting_id=$1 AND tenant_id=$2 ORDER BY order_no', [meeting.id, t])).rows;
   res.send(renderPage('Meeting Agenda', `
     <div class="card"><h2>Agenda: ${esc(meeting.title)}</h2><p class="muted">${meeting.meeting_date?new Date(meeting.meeting_date).toLocaleDateString():''}</p>
       <a href="/org/meetings/${meeting.id}/agenda/new" class="btn btn-sm" style="margin:10px 0">+ Add Agenda Item</a>
@@ -11934,16 +11966,21 @@ app.post('/org/meetings/:id/agenda/save', requireAuth, requireNotBanned, ah(asyn
   const t = req.session.user.tenant_id;
   const { item_text, order_no } = req.body;
   await pool.query('INSERT INTO meeting_agendas(tenant_id,meeting_id,item_text,order_no) VALUES($1,$2,$3,$4)', [t, req.params.id, item_text, order_no || 1]);
+  await audit(req.session.user.email, 'create_agenda', `Added agenda item to meeting ID: ${req.params.id}`);
   res.redirect(`/org/meetings/${req.params.id}/agenda`);
 }));
 
 app.post('/org/meetings/agenda/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('UPDATE meeting_agendas SET completed=NOT completed WHERE id=$1', [req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE meeting_agendas SET completed=NOT completed WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'toggle_agenda', `Toggled agenda item ID: ${req.params.id}`);
   res.redirect('back');
 }));
 
 app.post('/org/meetings/agenda/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('DELETE FROM meeting_agendas WHERE id=$1', [req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM meeting_agendas WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_agenda', `Deleted agenda item ID: ${req.params.id}`);
   res.redirect('back');
 }));
 
@@ -15977,13 +16014,22 @@ app.get('/org/resolutions/:id/vote', requireAuth, requireNotBanned, ah(async (re
   const t = req.session.user.tenant_id;
   const res_ = (await pool.query('SELECT * FROM board_resolutions WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!res_) return res.status(404).send('Not found');
+  // Ensure resolution_votes table exists
+  await pool.query(`CREATE TABLE IF NOT EXISTS resolution_votes (
+    id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, resolution_id INT NOT NULL, voter_email TEXT NOT NULL,
+    direction TEXT NOT NULL, voted_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(resolution_id, voter_email)
+  )`).catch(() => {});
+  // Check if this user already voted
+  const existingVote = (await pool.query('SELECT direction FROM resolution_votes WHERE resolution_id=$1 AND voter_email=$2 AND tenant_id=$3', [req.params.id, req.session.user.email, t])).rows[0];
+  const votedMsg = existingVote ? `<div class="alert" style="background:#fef3c7;padding:12px;border-radius:8px;margin-bottom:15px">You already voted <strong>${esc(existingVote.direction)}</strong> on this resolution.</div>` : '';
   res.send(renderPage('Vote on Resolution', `<div class="card" style="max-width:600px;margin:0 auto"><h2>${esc(res_.title)}</h2><p>${esc(res_.resolution_text||'')}</p>
     <p class="muted">Proposed: ${esc(res_.proposed_by||'')} | Seconded: ${esc(res_.seconded_by||'')} | Date: ${res_.meeting_date||''}</p>
-    <div style="margin-top:20px;display:flex;gap:10px">
+    ${votedMsg || `<div style="margin-top:20px;display:flex;gap:10px">
       <form method="POST" action="/org/resolutions/${res_.id}/vote/for" style="flex:1"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-green" style="width:100%">Vote For (${res_.vote_for})</button></form>
       <form method="POST" action="/org/resolutions/${res_.id}/vote/against" style="flex:1"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red" style="width:100%">Vote Against (${res_.vote_against})</button></form>
       <form method="POST" action="/org/resolutions/${res_.id}/vote/abstain" style="flex:1"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn" style="width:100%">Abstain (${res_.vote_abstain})</button></form>
-    </div>
+    </div>`}
     <a href="/org/resolutions" class="btn" style="margin-top:15px">Back</a></div>
   `, req.session.user));
 }));
@@ -15992,15 +16038,27 @@ app.post('/org/resolutions/:id/vote/:direction', requireAuth, requireNotBanned, 
   const VALID_COLS = ['vote_for','vote_against','vote_abstain'];
   const col = VALID_COLS.includes(req.params.direction === 'for' ? 'vote_for' : req.params.direction === 'against' ? 'vote_against' : 'vote_abstain') ? (req.params.direction === 'for' ? 'vote_for' : req.params.direction === 'against' ? 'vote_against' : 'vote_abstain') : null;
   if (!col) return res.status(400).send('Invalid vote direction');
+  const t = req.session.user.tenant_id;
+  const voterEmail = req.session.user.email;
+  // Ensure resolution_votes table exists
+  await pool.query(`CREATE TABLE IF NOT EXISTS resolution_votes (
+    id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, resolution_id INT NOT NULL, voter_email TEXT NOT NULL,
+    direction TEXT NOT NULL, voted_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(resolution_id, voter_email)
+  )`).catch(() => {});
+  // Check for duplicate vote
+  const existingVote = (await pool.query('SELECT id FROM resolution_votes WHERE resolution_id=$1 AND voter_email=$2 AND tenant_id=$3', [req.params.id, voterEmail, t])).rows[0];
+  if (existingVote) return res.status(400).send('You have already voted on this resolution.');
   // Race condition fix: use transaction with FOR UPDATE
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('SELECT id FROM board_resolutions WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [req.params.id, req.session.user.tenant_id]);
-    await client.query(`UPDATE board_resolutions SET ${col}=${col}+1 WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.session.user.tenant_id]);
+    await client.query('SELECT id FROM board_resolutions WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [req.params.id, t]);
+    await client.query(`UPDATE board_resolutions SET ${col}=${col}+1 WHERE id=$1 AND tenant_id=$2`, [req.params.id, t]);
+    await client.query('INSERT INTO resolution_votes(tenant_id,resolution_id,voter_email,direction) VALUES($1,$2,$3,$4)', [t, req.params.id, voterEmail, req.params.direction]);
     await client.query('COMMIT');
-  } catch(e) { await client.query('ROLLBACK'); } finally { client.release(); }
-  await audit(req.session.user.email, 'resolution_vote', `Voted ${req.params.direction} on resolution ID: ${req.params.id}`);
+  } catch(e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
+  await audit(voterEmail, 'resolution_vote', `Voted ${req.params.direction} on resolution ID: ${req.params.id}`);
   res.redirect(`/org/resolutions/${req.params.id}/vote`);
 }));
 
@@ -16071,7 +16129,12 @@ app.post('/org/assets/:id/delete', requireAuth, requireNotBanned, ah(async (req,
 // =============================================
 app.get('/org/partners', requireAuth, requireNotBanned, requireFeature('partners'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const partners = (await pool.query('SELECT * FROM partners WHERE tenant_id=$1 ORDER BY total_contributions DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 25;
+  const offset = (page - 1) * limit;
+  const total = (await pool.query('SELECT COUNT(*) FROM partners WHERE tenant_id=$1', [t])).rows[0].count;
+  const partners = (await pool.query('SELECT * FROM partners WHERE tenant_id=$1 ORDER BY total_contributions DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   const donors = partners.filter(p=>p.type==='donor');
   const sponsors = partners.filter(p=>p.type==='sponsor');
   const partners_ = partners.filter(p=>p.type==='partner');
@@ -16080,6 +16143,7 @@ app.get('/org/partners', requireAuth, requireNotBanned, requireFeature('partners
     <div class="stats"><div class="stat-card"><div class="stat-num">${donors.length}</div><div>Donors</div></div><div class="stat-card"><div class="stat-num">${sponsors.length}</div><div>Sponsors</div></div><div class="stat-card"><div class="stat-num">${partners_.length}</div><div>Partners</div></div><div class="stat-card"><div class="stat-num">UGX ${partners.reduce((a,p)=>a+(p.total_contributions||0),0).toLocaleString()}</div><div>Total Contributions</div></div></div>
     <div class="card"><a href="/org/partners/new" class="btn" style="margin-bottom:15px">+ Add Partner/Donor</a>
       ${partners.length?`<table><tr><th>Name</th><th>Type</th><th>Organization</th><th>Engagement</th><th>Total Given</th><th>Last Contact</th><th>Actions</th></tr>${partners.map(p=>`<tr><td><strong>${esc(p.name)}</strong><br><span class="muted">${esc(p.email||'')} ${esc(p.phone||'')}</span></td><td><span class="tag">${esc(p.type)}</span></td><td>${esc(p.organization||'-')}</td><td>${p.engagement_score||0}/100</td><td>UGX ${parseInt(p.total_contributions).toLocaleString()}</td><td>${p.last_contact||'-'}</td><td><form method="POST" action="/org/partners/${p.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>`:'<p class="muted">No partners yet</p>'}
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/partners?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -16116,11 +16180,17 @@ app.post('/org/partners/:id/delete', requireAuth, requireNotBanned, ah(async (re
 // =============================================
 app.get('/org/ticketing', requireAuth, requireNotBanned, requireFeature('event_ticketing'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const events = (await pool.query('SELECT * FROM ticketed_events WHERE tenant_id=$1 ORDER BY event_date DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 20;
+  const offset = (page - 1) * limit;
+  const total = (await pool.query('SELECT COUNT(*) FROM ticketed_events WHERE tenant_id=$1', [t])).rows[0].count;
+  const events = (await pool.query('SELECT * FROM ticketed_events WHERE tenant_id=$1 ORDER BY event_date DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Event Ticketing', `
     <div class="hero" style="background:linear-gradient(135deg,#e11d48,#be123c)"><h1>Event Ticketing</h1><p>Paid events, QR tickets and check-in</p></div>
     <div class="card"><a href="/org/ticketing/new" class="btn" style="margin-bottom:15px">+ Create Event</a>
       ${events.length?`<table><tr><th>Event</th><th>Date</th><th>Venue</th><th>Price</th><th>Sold/Capacity</th><th>Actions</th></tr>${events.map(e=>`<tr><td><strong>${esc(e.title)}</strong></td><td>${e.event_date||'-'}</td><td>${esc(e.venue||'-')}</td><td>UGX ${parseInt(e.price).toLocaleString()}</td><td>${e.tickets_sold}/${e.capacity}</td><td><a href="/org/ticketing/${e.id}/tickets" class="btn btn-sm">Tickets</a> <a href="/org/ticketing/${e.id}/register" class="btn btn-sm btn-green">Register</a> <form method="POST" action="/org/ticketing/${e.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>`:'<p class="muted">No events</p>'}
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/ticketing?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -16169,7 +16239,7 @@ app.post('/org/ticketing/:id/register/save', requireAuth, requireNotBanned, ah(a
     if (ev.tickets_sold >= ev.capacity) { await client.query('ROLLBACK'); client.release(); return res.status(400).send('Sold out! No more tickets available.'); }
     const code = 'TKT-' + crypto.randomBytes(4).toString('hex').toUpperCase();
     await client.query('INSERT INTO event_tickets(tenant_id,event_id,attendee_name,attendee_email,attendee_phone,ticket_code) VALUES($1,$2,$3,$4,$5,$6)', [t, req.params.id, req.body.attendee_name, req.body.attendee_email, req.body.attendee_phone, code]);
-    await client.query('UPDATE ticketed_events SET tickets_sold=tickets_sold+1 WHERE id=$1', [req.params.id]);
+    await client.query('UPDATE ticketed_events SET tickets_sold=tickets_sold+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
     await client.query('COMMIT');
   } catch(e) { await client.query('ROLLBACK'); } finally { client.release(); }
   await audit(req.session.user.email, 'ticket_register', `Registered ${req.body.attendee_name} for event ID: ${req.params.id}`);
@@ -16180,7 +16250,7 @@ app.get('/org/ticketing/:id/tickets', requireAuth, requireNotBanned, ah(async (r
   const t = req.session.user.tenant_id;
   const event = (await pool.query('SELECT * FROM ticketed_events WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!event) return res.status(404).send('Not found');
-  const tickets = (await pool.query('SELECT * FROM event_tickets WHERE event_id=$1 ORDER BY created_at DESC', [event.id])).rows;
+  const tickets = (await pool.query('SELECT * FROM event_tickets WHERE event_id=$1 AND tenant_id=$2 ORDER BY created_at DESC', [event.id, t])).rows;
   res.send(renderPage('Event Tickets', `<div class="card"><h2>${esc(event.title)} - Tickets</h2>
     ${tickets.length?`<table><tr><th>Code</th><th>Name</th><th>Email</th><th>Status</th><th>Check-in</th></tr>${tickets.map(tk=>`<tr><td><code>${esc(tk.ticket_code)}</code></td><td>${esc(tk.attendee_name)}</td><td>${esc(tk.attendee_email||'-')}</td><td>${tk.checked_in?'<span class="tag" style="background:#d1fae5">Checked In</span>':'<span class="tag">Active</span>'}</td><td>${!tk.checked_in?`<form method="POST" action="/org/ticketing/ticket/${tk.id}/checkin" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-green">Check In</button></form>`:'-'}</td></tr>`).join('')}</table>`:'<p class="muted">No tickets sold</p>'}
     <a href="/org/ticketing" class="btn" style="margin-top:10px">Back</a></div>
@@ -16188,14 +16258,15 @@ app.get('/org/ticketing/:id/tickets', requireAuth, requireNotBanned, ah(async (r
 }));
 
 app.post('/org/ticketing/ticket/:id/checkin', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('UPDATE event_tickets SET checked_in=true, checked_in_at=NOW() WHERE id=$1', [req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE event_tickets SET checked_in=true, checked_in_at=NOW() WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
   await audit(req.session.user.email, 'ticket_checkin', `Checked in ticket ID: ${req.params.id}`);
   res.redirect('back');
 }));
 
 app.post('/org/ticketing/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  await pool.query('DELETE FROM event_tickets WHERE event_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM event_tickets WHERE event_id=$1 AND tenant_id=$2', [req.params.id, t]);
   await pool.query('DELETE FROM ticketed_events WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
   await audit(req.session.user.email, 'delete_ticketed_event', `Deleted ticketed event ID: ${req.params.id}`);
   res.redirect('/org/ticketing');
