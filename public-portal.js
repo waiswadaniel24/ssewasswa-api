@@ -391,11 +391,10 @@ document.querySelectorAll('#mobileMenu a').forEach(a => {
   if(!banner) return;
   if(localStorage.getItem('cookieAccepted') || localStorage.getItem('cookieDismissed')){
     banner.style.display = 'none';
-    return;
   }
-  window.acceptCookies = function(){ localStorage.setItem('cookieAccepted','1'); banner.style.display='none'; };
-  window.dismissCookies = function(){ localStorage.setItem('cookieDismissed','1'); banner.style.display='none'; };
 })();
+function acceptCookies(){ localStorage.setItem('cookieAccepted','1'); var b=document.getElementById('cookieBanner'); if(b) b.style.display='none'; }
+function dismissCookies(){ localStorage.setItem('cookieDismissed','1'); var b=document.getElementById('cookieBanner'); if(b) b.style.display='none'; }
 </script>
 </body></html>`;
     res.send(html);
