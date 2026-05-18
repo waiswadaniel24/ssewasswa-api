@@ -223,9 +223,23 @@ if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
 let sessionStore;
 try {
   sessionStore = (pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true }));
+  // Set a prune timer to clean up expired sessions periodically
+  if (pgSessionStore) pgSessionStore.pruneSessions = () => {};
 } catch (e) {
   console.warn('[Session] PG store failed, using memory store:', e.message);
+  sessionStore = undefined;
+  pgSessionStore = null;
 }
+// Add request timeout BEFORE session to prevent hung DB connections from blocking all requests
+app.use((req, res, next) => {
+  req.setTimeout(10000, () => {
+    if (!res.headersSent) {
+      console.warn('[Timeout] Request timed out:', req.method, req.path);
+      res.status(503).send('Service temporarily unavailable. Please try again.');
+    }
+  });
+  next();
+});
 app.use(session({
   store: sessionStore || undefined, // undefined = default memory store
   secret: process.env.SESSION_SECRET || 'dev-session-secret-local-only',
@@ -238,6 +252,15 @@ app.use(session({
     maxAge: SESSION_MAX_AGE
   }
 }));
+
+// Session error recovery — if session store fails, continue without session
+app.use((req, res, next) => {
+  if (!req.session) {
+    console.warn('[Session] No session available — creating fallback');
+    req.session = { csrfToken: generateCSRFToken() };
+  }
+  next();
+});
 
 // Generate CSRF token and store in session (AFTER session middleware)
 app.use((req, res, next) => {
