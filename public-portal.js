@@ -504,35 +504,35 @@ ul { list-style: none; }
       <p class="section-desc">Everything you need to know about getting started with Comfort.</p>
     </div>
     <div class="faq-container">
-      <div class="faq-item reveal" onclick="toggleFaq(this)">
+      <div class="faq-item reveal">
         <div class="faq-question"><span>Is Comfort really free to start?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
         <div class="faq-answer"><div class="faq-answer-inner">Yes! The Free plan lets you manage up to 100 records with up to 3 users, forever. No credit card required. When you're ready to scale, upgrade to a paid plan.</div></div>
       </div>
-      <div class="faq-item reveal" onclick="toggleFaq(this)">
+      <div class="faq-item reveal">
         <div class="faq-question"><span>Does it work offline?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
         <div class="faq-answer"><div class="faq-answer-inner">Absolutely. Comfort is a Progressive Web App (PWA) that works offline. You can add data, take attendance, record sales, and more &mdash; everything syncs when you're back online.</div></div>
       </div>
-      <div class="faq-item reveal" onclick="toggleFaq(this)">
+      <div class="faq-item reveal">
         <div class="faq-question"><span>Is my data secure?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
         <div class="faq-answer"><div class="faq-answer-inner">Yes. All data is encrypted in transit (SSL/TLS) and at rest. We use role-based access control, audit logging, and two-factor authentication. Your data belongs to you.</div></div>
       </div>
-      <div class="faq-item reveal" onclick="toggleFaq(this)">
+      <div class="faq-item reveal">
         <div class="faq-question"><span>Can I customize it for my business?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
         <div class="faq-answer"><div class="faq-answer-inner">Yes! Each business type gets a specialized dashboard with features built specifically for that industry. You can also customize branding, colors, and logos.</div></div>
       </div>
-      <div class="faq-item reveal" onclick="toggleFaq(this)">
+      <div class="faq-item reveal">
         <div class="faq-question"><span>What payment methods do you accept?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
         <div class="faq-answer"><div class="faq-answer-inner">We accept MTN Mobile Money, Airtel Money, bank transfers, and Flutterwave for card payments. All prices are in Uganda Shillings (UGX).</div></div>
       </div>
-      <div class="faq-item reveal" onclick="toggleFaq(this)">
+      <div class="faq-item reveal">
         <div class="faq-question"><span>How long does setup take?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
         <div class="faq-answer"><div class="faq-answer-inner">Most institutions are up and running in under 10 minutes. Just register, pick your institution type, and start adding data. Our team can help with data migration for larger setups.</div></div>
       </div>
-      <div class="faq-item reveal" onclick="toggleFaq(this)">
+      <div class="faq-item reveal">
         <div class="faq-question"><span>Can I switch between business types?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
         <div class="faq-answer"><div class="faq-answer-inner">Yes! If you start as a retail shop and later add a restaurant, you can enable multiple specializations. Each gets its own dedicated dashboard and features.</div></div>
       </div>
-      <div class="faq-item reveal" onclick="toggleFaq(this)">
+      <div class="faq-item reveal">
         <div class="faq-question"><span>Do you offer support?</span><span class="faq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div>
         <div class="faq-answer"><div class="faq-answer-inner">Yes &mdash; Free plan gets email support (24-48hr response). Basic and above get priority support via email, WhatsApp, and phone. Enterprise gets a dedicated account manager.</div></div>
       </div>
@@ -579,15 +579,15 @@ ul { list-style: none; }
   <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
 </a>
 
-<button class="back-to-top" id="backToTop" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Back to top">
+<button class="back-to-top" id="backToTop" aria-label="Back to top">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
 </button>
 
 <div class="cookie-banner" id="cookieBanner">
   <span>We use cookies to improve your experience. By continuing, you agree to our <a href="/privacy">Privacy Policy</a>.</span>
   <div class="cookie-actions">
-    <button class="cookie-accept" onclick="acceptCookies()">Accept</button>
-    <button class="cookie-dismiss" onclick="dismissCookies()">Dismiss</button>
+    <button class="cookie-accept">Accept</button>
+    <button class="cookie-dismiss">Dismiss</button>
   </div>
 </div>
 
@@ -674,15 +674,19 @@ document.querySelectorAll('a[href^="/#"]').forEach(function(a){
 (function(){
   var banner = document.getElementById('cookieBanner');
   if(!banner) return;
-  if(localStorage.getItem('cookieAccepted') || localStorage.getItem('cookieDismissed')){ banner.style.display = 'none'; return; }
-  window.acceptCookies = function(){ localStorage.setItem('cookieAccepted','1'); banner.style.display='none'; };
-  window.dismissCookies = function(){ localStorage.setItem('cookieDismissed','1'); banner.style.display='none'; };
+  if(localStorage.getItem('cookieAccepted') || localStorage.getItem('cookieDismissed')){ banner.style.display = 'none'; }
+  var acceptBtn = banner.querySelector('.cookie-accept');
+  var dismissBtn = banner.querySelector('.cookie-dismiss');
+  if(acceptBtn) acceptBtn.addEventListener('click', function(){ localStorage.setItem('cookieAccepted','1'); banner.style.display='none'; });
+  if(dismissBtn) dismissBtn.addEventListener('click', function(){ localStorage.setItem('cookieDismissed','1'); banner.style.display='none'; });
 })();
-function toggleFaq(item){
-  var wasOpen = item.classList.contains('open');
-  document.querySelectorAll('.faq-item.open').forEach(function(el){ el.classList.remove('open'); });
-  if(!wasOpen) item.classList.add('open');
-}
+document.querySelectorAll('.faq-item').forEach(function(item){
+  item.addEventListener('click', function(){
+    var wasOpen = item.classList.contains('open');
+    document.querySelectorAll('.faq-item.open').forEach(function(el){ el.classList.remove('open'); });
+    if(!wasOpen) item.classList.add('open');
+  });
+});
 </script>
 </body>
 </html>`;
