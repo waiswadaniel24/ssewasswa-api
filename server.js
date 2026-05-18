@@ -219,17 +219,31 @@ if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
   console.error('FATAL: SESSION_SECRET must be set in production');
   process.exit(1);
 }
-// Wrap session store creation in try/catch — if DB is unavailable, use memory store as fallback
+// Wrap session store creation — test DB first, fall back to memory store
 let sessionStore;
-try {
-  sessionStore = (pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true }));
-  // Set a prune timer to clean up expired sessions periodically
-  if (pgSessionStore) pgSessionStore.pruneSessions = () => {};
-} catch (e) {
-  console.warn('[Session] PG store failed, using memory store:', e.message);
-  sessionStore = undefined;
-  pgSessionStore = null;
-}
+let _dbReady = false;
+// Try a quick DB connection test (async, non-blocking)
+pool.query('SELECT 1').then(() => {
+  _dbReady = true;
+  try {
+    pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true });
+    console.log('[Session] PG session store ready');
+  } catch (e) { console.warn('[Session] PG store creation failed:', e.message); }
+}).catch(e => {
+  console.warn('[Session] DB not ready yet, using memory store:', e.message);
+  // Retry in background every 5s
+  const retry = setInterval(() => {
+    pool.query('SELECT 1').then(() => {
+      _dbReady = true;
+      try {
+        pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true });
+        console.log('[Session] Upgraded to PG session store');
+      } catch (e2) { console.warn('[Session] PG store upgrade failed:', e2.message); }
+      clearInterval(retry);
+    }).catch(() => {});
+  }, 5000);
+});
+
 // Add request timeout BEFORE session to prevent hung DB connections from blocking all requests
 app.use((req, res, next) => {
   req.setTimeout(10000, () => {
