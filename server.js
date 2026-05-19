@@ -4069,6 +4069,29 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
   </div></div>`;
   sendEmail(email, 'Welcome to Comfort!', welcomeHtml);
   queueEmail(tenant.rows[0].id, email, 'Welcome to Comfort!', welcomeHtml);
+  // Signup Alert: notify platform admin
+  try {
+    const adminAlertHtml = `<div style="font-family:'Segoe UI',system-ui,sans-serif;max-width:500px;margin:0 auto;background:#f8fafc;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0">
+    <div style="background:linear-gradient(135deg,#059669,#10b981);padding:28px 24px;text-align:center">
+      <h1 style="color:white;font-size:22px;margin:0">&#128276; New Tenant Signup!</h1>
+    </div>
+    <div style="padding:24px">
+      <p style="font-size:15px;color:#1e293b">A new organization has just signed up on the platform:</p>
+      <table style="width:100%;font-size:14px;color:#334155">
+        <tr><td style="padding:6px 0;font-weight:700;color:#64748b">Organization</td><td>${esc(org_name)}</td></tr>
+        <tr><td style="padding:6px 0;font-weight:700;color:#64748b">Type</td><td>${esc(type)}</td></tr>
+        <tr><td style="padding:6px 0;font-weight:700;color:#64748b">Owner</td><td>${esc(name)}</td></tr>
+        <tr><td style="padding:6px 0;font-weight:700;color:#64748b">Email</td><td>${esc(email)}</td></tr>
+        <tr><td style="padding:6px 0;font-weight:700;color:#64748b">Plan</td><td>${esc(chosenPlan)}</td></tr>
+        <tr><td style="padding:6px 0;font-weight:700;color:#64748b">Tenant ID</td><td>${newTenantId}</td></tr>
+      </table>
+      <div style="text-align:center;margin-top:20px">
+        <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/dev/analytics" style="display:inline-block;padding:12px 28px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">View Analytics</a>
+      </div>
+    </div></div>`;
+    sendEmail('waiswadaniel24@gmail.com', `[Comfort] New Signup: ${org_name}`, adminAlertHtml);
+    queueEmail(1, 'waiswadaniel24@gmail.com', `[Comfort] New Signup: ${org_name}`, adminAlertHtml);
+  } catch(e) { console.warn('[Signup Alert] Failed:', e.message); }
   // v1.0: Subscription based on chosen plan
   // Set 2-month free trial for free plan, or trial dates for paid plans too
   const trialStart = new Date();
@@ -9503,6 +9526,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
           <a href="/dev/settings" class="nav-tile"><div class="nt-icon" style="background:#f1f5f9">&#9881;</div><div class="nt-label">Settings</div></a>
           <a href="/dev/api-health" class="nav-tile"><div class="nt-icon" style="background:#ecfdf5">&#128737;</div><div class="nt-label">System Health</div></a>
           <a href="/dev/api-analytics" class="nav-tile"><div class="nt-icon" style="background:#eff6ff">&#128200;</div><div class="nt-label">Analytics</div></a>
+          <a href="/dev/analytics" class="nav-tile"><div class="nt-icon" style="background:#0f172a">&#128202;</div><div class="nt-label">Global Analytics</div></a>
         </div>
 
         <h3>Content &amp; Publishing</h3>
@@ -40602,6 +40626,385 @@ app.post('/dev/webhooks/:id/test', requireAuth, requireSuperAdmin, ah(async (req
   if (!hook) return res.status(404).send('Not found');
   try { await require('https').request(hook.url, {method:'POST',headers:{'Content-Type':'application/json','X-Webhook-Secret':hook.secret}}, (r)=>{r.on('data',()=>{})}).end(JSON.stringify({test:true,timestamp:new Date().toISOString(),event:'ping'})); } catch(e) {}
   res.redirect('/dev/webhooks');
+}));
+
+// ============================================================
+// === GLOBAL ADMIN ANALYTICS DASHBOARD ===
+// ============================================================
+
+// API: Revenue analytics
+app.get('/dev/api/analytics/revenue', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const [mrrResult, thisMonthResult, lastMonthResult, monthlyData] = await Promise.all([
+    pool.query("SELECT COALESCE(SUM(amount),0) as mrr FROM subscriptions WHERE status='active' AND plan != 'free'"),
+    pool.query("SELECT COALESCE(SUM(amount),0) as total FROM developer_revenue WHERE amount > 0 AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())"),
+    pool.query("SELECT COALESCE(SUM(amount),0) as total FROM developer_revenue WHERE amount > 0 AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW() - INTERVAL '1 month')"),
+    pool.query("SELECT TO_CHAR(created_at, 'YYYY-MM') as month, COALESCE(SUM(amount),0) as revenue FROM developer_revenue WHERE created_at >= NOW() - INTERVAL '12 months' AND amount > 0 GROUP BY month ORDER BY month")
+  ]);
+  const mrr = parseInt(mrrResult.rows[0].mrr) || 0;
+  const arr = mrr * 12;
+  const thisMonth = parseInt(thisMonthResult.rows[0].total) || 0;
+  const lastMonth = parseInt(lastMonthResult.rows[0].total) || 0;
+  const growth = lastMonth > 0 ? ((thisMonth - lastMonth) / lastMonth * 100).toFixed(1) : (thisMonth > 0 ? 100 : 0);
+  res.json({ mrr, arr, thisMonth, lastMonth, growth: parseFloat(growth), monthly: monthlyData.rows });
+}));
+
+// API: Churn analytics
+app.get('/dev/api/analytics/churn', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const [activeSubs, cancelledThisMonth, totalSubsStart, churnTrend, newThisMonth] = await Promise.all([
+    pool.query("SELECT COUNT(*) as cnt FROM subscriptions WHERE status='active'"),
+    pool.query("SELECT COUNT(*) as cnt FROM subscriptions WHERE status IN ('cancelled','expired','inactive') AND DATE_TRUNC('month', COALESCE(expires_at, updated_at, created_at)) = DATE_TRUNC('month', NOW())"),
+    pool.query("SELECT COUNT(*) as cnt FROM subscriptions WHERE status IN ('active','cancelled','expired','inactive') AND COALESCE(started_at, created_at) < DATE_TRUNC('month', NOW())"),
+    pool.query("SELECT TO_CHAR(COALESCE(expires_at, updated_at, created_at), 'YYYY-MM') as month, COUNT(*) as cancelled FROM subscriptions WHERE status IN ('cancelled','expired','inactive') AND COALESCE(expires_at, updated_at, created_at) >= NOW() - INTERVAL '6 months' GROUP BY month ORDER BY month"),
+    pool.query("SELECT COUNT(*) as cnt FROM subscriptions WHERE DATE_TRUNC('month', COALESCE(started_at, created_at)) = DATE_TRUNC('month', NOW()) AND status='active'")
+  ]);
+  const active = parseInt(activeSubs.rows[0].cnt) || 0;
+  const cancelled = parseInt(cancelledThisMonth.rows[0].cnt) || 0;
+  const totalStart = parseInt(totalSubsStart.rows[0].cnt) || 0;
+  const churnRate = totalStart > 0 ? (cancelled / totalStart * 100).toFixed(1) : 0;
+  const newSubs = parseInt(newThisMonth.rows[0].cnt) || 0;
+  res.json({ active, cancelled, churnRate: parseFloat(churnRate), newThisMonth: newSubs, trend: churnTrend.rows });
+}));
+
+// API: Per-tenant revenue
+app.get('/dev/api/analytics/tenants', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const [topTenants, pieData] = await Promise.all([
+    pool.query("SELECT t.id, t.name, t.type, COALESCE(s.plan,'free') as plan, COALESCE(SUM(p.amount),0) as total_paid, MAX(p.created_at) as last_payment, CASE WHEN t.banned THEN 'Banned' WHEN t.approved THEN 'Active' ELSE 'Pending' END as status FROM tenants t LEFT JOIN payments p ON p.tenant_id = t.id LEFT JOIN subscriptions s ON s.tenant_id = t.id AND s.status='active' GROUP BY t.id, t.name, t.type, t.banned, t.approved, s.plan ORDER BY total_paid DESC NULLS LAST LIMIT 20"),
+    pool.query("SELECT t.name, COALESCE(SUM(p.amount),0) as total FROM tenants t LEFT JOIN payments p ON p.tenant_id = t.id GROUP BY t.id, t.name ORDER BY total DESC LIMIT 6")
+  ]);
+  const pieLabels = pieData.rows.map(r => r.name);
+  const pieValues = pieData.rows.map(r => parseInt(r.total));
+  if (pieValues.length > 5) {
+    const top5Labels = pieLabels.slice(0, 5);
+    const top5Values = pieValues.slice(0, 5);
+    const othersValue = pieValues.slice(5).reduce((a, b) => a + b, 0);
+    top5Labels.push('Others');
+    top5Values.push(othersValue);
+    pieData.rows = top5Labels.map((l, i) => ({ name: l, total: top5Values[i] }));
+  }
+  res.json({ topTenants: topTenants.rows, pie: pieData.rows });
+}));
+
+// API: Signup funnel data
+app.get('/dev/api/analytics/signups', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const [signupsThisMonth, totalTenants, signupTrend, recentSignups, activePaid] = await Promise.all([
+    pool.query("SELECT COUNT(*) as cnt FROM tenants WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())"),
+    pool.query("SELECT COUNT(*) as cnt FROM tenants"),
+    pool.query("SELECT TO_CHAR(created_at, 'YYYY-MM') as month, COUNT(*) as count FROM tenants WHERE created_at >= NOW() - INTERVAL '12 months' GROUP BY month ORDER BY month"),
+    pool.query("SELECT id, name, type, email, created_at FROM tenants ORDER BY created_at DESC LIMIT 10"),
+    pool.query("SELECT COUNT(DISTINCT tenant_id) as cnt FROM subscriptions WHERE status='active' AND plan != 'free'")
+  ]);
+  const signups = parseInt(signupsThisMonth.rows[0].cnt) || 0;
+  const total = parseInt(totalTenants.rows[0].cnt) || 0;
+  const paid = parseInt(activePaid.rows[0].cnt) || 0;
+  const conversion = total > 0 ? (paid / total * 100).toFixed(1) : 0;
+  res.json({ signupsThisMonth: signups, totalTenants: total, conversionRate: parseFloat(conversion), trend: signupTrend.rows, recent: recentSignups.rows });
+}));
+
+// Analytics Dashboard Page
+app.get('/dev/analytics', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  res.send(renderPage('Global Analytics', `
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      .an-hero{background:linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%);padding:32px 28px;border-radius:20px;margin-bottom:24px;color:white;position:relative;overflow:hidden}
+      .an-hero::before{content:'';position:absolute;top:-60px;right:-60px;width:160px;height:160px;background:rgba(99,102,241,0.15);border-radius:50%}
+      .an-hero::after{content:'';position:absolute;bottom:-40px;left:30%;width:100px;height:100px;background:rgba(16,185,129,0.1);border-radius:50%}
+      .an-section{background:#0f172a;border:1px solid #1e293b;border-radius:16px;padding:24px;margin-bottom:20px}
+      .an-section h2{font-size:17px;margin:0 0 16px;display:flex;align-items:center;gap:8px;color:#e2e8f0}
+      .an-section h3{font-size:13px;margin:0 0 10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;font-weight:700}
+      .an-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
+      .an-card{background:linear-gradient(135deg,#1e293b,#334155);border-radius:14px;padding:22px;text-align:center;border:1px solid #334155;box-shadow:0 4px 20px rgba(0,0,0,0.3);transition:transform 0.2s,box-shadow 0.2s;position:relative;overflow:hidden}
+      .an-card:hover{transform:translateY(-3px);box-shadow:0 8px 30px rgba(0,0,0,0.4)}
+      .an-card::after{content:'';position:absolute;top:-20px;right:-20px;width:60px;height:60px;background:rgba(255,255,255,0.04);border-radius:50%}
+      .an-card .an-label{font-size:11px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
+      .an-card .an-value{font-size:26px;font-weight:900;margin:8px 0 0;color:#f1f5f9;line-height:1.2}
+      .an-card .an-sub{font-size:11px;color:#94a3b8;margin-top:4px}
+      .an-card.green .an-value{color:#34d399}
+      .an-card.amber .an-value{color:#fbbf24}
+      .an-card.rose .an-value{color:#fb7185}
+      .an-card.cyan .an-value{color:#22d3ee}
+      .an-chart-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+      .an-table{width:100%;border-collapse:collapse;font-size:13px}
+      .an-table th{background:#1e293b;color:#94a3b8;padding:10px 14px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;font-weight:700;border-bottom:1px solid #334155}
+      .an-table td{padding:10px 14px;border-bottom:1px solid rgba(51,65,85,0.5);color:#cbd5e1}
+      .an-table tr:hover td{background:rgba(30,41,59,0.5)}
+      .an-tag{display:inline-block;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:700}
+      .an-tag-active{background:rgba(52,211,153,0.15);color:#34d399}
+      .an-tag-pending{background:rgba(251,191,36,0.15);color:#fbbf24}
+      .an-tag-banned{background:rgba(251,113,133,0.15);color:#fb7185}
+      .an-tag-free{background:rgba(148,163,184,0.15);color:#94a3b8}
+      .an-tag-basic{background:rgba(34,211,238,0.15);color:#22d3ee}
+      .an-tag-pro{background:rgba(129,140,248,0.15);color:#818cf8}
+      .an-refresh{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border:none;padding:8px 20px;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer;transition:0.2s}
+      .an-refresh:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(79,70,229,0.4)}
+      .an-skeleton{background:linear-gradient(90deg,#1e293b 25%,#334155 50%,#1e293b 75%);background-size:200% 100%;animation:anShimmer 1.5s infinite;border-radius:8px;height:40px}
+      @keyframes anShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+      .an-toast{position:fixed;bottom:24px;right:24px;padding:14px 24px;border-radius:12px;color:white;font-weight:600;font-size:13px;z-index:9999;transform:translateY(100px);opacity:0;transition:all 0.4s cubic-bezier(0.16,1,0.3,1)}
+      .an-toast.show{transform:translateY(0);opacity:1}
+      .an-toast-success{background:linear-gradient(135deg,#059669,#10b981)}
+      .an-toast-error{background:linear-gradient(135deg,#dc2626,#ef4444)}
+      .an-back{display:inline-flex;align-items:center;gap:6px;color:#94a3b8;text-decoration:none;font-weight:600;font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid #334155;transition:0.2s}
+      .an-back:hover{color:#e2e8f0;background:#1e293b;text-decoration:none}
+      .an-list-item{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid rgba(51,65,85,0.5)}
+      .an-list-item:last-child{border-bottom:none}
+      .an-list-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+      .an-list-info{flex:1}
+      .an-list-name{font-size:13px;font-weight:600;color:#e2e8f0}
+      .an-list-meta{font-size:11px;color:#64748b}
+      .an-list-time{font-size:11px;color:#64748b;white-space:nowrap}
+      @media(max-width:1024px){.an-grid-4{grid-template-columns:repeat(2,1fr)}.an-chart-row{grid-template-columns:1fr}}
+      @media(max-width:640px){.an-grid-4{grid-template-columns:1fr}.an-card .an-value{font-size:22px}.an-hero h1{font-size:22px!important}}
+    </style>
+
+    <!-- Hero -->
+    <div class="an-hero">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;position:relative;z-index:1">
+        <div>
+          <a href="/dev/master" class="an-back" style="margin-bottom:12px">&#8592; Dev Hub</a>
+          <h1 style="font-size:28px;font-weight:900;margin:0">Global Admin Analytics</h1>
+          <p style="opacity:0.8;margin-top:6px;font-size:14px">MRR/ARR, churn, revenue breakdown, signup alerts</p>
+        </div>
+        <button class="an-refresh" onclick="refreshAll()">&#8635; Refresh Data</button>
+      </div>
+    </div>
+
+    <!-- Section A: Revenue Cards -->
+    <div class="an-grid-4" id="revenueCards">
+      <div class="an-card cyan"><div class="an-label">MRR</div><div class="an-value" id="mrrVal"><div class="an-skeleton"></div></div><div class="an-sub">Monthly Recurring Revenue</div></div>
+      <div class="an-card green"><div class="an-label">ARR</div><div class="an-value" id="arrVal"><div class="an-skeleton"></div></div><div class="an-sub">Annual Recurring Revenue</div></div>
+      <div class="an-card amber"><div class="an-label">Revenue This Month</div><div class="an-value" id="monthVal"><div class="an-skeleton"></div></div><div class="an-sub" id="monthSub"></div></div>
+      <div class="an-card rose"><div class="an-label">Revenue Growth</div><div class="an-value" id="growthVal"><div class="an-skeleton"></div></div><div class="an-sub" id="growthSub">vs last month</div></div>
+    </div>
+
+    <!-- Section B: Revenue Trend Chart -->
+    <div class="an-section">
+      <h2>&#128200; Revenue Trend (12 Months)</h2>
+      <canvas id="revenueChart" height="100"></canvas>
+    </div>
+
+    <!-- Section C: Churn & Subscribers -->
+    <div class="an-grid-4" id="churnCards">
+      <div class="an-card rose"><div class="an-label">Monthly Churn Rate</div><div class="an-value" id="churnVal"><div class="an-skeleton"></div></div></div>
+      <div class="an-card cyan"><div class="an-label">Active Subscribers</div><div class="an-value" id="activeSubsVal"><div class="an-skeleton"></div></div></div>
+      <div class="an-card green"><div class="an-label">New This Month</div><div class="an-value" id="newSubsVal"><div class="an-skeleton"></div></div></div>
+      <div class="an-card amber"><div class="an-label">Cancelled This Month</div><div class="an-value" id="cancelledVal"><div class="an-skeleton"></div></div></div>
+    </div>
+
+    <div class="an-chart-row">
+      <div class="an-section" style="margin-bottom:0">
+        <h2>&#128201; Churn Trend (6 Months)</h2>
+        <canvas id="churnChart" height="140"></canvas>
+      </div>
+      <div class="an-section" style="margin-bottom:0">
+        <h2>&#128203; Revenue by Tenant (Top 5)</h2>
+        <canvas id="pieChart" height="140"></canvas>
+      </div>
+    </div>
+
+    <!-- Section D: Per-Tenant Revenue Table -->
+    <div class="an-section">
+      <h2>&#128176; Per-Tenant Revenue Breakdown (Top 20)</h2>
+      <div style="overflow-x:auto">
+        <table class="an-table" id="tenantTable">
+          <thead><tr><th>Name</th><th>Plan</th><th>Total Paid</th><th>Last Payment</th><th>Status</th></tr></thead>
+          <tbody><tr><td colspan="5"><div class="an-skeleton" style="height:20px;margin:8px 0"></div></td></tr><tr><td colspan="5"><div class="an-skeleton" style="height:20px;margin:8px 0"></div></td></tr><tr><td colspan="5"><div class="an-skeleton" style="height:20px;margin:8px 0"></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section E: Signup Funnel -->
+    <div class="an-grid-4" id="signupCards">
+      <div class="an-card green"><div class="an-label">Signups This Month</div><div class="an-value" id="signupsVal"><div class="an-skeleton"></div></div></div>
+      <div class="an-card cyan"><div class="an-label">Total Tenants</div><div class="an-value" id="totalTenantsVal"><div class="an-skeleton"></div></div></div>
+      <div class="an-card amber"><div class="an-label">Conversion Rate</div><div class="an-value" id="conversionVal"><div class="an-skeleton"></div></div><div class="an-sub">trial to paid</div></div>
+      <div class="an-card rose"><div class="an-label">Last 10 Signups</div><div class="an-value" style="font-size:16px" id="recentListVal"><div class="an-skeleton"></div></div></div>
+    </div>
+
+    <div class="an-chart-row">
+      <div class="an-section" style="margin-bottom:0">
+        <h2>&#128202; Signup Trend (12 Months)</h2>
+        <canvas id="signupChart" height="140"></canvas>
+      </div>
+      <div class="an-section" style="margin-bottom:0">
+        <h2>&#128276; Recent Signups</h2>
+        <div id="recentSignupsList" style="max-height:320px;overflow-y:auto">
+          <div class="an-skeleton" style="height:40px;margin:8px 0"></div>
+          <div class="an-skeleton" style="height:40px;margin:8px 0"></div>
+          <div class="an-skeleton" style="height:40px;margin:8px 0"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section F: Feature Adoption -->
+    <div class="an-section">
+      <h2>&#127891; Feature Adoption (Top 10 by Audit Logs)</h2>
+      <div style="overflow-x:auto">
+        <table class="an-table" id="featureTable">
+          <thead><tr><th>Feature</th><th>Users</th><th>% of Tenants</th></tr></thead>
+          <tbody><tr><td colspan="3"><div class="an-skeleton" style="height:20px;margin:8px 0"></div></td></tr><tr><td colspan="3"><div class="an-skeleton" style="height:20px;margin:8px 0"></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="an-toast" id="anToast"></div>
+
+    <script>
+    var charts = {};
+    function fmtUGX(n){ return 'UGX ' + parseInt(n||0).toLocaleString(); }
+    function fmtPct(n){ return parseFloat(n||0).toFixed(1) + '%'; }
+
+    function showToast(msg, type){
+      var t = document.getElementById('anToast');
+      t.textContent = msg;
+      t.className = 'an-toast an-toast-' + (type||'success') + ' show';
+      setTimeout(function(){ t.classList.remove('show'); }, 3000);
+    }
+
+    function loadRevenue(){
+      fetch('/dev/api/analytics/revenue').then(function(r){return r.json()}).then(function(d){
+        document.getElementById('mrrVal').textContent = fmtUGX(d.mrr);
+        document.getElementById('arrVal').textContent = fmtUGX(d.arr);
+        document.getElementById('monthVal').textContent = fmtUGX(d.thisMonth);
+        document.getElementById('monthSub').textContent = 'vs ' + fmtUGX(d.lastMonth) + ' last month';
+        var g = d.growth;
+        document.getElementById('growthVal').textContent = (g >= 0 ? '+' : '') + g + '%';
+        document.getElementById('growthVal').style.color = g >= 0 ? '#34d399' : '#fb7185';
+        // Revenue trend chart
+        var labels = d.monthly.map(function(r){return r.month});
+        var values = d.monthly.map(function(r){return parseInt(r.revenue)});
+        if(charts.revenue) charts.revenue.destroy();
+        charts.revenue = new Chart(document.getElementById('revenueChart'),{
+          type:'line',
+          data:{labels:labels,datasets:[{label:'Revenue (UGX)',data:values,borderColor:'#22d3ee',backgroundColor:'rgba(34,211,238,0.1)',fill:true,tension:0.3,pointBackgroundColor:'#22d3ee',pointRadius:4}]},
+          options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#64748b'},grid:{color:'rgba(51,65,85,0.3)'}},y:{ticks:{color:'#64748b',callback:function(v){return 'UGX '+(v/1000)+'k'}},grid:{color:'rgba(51,65,85,0.3)'}}}}
+        });
+      }).catch(function(e){ showToast('Revenue load failed','error'); });
+    }
+
+    function loadChurn(){
+      fetch('/dev/api/analytics/churn').then(function(r){return r.json()}).then(function(d){
+        document.getElementById('churnVal').textContent = fmtPct(d.churnRate);
+        document.getElementById('churnVal').style.color = d.churnRate > 5 ? '#fb7185' : '#34d399';
+        document.getElementById('activeSubsVal').textContent = d.active;
+        document.getElementById('newSubsVal').textContent = d.newThisMonth;
+        document.getElementById('cancelledVal').textContent = d.cancelled;
+        // Churn trend chart
+        var labels = d.trend.map(function(r){return r.month});
+        var values = d.trend.map(function(r){return parseInt(r.cancelled)});
+        if(charts.churn) charts.churn.destroy();
+        charts.churn = new Chart(document.getElementById('churnChart'),{
+          type:'line',
+          data:{labels:labels,datasets:[{label:'Cancelled',data:values,borderColor:'#fb7185',backgroundColor:'rgba(251,113,133,0.1)',fill:true,tension:0.3,pointBackgroundColor:'#fb7185'}]},
+          options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#64748b'},grid:{color:'rgba(51,65,85,0.3)'}},y:{beginAtZero:true,ticks:{color:'#64748b',stepSize:1},grid:{color:'rgba(51,65,85,0.3)'}}}}
+        });
+      }).catch(function(e){ showToast('Churn load failed','error'); });
+    }
+
+    function loadTenants(){
+      fetch('/dev/api/analytics/tenants').then(function(r){return r.json()}).then(function(d){
+        // Table
+        var tbody = document.querySelector('#tenantTable tbody');
+        if(d.topTenants.length === 0){
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#64748b;padding:24px">No tenant payment data yet</td></tr>';
+        } else {
+          tbody.innerHTML = d.topTenants.map(function(t){
+            var planClass = t.plan === 'free' ? 'an-tag-free' : t.plan === 'basic' ? 'an-tag-basic' : t.plan === 'pro' ? 'an-tag-pro' : 'an-tag-free';
+            var statusClass = t.status === 'Active' ? 'an-tag-active' : t.status === 'Banned' ? 'an-tag-banned' : 'an-tag-pending';
+            return '<tr><td style="font-weight:600">' + esc(String(t.name||'')) + '</td><td><span class="an-tag ' + planClass + '">' + esc(String(t.plan||'free')) + '</span></td><td style="font-weight:700">' + fmtUGX(t.total_paid) + '</td><td style="font-size:12px">' + (t.last_payment ? new Date(t.last_payment).toLocaleDateString() : '—') + '</td><td><span class="an-tag ' + statusClass + '">' + esc(String(t.status)) + '</span></td></tr>';
+          }).join('');
+        }
+        // Pie chart
+        var pieLabels = d.pie.map(function(r){return r.name});
+        var pieValues = d.pie.map(function(r){return parseInt(r.total)});
+        var colors = ['#818cf8','#22d3ee','#34d399','#fbbf24','#fb7185','#94a3b8'];
+        if(charts.pie) charts.pie.destroy();
+        charts.pie = new Chart(document.getElementById('pieChart'),{
+          type:'doughnut',
+          data:{labels:pieLabels,datasets:[{data:pieValues,backgroundColor:colors,borderColor:'#0f172a',borderWidth:2}]},
+          options:{responsive:true,plugins:{legend:{position:'bottom',labels:{color:'#94a3b8',font:{size:11},padding:8}}}}
+        });
+      }).catch(function(e){ showToast('Tenant data load failed','error'); });
+    }
+
+    function loadSignups(){
+      fetch('/dev/api/analytics/signups').then(function(r){return r.json()}).then(function(d){
+        document.getElementById('signupsVal').textContent = d.signupsThisMonth;
+        document.getElementById('totalTenantsVal').textContent = d.totalTenants;
+        document.getElementById('conversionVal').textContent = fmtPct(d.conversionRate);
+        // Signup trend bar chart
+        var labels = d.trend.map(function(r){return r.month});
+        var values = d.trend.map(function(r){return parseInt(r.count)});
+        if(charts.signup) charts.signup.destroy();
+        charts.signup = new Chart(document.getElementById('signupChart'),{
+          type:'bar',
+          data:{labels:labels,datasets:[{label:'New Signups',data:values,backgroundColor:'rgba(129,140,248,0.6)',borderColor:'#818cf8',borderWidth:1,borderRadius:6}]},
+          options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#64748b'},grid:{color:'rgba(51,65,85,0.3)'}},y:{beginAtZero:true,ticks:{color:'#64748b',stepSize:1},grid:{color:'rgba(51,65,85,0.3)'}}}}
+        });
+        // Recent signups list
+        var list = document.getElementById('recentSignupsList');
+        if(d.recent.length === 0){
+          list.innerHTML = '<p style="color:#64748b;text-align:center;padding:24px">No signups yet</p>';
+        } else {
+          list.innerHTML = d.recent.map(function(r){
+            var dotColor = '#34d399';
+            return '<div class="an-list-item"><div class="an-list-dot" style="background:' + dotColor + '"></div><div class="an-list-info"><div class="an-list-name">' + esc(String(r.name||'')) + '</div><div class="an-list-meta">' + esc(String(r.type||'')) + ' &bull; ' + esc(String(r.email||'')) + '</div></div><div class="an-list-time">' + new Date(r.created_at).toLocaleDateString() + '</div></div>';
+          }).join('');
+        }
+      }).catch(function(e){ showToast('Signup data load failed','error'); });
+    }
+
+    function loadFeatures(){
+      fetch('/dev/api/analytics/features').then(function(r){return r.json()}).then(function(d){
+        var tbody = document.querySelector('#featureTable tbody');
+        if(d.features.length === 0){
+          tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#64748b;padding:24px">No feature usage data yet</td></tr>';
+        } else {
+          tbody.innerHTML = d.features.map(function(f){
+            return '<tr><td style="font-weight:600">' + esc(String(f.feature)) + '</td><td>' + f.users + '</td><td><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;background:#1e293b;border-radius:4px;height:8px;overflow:hidden"><div style="height:100%;background:linear-gradient(90deg,#818cf8,#22d3ee);width:' + Math.min(f.pct,100) + '%;border-radius:4px"></div></div><span style="font-size:12px;min-width:42px;text-align:right">' + fmtPct(f.pct) + '</span></div></td></tr>';
+          }).join('');
+        }
+      }).catch(function(e){ showToast('Feature data load failed','error'); });
+    }
+
+    // Feature adoption API (inline since we need it)
+    fetch('/dev/api/analytics/features').then(function(r){return r.json()}).then(function(d){}).catch(function(){});
+
+    function refreshAll(){
+      showToast('Refreshing analytics...','success');
+      loadRevenue();
+      loadChurn();
+      loadTenants();
+      loadSignups();
+      loadFeatures();
+      setTimeout(function(){ showToast('Data refreshed successfully!','success'); }, 1500);
+    }
+
+    // Initial load
+    loadRevenue();
+    loadChurn();
+    loadTenants();
+    loadSignups();
+    loadFeatures();
+    </script>
+  `, req.session.user));
+}));
+
+// Feature Adoption API (needs total tenants count)
+app.get('/dev/api/analytics/features', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const [features, totalTenants] = await Promise.all([
+    pool.query("SELECT action as feature, COUNT(DISTINCT user_email) as users, COUNT(DISTINCT tenant_id) as tenant_count FROM audit_logs WHERE created_at >= NOW() - INTERVAL '30 days' GROUP BY action ORDER BY users DESC LIMIT 10"),
+    pool.query("SELECT COUNT(*) as cnt FROM tenants")
+  ]);
+  const total = parseInt(totalTenants.rows[0].cnt) || 1;
+  res.json({
+    features: features.rows.map(function(r) {
+      return {
+        feature: r.feature,
+        users: parseInt(r.users),
+        pct: (parseInt(r.tenant_count) / total * 100).toFixed(1)
+      };
+    })
+  });
 }));
 
 // ============================================================
