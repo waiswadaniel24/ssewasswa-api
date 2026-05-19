@@ -2436,6 +2436,19 @@ loadPlatformSettings();
 // Refresh settings every 60 seconds
 setInterval(loadPlatformSettings, 60000);
 
+// === DASHBOARD SECTION HELPER ===
+// ds(icon, title, cardsHtml) — wraps a group of dashboard cards into a collapsible section
+const ds = (icon, title, cardsHtml) => {
+  const count = (cardsHtml.match(/class="card"/g) || []).length;
+  return `<div class="dash-section">
+  <div class="dash-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+    <h3>${icon} ${title} <span class="ds-count">${count} modules</span></h3>
+    <span class="ds-toggle">&#9660;</span>
+  </div>
+  <div class="dash-section-body">${cardsHtml}</div>
+</div>`;
+};
+
 // === RENDER PAGE (with dark mode support) ===
 const renderPage = (title, content, user, csrfTokenOrReq) => {
   const dark = user?.dark_mode || false;
@@ -2595,8 +2608,15 @@ tbody tr:hover{background:${dark ? 'rgba(99,102,241,0.06)' : 'rgba(99,102,241,0.
 /* ── GRID ── */
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;transition:all 0.3s ease}
 /* ── SECTIONS ── */
-.dash-section{margin:28px 0 12px;padding-bottom:10px;border-bottom:2px solid var(--border);font-size:13px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:1.5px;display:flex;align-items:center;gap:8px}
-.dash-section:first-of-type{margin-top:0}
+.dash-section{margin-bottom:20px}
+.dash-section-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:${dark ? 'rgba(99,102,241,0.08)' : '#f0f4ff'};border:1px solid var(--border);border-radius:14px 14px 0 0;cursor:pointer;user-select:none;transition:all 0.2s ease}
+.dash-section-header:hover{background:${dark ? 'rgba(99,102,241,0.14)' : '#e8edff'};border-color:var(--primary-light)}
+.dash-section-header h3{font-size:14px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px;margin:0;font-family:'Plus Jakarta Sans','Inter',sans-serif}
+.dash-section-header .ds-count{background:var(--border);color:var(--text-muted);font-size:11px;padding:2px 10px;border-radius:20px;font-weight:600;letter-spacing:0.02em}
+.dash-section-header .ds-toggle{font-size:12px;color:var(--text-muted);transition:transform 0.25s ease}
+.dash-section.collapsed .ds-toggle{transform:rotate(-90deg)}
+.dash-section.collapsed .dash-section-body{display:none}
+.dash-section-body{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;padding:16px 18px;border:1px solid var(--border);border-top:none;border-radius:0 0 14px 14px;background:var(--bg-card)}
 /* ── TAG ── */
 .tag{display:inline-block;padding:4px 12px;background:${dark ? 'rgba(99,102,241,0.15)' : '#e0e7ff'};color:var(--primary);border-radius:20px;font-size:12px;font-weight:600;letter-spacing:0.02em}
 /* ── ALERTS ── */
@@ -2622,7 +2642,7 @@ a{color:var(--primary);text-decoration:none;font-weight:500;transition:color 0.2
 /* ── SCROLLBAR ── */
 ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-track{background:${dark ? '#0c1222' : '#f0f4ff'}}::-webkit-scrollbar-thumb{background:${dark ? '#2a3a5c' : '#c7d2fe'};border-radius:4px}::-webkit-scrollbar-thumb:hover{background:${dark ? '#3a4f7a' : '#a5b4fc'}}
 /* ── RESPONSIVE ── */
-@media(max-width:768px){.nav{flex-wrap:wrap;flex-direction:column;align-items:stretch;padding:10px 16px;gap:4px;height:auto}.nav .nav-links{display:none;flex-direction:column;width:100%;padding-top:8px;border-top:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}}.nav.open .nav-links{display:flex!important}.nav .nav-links a,.nav .nav-links button,.nav .nav-links select,.nav .nav-links span{width:100%;text-align:left;padding:10px 12px;font-size:14px}.nav .nav-links .dd{width:100%}.nav .nav-links .dd-btn{width:100%;justify-content:space-between}.nav .nav-links .dd-menu{right:auto;left:0;position:static;box-shadow:none;border:none;border-radius:0;background:transparent;padding:0;margin-top:0;animation:none;display:none;min-width:0}.nav .nav-links .dd.open .dd-menu{display:block}.nav .nav-links .dd-menu a{color:${dark ? '#e2e8f0' : '#475569'};padding:10px 16px 10px 32px;font-size:13px}.nav .nav-links .dd-menu a:hover{background:${dark ? 'rgba(99,102,241,0.12)' : 'rgba(99,102,241,0.06)'}}.nav .nav-links .dd-menu .dd-divider{background:${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};margin:2px 16px}.nav .nav-links .dd-menu .dd-header{color:var(--text-dim);padding:6px 16px 2px;font-size:9px}.stats{grid-template-columns:repeat(2,1fr);gap:10px}.grid{grid-template-columns:repeat(2,1fr);gap:12px}.tab-bar{flex-direction:column}.hero{padding:28px 18px;border-radius:14px}.container{padding:0 14px}.card{padding:16px;margin-bottom:10px;border-radius:12px}.card:hover{transform:translateY(-2px)}.card h3{font-size:14px;margin-bottom:6px}.btn{padding:10px 18px;font-size:13px}.btn-sm{padding:7px 12px;font-size:11px}.btn-group{gap:6px}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}.search-bar{flex-direction:column}.tab-bar a{padding:10px;font-size:13px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}body{padding-bottom:72px}form input,form select,form textarea{font-size:16px!important}.tag{font-size:11px;padding:2px 6px}h2{font-size:18px}h3{font-size:15px}.stat-num{font-size:24px}.stat-card{padding:14px 10px}.stat-card>div:last-child{font-size:11px}.dash-section{font-size:12px;margin:18px 0 8px}}
+@media(max-width:768px){.nav{flex-wrap:wrap;flex-direction:column;align-items:stretch;padding:10px 16px;gap:4px;height:auto}.nav .nav-links{display:none;flex-direction:column;width:100%;padding-top:8px;border-top:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}}.nav.open .nav-links{display:flex!important}.nav .nav-links a,.nav .nav-links button,.nav .nav-links select,.nav .nav-links span{width:100%;text-align:left;padding:10px 12px;font-size:14px}.nav .nav-links .dd{width:100%}.nav .nav-links .dd-btn{width:100%;justify-content:space-between}.nav .nav-links .dd-menu{right:auto;left:0;position:static;box-shadow:none;border:none;border-radius:0;background:transparent;padding:0;margin-top:0;animation:none;display:none;min-width:0}.nav .nav-links .dd.open .dd-menu{display:block}.nav .nav-links .dd-menu a{color:${dark ? '#e2e8f0' : '#475569'};padding:10px 16px 10px 32px;font-size:13px}.nav .nav-links .dd-menu a:hover{background:${dark ? 'rgba(99,102,241,0.12)' : 'rgba(99,102,241,0.06)'}}.nav .nav-links .dd-menu .dd-divider{background:${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};margin:2px 16px}.nav .nav-links .dd-menu .dd-header{color:var(--text-dim);padding:6px 16px 2px;font-size:9px}.stats{grid-template-columns:repeat(2,1fr);gap:10px}.grid{grid-template-columns:repeat(2,1fr);gap:12px}.tab-bar{flex-direction:column}.hero{padding:28px 18px;border-radius:14px}.container{padding:0 14px}.card{padding:16px;margin-bottom:10px;border-radius:12px}.card:hover{transform:translateY(-2px)}.card h3{font-size:14px;margin-bottom:6px}.btn{padding:10px 18px;font-size:13px}.btn-sm{padding:7px 12px;font-size:11px}.btn-group{gap:6px}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}.search-bar{flex-direction:column}.tab-bar a{padding:10px;font-size:13px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}body{padding-bottom:72px}form input,form select,form textarea{font-size:16px!important}.tag{font-size:11px;padding:2px 6px}h2{font-size:18px}h3{font-size:15px}.stat-num{font-size:24px}.stat-card{padding:14px 10px}.stat-card>div:last-child{font-size:11px}.dash-section{font-size:12px;margin:18px 0 8px}.dash-section-header{padding:12px 14px;border-radius:12px 12px 0 0}.dash-section-header h3{font-size:13px}.dash-section-body{grid-template-columns:1fr!important;padding:12px 14px;border-radius:0 0 12px 12px}.dash-section-header .ds-count{display:none}}
 @media(max-width:480px){.grid{grid-template-columns:repeat(2,1fr)!important;gap:10px}.stats{grid-template-columns:repeat(2,1fr)!important;gap:8px}.card{padding:14px;margin-bottom:8px;border-radius:12px}.card:hover{transform:none}.card h3{font-size:13px;margin-bottom:4px}.card .btn-sm{padding:6px 10px;font-size:11px}.card p{font-size:11px}.stat-num{font-size:22px}.hero{padding:22px 16px}}
 @media(min-width:769px) and (max-width:1024px){.stats{grid-template-columns:repeat(4,1fr)}.grid{grid-template-columns:repeat(2,1fr)}.stat-num{font-size:28px}}
 @media(max-width:380px){.grid{grid-template-columns:1fr!important;gap:8px}}
@@ -3671,79 +3691,93 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="stat-card"><div class="stat-num">${exams.rows[0].count}</div><div>Exams</div></div>
       <div class="stat-card"><div class="stat-num" style="color:#059669">${attendance.rows[0].count}</div><div>Present Today</div></div>
     </div>
-    <div class="grid">
+    ${ds('📚', 'Academics', `
       <div class="card"><h3>Students</h3><a href="/school/students" class="btn">Manage Students</a><a href="/school/students/import" class="btn btn-green btn-sm" style="margin-top:8px">CSV Import</a></div>
-      <div class="card"><h3>Fees</h3><a href="/school/fees" class="btn">Fee Management</a><a href="/school/fee-structures" class="btn btn-sm" style="margin-top:8px">Fee Structures</a><a href="/school/fees/receipts" class="btn btn-gold btn-sm" style="margin-top:8px">Receipts</a></div>
       <div class="card"><h3>Exams & Marks</h3><a href="/school/exams" class="btn">Exam Results</a><a href="/school/exams/new" class="btn btn-sm" style="margin-top:8px">New Exam</a></div>
       <div class="card"><h3>Attendance</h3><a href="/school/attendance" class="btn">Mark Attendance</a><a href="/school/attendance/print" class="btn btn-sm" style="margin-top:8px">Print Sheet</a></div>
-      <div class="card"><h3>Staff</h3><a href="/school/staff" class="btn btn-sm">Manage Staff</a><a href="/school/staff/new" class="btn btn-sm" style="margin-top:8px">Add Staff</a></div>
-      <div class="card"><h3>Sign In/Out</h3><a href="/school/signin" class="btn btn-sm">Clock In/Out</a><a href="/school/signin/history?from=${new Date(Date.now()-7*86400000).toISOString().split('T')[0]}&to=${new Date().toISOString().split('T')[0]}" class="btn btn-sm" style="margin-top:8px">History</a></div>
       <div class="card"><h3>Timetable</h3><a href="/school/timetable" class="btn btn-sm">View Timetable</a></div>
       <div class="card"><h3>Grading</h3><a href="/school/grading" class="btn btn-sm">Grading Scale</a></div>
       <div class="card"><h3>Promote</h3><a href="/school/promote" class="btn btn-sm">Student Promotion</a></div>
       <div class="card"><h3>Report Cards</h3><a href="/school/report-cards" class="btn btn-gold">Generate</a><a href="/school/report-cards/bulk" class="btn btn-sm" style="margin-top:8px">Bulk Cards</a></div>
-      <div class="card"><h3>Print</h3><a href="/school/print/fee-balances" class="btn btn-sm">Fee Balances</a><a href="/school/attendance/print" class="btn btn-sm" style="margin-top:8px">Attendance</a></div>
-      <div class="card"><h3>Notify</h3><a href="/school/notify" class="btn btn-sm">Send SMS</a><a href="/notifications" class="btn btn-sm" style="margin-top:8px">Notifications</a></div>
-      <div class="card"><h3>Parent Links</h3><a href="/school/parent-links" class="btn btn-sm">Manage Parents</a></div>
-      <div class="card"><h3>Barcodes</h3><a href="/barcode" class="btn btn-sm">Scan / Generate</a></div>
-      <div class="card"><h3>Income</h3><a href="/income" class="btn btn-sm btn-green">Income Tracking</a></div>
-      <div class="card"><h3>Billing</h3><a href="/billing" class="btn btn-sm btn-gold">Subscriptions</a></div>
-      <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Document Library</a><a href="/documents/upload" class="btn btn-sm btn-green" style="margin-top:8px">Upload File</a></div>
-      <div class="card" style="background:#fff7ed;border:2px solid #f59e0b"><h3 style="color:#f59e0b">📷 Gallery</h3><a href="/school/gallery" class="btn btn-sm">Photo Gallery</a></div>
-      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">📚 Books & Papers</h3><a href="/library" class="btn btn-sm">Browse Library</a></div>
-      <div class="card"><h3>Bills</h3><a href="/bill-reminders" class="btn btn-sm btn-red">Bill Reminders</a></div>
-      <div class="card"><h3>API & Webhooks</h3><a href="/api-keys" class="btn btn-sm">Manage Keys</a></div>
-      ${hasTransport ? `<div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Transport</h3><a href="/school/transport" class="btn btn-sm">Bus Routes</a></div>` : lockCard(`<div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Transport</h3><a href="/school/transport" class="btn btn-sm">Bus Routes</a></div>`, 'Basic Plan')}
-      <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">NEW: Discipline</h3><a href="/school/discipline" class="btn btn-sm">Incidents</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Homework</h3><a href="/school/homework" class="btn btn-sm">Assignments</a></div>
-      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">NEW: Calendar</h3><a href="/school/calendar" class="btn btn-sm">Events & Terms</a></div>
-      <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Sick Bay</h3><p class="muted" style="font-size:12px">First aid & minor illness for students</p><a href="/sickbay" class="btn btn-sm" style="background:#ec4899;color:white">Sick Bay</a><a href="/sickbay/units" class="btn btn-sm" style="margin-top:6px">Manage Units</a><a href="/school/health" class="btn btn-sm" style="margin-top:6px">Medical Records</a></div>
-      <div class="card" style="background:#eff6ff;border:2px solid #3b82f6"><h3 style="color:#3b82f6">NEW: Alumni</h3><a href="/school/alumni" class="btn btn-sm">Graduates</a></div>
-      <div class="card" style="background:#f7fee7;border:2px solid #65a30d"><h3 style="color:#65a30d">NEW: Library</h3><a href="/school/library" class="btn btn-sm">Books & Borrow</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">Levels</h3><a href="/school/levels" class="btn btn-sm">K-University</a></div>
-      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">Hostels</h3><a href="/school/hostels" class="btn btn-sm">Dormitories</a></div>
-      <div class="card" style="background:#fff7ed;border:2px solid #f59e0b"><h3 style="color:#f59e0b">Meals</h3><a href="/school/meals" class="btn btn-sm">Meal Plans</a></div>
       <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">Tracks</h3><a href="/school/tracks" class="btn btn-sm">Specialization</a></div>
       <div class="card" style="background:#eff6ff;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Admissions</h3><a href="/school/admissions" class="btn btn-sm">Apply→Enroll</a></div>
       <div class="card" style="background:#f7fee7;border:2px solid #65a30d"><h3 style="color:#65a30d">Subjects</h3><a href="/school/subjects" class="btn btn-sm">Subject Mgmt</a></div>
+    `)}
+    ${ds('💰', 'Finance', `
+      <div class="card"><h3>Fees</h3><a href="/school/fees" class="btn">Fee Management</a><a href="/school/fee-structures" class="btn btn-sm" style="margin-top:8px">Fee Structures</a><a href="/school/fees/receipts" class="btn btn-gold btn-sm" style="margin-top:8px">Receipts</a></div>
+      <div class="card"><h3>Income</h3><a href="/income" class="btn btn-sm btn-green">Income Tracking</a></div>
+      <div class="card"><h3>Billing</h3><a href="/billing" class="btn btn-sm btn-gold">Subscriptions</a></div>
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Scholarships</h3><a href="/school/scholarships" class="btn btn-sm">Bursaries</a></div>
-      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">Visitors</h3><a href="/school/visitors" class="btn btn-sm">Gate Pass</a></div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Student Portal</h3><a href="/student/login" class="btn btn-sm">Student Login</a><a href="/school/students/generate-passwords" class="btn btn-sm btn-green" style="margin-top:8px">Gen Passwords</a></div>
-      <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
       <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">Fee Reminders</h3><a href="/school/fee-reminders" class="btn btn-sm btn-red">Send Reminders</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Online Payments</h3><a href="/billing" class="btn btn-sm">Pay/Subscribe</a></div>
-      ${hasExams ? `<div class="card" style="background:#eff6ff;border:2px solid #2563eb"><h3 style="color:#2563eb">NEW: Online Exams</h3><a href="/exams" class="btn btn-sm">Quizzes & Tests</a></div>` : lockCard(`<div class="card" style="background:#eff6ff;border:2px solid #2563eb"><h3 style="color:#2563eb">NEW: Online Exams</h3><a href="/exams" class="btn btn-sm">Quizzes & Tests</a></div>`, 'Basic Plan')}
-      ${hasWhatsApp ? `<div class="card" style="background:#f0fdf4;border:2px solid #16a34a"><h3 style="color:#16a34a">NEW: WhatsApp</h3><a href="/whatsapp" class="btn btn-sm">Messaging</a></div>` : lockCard(`<div class="card" style="background:#f0fdf4;border:2px solid #16a34a"><h3 style="color:#16a34a">NEW: WhatsApp</h3><a href="/whatsapp" class="btn btn-sm">Messaging</a></div>`, 'Basic Plan')}
-      ${hasReports ? `<div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Reports</h3><a href="/scheduled-reports" class="btn btn-sm">Auto Reports</a></div>` : lockCard(`<div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Reports</h3><a href="/scheduled-reports" class="btn btn-sm">Auto Reports</a></div>`, 'Basic Plan')}
-      ${hasBranches ? `<div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Branches</h3><a href="/branches" class="btn btn-sm">Multi-Branch</a></div>` : lockCard(`<div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Branches</h3><a href="/branches" class="btn btn-sm">Multi-Branch</a></div>`, 'Basic Plan')}
-      <div class="card" style="background:#eff6ff;border:2px solid #0ea5e9"><h3 style="color:#0ea5e9">NEW: Deep Links</h3><a href="/links" class="btn btn-sm">URL Shortener</a></div>
-      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Webhooks</h3><a href="/webhooks" class="btn btn-sm">Webhook Mgmt</a></div>
-      <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Plugins</h3><a href="/marketplace" class="btn btn-sm">Marketplace</a></div>
-      <div class="card" style="background:#f1f5f9;border:2px solid #64748b"><h3 style="color:#64748b">NEW: Backup</h3><a href="/backup" class="btn btn-sm">Backup Center</a></div>
-      <div class="card" style="background:#ecfdf5;border:2px solid #059669"><h3 style="color:#059669">NEW: Inventory</h3><a href="/inventory" class="btn btn-sm">Stock Management</a></div>
-      <div class="card" style="background:#eef2ff;border:2px solid #6366f1"><h3 style="color:#6366f1">NEW: Parent Portal</h3><a href="/parent-portal" class="btn btn-sm">Parent Access</a></div>
-      <div class="card" style="background:#fdf4ff;border:2px solid #a855f7"><h3 style="color:#a855f7">NEW: Analytics v2</h3><a href="/analytics-v2" class="btn btn-sm">Visual Dashboard</a></div>
-      <div class="card" style="background:#fffbeb;border:2px solid #f59e0b"><h3 style="color:#f59e0b">NEW: Receipt Builder</h3><a href="/receipts" class="btn btn-sm">Doc Templates</a></div>
-      <div class="card" style="background:#f0f9ff;border:2px solid #0ea5e9"><h3 style="color:#0ea5e9">NEW: Public Portal</h3><a href="/portal/public" class="btn btn-sm">Public Pages</a></div>
+    `)}
+    ${ds('👥', 'People', `
+      <div class="card"><h3>Staff</h3><a href="/school/staff" class="btn btn-sm">Manage Staff</a><a href="/school/staff/new" class="btn btn-sm" style="margin-top:8px">Add Staff</a></div>
+      <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
+      <div class="card"><h3>Parent Links</h3><a href="/school/parent-links" class="btn btn-sm">Manage Parents</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Student Portal</h3><a href="/student/login" class="btn btn-sm">Student Login</a><a href="/school/students/generate-passwords" class="btn btn-sm btn-green" style="margin-top:8px">Gen Passwords</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #3b82f6"><h3 style="color:#3b82f6">NEW: Alumni</h3><a href="/school/alumni" class="btn btn-sm">Graduates</a></div>
+      <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Sick Bay</h3><p class="muted" style="font-size:12px">First aid & minor illness for students</p><a href="/sickbay" class="btn btn-sm" style="background:#ec4899;color:white">Sick Bay</a><a href="/sickbay/units" class="btn btn-sm" style="margin-top:6px">Manage Units</a><a href="/school/health" class="btn btn-sm" style="margin-top:6px">Medical Records</a></div>
+    `)}
+    ${ds('⚙️', 'Operations', `
+      <div class="card"><h3>Sign In/Out</h3><a href="/school/signin" class="btn btn-sm">Clock In/Out</a><a href="/school/signin/history?from=${new Date(Date.now()-7*86400000).toISOString().split('T')[0]}&to=${new Date().toISOString().split('T')[0]}" class="btn btn-sm" style="margin-top:8px">History</a></div>
+      <div class="card"><h3>Print</h3><a href="/school/print/fee-balances" class="btn btn-sm">Fee Balances</a><a href="/school/attendance/print" class="btn btn-sm" style="margin-top:8px">Attendance</a></div>
+      <div class="card"><h3>Notify</h3><a href="/school/notify" class="btn btn-sm">Send SMS</a><a href="/notifications" class="btn btn-sm" style="margin-top:8px">Notifications</a></div>
+      <div class="card"><h3>Barcodes</h3><a href="/barcode" class="btn btn-sm">Scan / Generate</a></div>
+      <div class="card" style="background:#f0f9ff;border:2px solid #0284c7"><h3 style="color:#0284c7">NEW: QR Attendance</h3><a href="/qr-attendance" class="btn btn-sm">Check-In</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">Visitors</h3><a href="/school/visitors" class="btn btn-sm">Gate Pass</a></div>
+      <div class="card"><h3>API & Webhooks</h3><a href="/api-keys" class="btn btn-sm">Manage Keys</a></div>
+      <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Document Library</a><a href="/documents/upload" class="btn btn-sm btn-green" style="margin-top:8px">Upload File</a></div>
+    `)}
+    ${ds('🏫', 'Campus', `
+      ${hasTransport ? `<div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Transport</h3><a href="/school/transport" class="btn btn-sm">Bus Routes</a></div>` : lockCard(`<div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Transport</h3><a href="/school/transport" class="btn btn-sm">Bus Routes</a></div>`, 'Basic Plan')}
+      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">Hostels</h3><a href="/school/hostels" class="btn btn-sm">Dormitories</a></div>
+      <div class="card" style="background:#fff7ed;border:2px solid #f59e0b"><h3 style="color:#f59e0b">Meals</h3><a href="/school/meals" class="btn btn-sm">Meal Plans</a></div>
+      <div class="card" style="background:#f7fee7;border:2px solid #65a30d"><h3 style="color:#65a30d">NEW: Library</h3><a href="/school/library" class="btn btn-sm">Books & Borrow</a></div>
+      <div class="card" style="background:#fff7ed;border:2px solid #f59e0b"><h3 style="color:#f59e0b">📷 Gallery</h3><a href="/school/gallery" class="btn btn-sm">Photo Gallery</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">📚 Books & Papers</h3><a href="/library" class="btn btn-sm">Browse Library</a></div>
+    `)}
+    ${ds('💬', 'Communication', `
+      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">NEW: Calendar</h3><a href="/school/calendar" class="btn btn-sm">Events & Terms</a></div>
       <div class="card" style="background:#eef2ff;border:2px solid #6366f1"><h3 style="color:#6366f1">NEW: Calendar</h3><a href="/calendar" class="btn btn-sm">Events & RSVP</a></div>
       <div class="card" style="background:#ecfdf5;border:2px solid #059669"><h3 style="color:#059669">NEW: Campaigns</h3><a href="/campaigns" class="btn btn-sm">SMS/Email</a></div>
-      <div class="card" style="background:#f0f9ff;border:2px solid #0284c7"><h3 style="color:#0284c7">NEW: QR Attendance</h3><a href="/qr-attendance" class="btn btn-sm">Check-In</a></div>
-      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Finance</h3><a href="/finance" class="btn btn-sm">Chart of Accounts</a></div>
+      ${hasWhatsApp ? `<div class="card" style="background:#f0fdf4;border:2px solid #16a34a"><h3 style="color:#16a34a">NEW: WhatsApp</h3><a href="/whatsapp" class="btn btn-sm">Messaging</a></div>` : lockCard(`<div class="card" style="background:#f0fdf4;border:2px solid #16a34a"><h3 style="color:#16a34a">NEW: WhatsApp</h3><a href="/whatsapp" class="btn btn-sm">Messaging</a></div>`, 'Basic Plan')}
+      <div class="card"><h3>Forums</h3><a href="/forums" class="btn btn-sm">Discussions</a></div>
+      <div class="card"><h3>Suggestions</h3><a href="/suggestions" class="btn btn-sm">Feedback</a></div>
+    `)}
+    ${ds('🚀', 'Advanced', `
+      ${hasExams ? `<div class="card" style="background:#eff6ff;border:2px solid #2563eb"><h3 style="color:#2563eb">NEW: Online Exams</h3><a href="/exams" class="btn btn-sm">Quizzes & Tests</a></div>` : lockCard(`<div class="card" style="background:#eff6ff;border:2px solid #2563eb"><h3 style="color:#2563eb">NEW: Online Exams</h3><a href="/exams" class="btn btn-sm">Quizzes & Tests</a></div>`, 'Basic Plan')}
+      <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">NEW: Discipline</h3><a href="/school/discipline" class="btn btn-sm">Incidents</a></div>
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">NEW: Appraisals</h3><a href="/appraisals" class="btn btn-sm">Staff Review</a></div>
       <div class="card" style="background:#eff6ff;border:2px solid #2563eb"><h3 style="color:#2563eb">NEW: HR & Payroll</h3><a href="/hr" class="btn btn-sm">Employees & Salary</a></div>
       <div class="card" style="background:#ecfdf5;border:2px solid #059669"><h3 style="color:#059669">NEW: CRM & Leads</h3><a href="/crm" class="btn btn-sm">Lead Pipeline</a></div>
       <div class="card" style="background:#fef3c7;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Task Manager</h3><a href="/tasks" class="btn btn-sm">Kanban Board</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Finance</h3><a href="/finance" class="btn btn-sm">Chart of Accounts</a></div>
+      <div class="card" style="background:#fdf4ff;border:2px solid #a855f7"><h3 style="color:#a855f7">NEW: Analytics v2</h3><a href="/analytics-v2" class="btn btn-sm">Visual Dashboard</a></div>
+      ${hasReports ? `<div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Reports</h3><a href="/scheduled-reports" class="btn btn-sm">Auto Reports</a></div>` : lockCard(`<div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Reports</h3><a href="/scheduled-reports" class="btn btn-sm">Auto Reports</a></div>`, 'Basic Plan')}
+      ${hasBranches ? `<div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Branches</h3><a href="/branches" class="btn btn-sm">Multi-Branch</a></div>` : lockCard(`<div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Branches</h3><a href="/branches" class="btn btn-sm">Multi-Branch</a></div>`, 'Basic Plan')}
+      <div class="card" style="background:#ecfdf5;border:2px solid #059669"><h3 style="color:#059669">NEW: Inventory</h3><a href="/inventory" class="btn btn-sm">Stock Management</a></div>
       <div class="card" style="background:#f1f5f9;border:2px solid #475569"><h3 style="color:#475569">NEW: Asset Tracker</h3><a href="/assets" class="btn btn-sm">Equipment & Depreciation</a></div>
       <div class="card" style="background:#fdf2f8;border:2px solid #be185d"><h3 style="color:#be185d">NEW: Event Tickets</h3><a href="/event-tickets" class="btn btn-sm">Sell Tickets Online</a></div>
-      <div class="card"><h3>Suggestions</h3><a href="/suggestions" class="btn btn-sm">Feedback</a></div>
-      <div class="card"><h3>Forums</h3><a href="/forums" class="btn btn-sm">Discussions</a></div>
-      <div class="card"><h3>Login History</h3><a href="/login-history" class="btn btn-sm">Security</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #0ea5e9"><h3 style="color:#0ea5e9">NEW: Deep Links</h3><a href="/links" class="btn btn-sm">URL Shortener</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Webhooks</h3><a href="/webhooks" class="btn btn-sm">Webhook Mgmt</a></div>
+      <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Plugins</h3><a href="/marketplace" class="btn btn-sm">Marketplace</a></div>
+      <div class="card" style="background:#f1f5f9;border:2px solid #64748b"><h3 style="color:#64748b">NEW: Backup</h3><a href="/backup" class="btn btn-sm">Backup Center</a></div>
+      <div class="card" style="background:#fffbeb;border:2px solid #f59e0b"><h3 style="color:#f59e0b">NEW: Receipt Builder</h3><a href="/receipts" class="btn btn-sm">Doc Templates</a></div>
+      <div class="card" style="background:#eef2ff;border:2px solid #6366f1"><h3 style="color:#6366f1">NEW: Parent Portal</h3><a href="/parent-portal" class="btn btn-sm">Parent Access</a></div>
+      <div class="card" style="background:#f0f9ff;border:2px solid #0ea5e9"><h3 style="color:#0ea5e9">NEW: Public Portal</h3><a href="/portal/public" class="btn btn-sm">Public Pages</a></div>
       <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">🌐 Public Site</h3><a href="/public-site" class="btn btn-sm">Website Builder</a></div>
       <div class="card" style="background:#d1fae5;border:2px solid #059669"><h3 style="color:#059669">🎯 Fundraising</h3><a href="/fundraising" class="btn btn-sm">Campaigns</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">🎬 Entertainment</h3><a href="/entertainment" class="btn btn-sm">Hub</a></div>
+    `)}
+    ${ds('🔒', 'Admin', `
+      <div class="card"><h3>Bills</h3><a href="/bill-reminders" class="btn btn-sm btn-red">Bill Reminders</a></div>
+      <div class="card"><h3>Login History</h3><a href="/login-history" class="btn btn-sm">Security</a></div>
       <div class="card"><h3>Policies</h3><a href="/policies" class="btn btn-sm">Policy Docs</a></div>
       <div class="card"><h3>Committees</h3><a href="/committees" class="btn btn-sm">Manage</a></div>
-    </div>
+    `)}
     <h2 style="margin:28px 0 12px;font-size:18px;color:#1e293b">&#x1f4ca; Analytics Overview</h2>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px">
       <div class="card">${feeSvg}</div>
@@ -5380,38 +5414,32 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       <div class="stat-card"><div class="stat-num">${events.rows[0].count}</div><div>Events</div></div>
       <div class="stat-card"><div class="stat-num">UGX ${parseInt(budget.rows[0].coalesce).toLocaleString()}</div><div>Income</div></div>
     </div>
-    <div class="grid">
+    ${ds('🏢', 'Core', `
+      <div class="grid">
       <div class="card"><h3>Members</h3>
         <a href="/org/members" class="btn btn-sm">Member Database</a>
         <a href="/org/register" class="btn btn-sm" style="margin-top:8px">Register Member</a>
         <a href="/org/attendance" class="btn btn-sm" style="margin-top:8px">Attendance</a>
       </div>
+      <div class="card"><h3>Roles</h3>
+        <a href="/roles" class="btn btn-sm">Permissions</a>
+      </div>
       <div class="card"><h3>Projects</h3>
         <a href="/org/projects" class="btn btn-sm">All Projects</a>
         <a href="/org/projects/new" class="btn btn-sm" style="margin-top:8px">New Project</a>
-      </div>
-      <div class="card"><h3>Events</h3>
-        <a href="/org/events" class="btn btn-sm">Events</a>
-        <a href="/org/events/new" class="btn btn-sm" style="margin-top:8px">New Event</a>
-      </div>
-      <div class="card"><h3>Finance</h3>
-        <a href="/org/finance" class="btn btn-sm">Income/Expense</a>
-        <a href="/org/finance/categories" class="btn btn-sm" style="margin-top:8px">Budget vs Actual</a>
-        <a href="/org/reports" class="btn btn-sm" style="margin-top:8px">Reports</a>
       </div>
       <div class="card"><h3>Meetings</h3>
         <a href="/org/meetings" class="btn btn-sm">Meeting Minutes</a>
         <span class="muted">${meetings.rows[0].count} recorded</span>
       </div>
-      <div class="card"><h3>Notices</h3>
-        <a href="/org/notices" class="btn btn-sm">Notice Board</a>
-        <span class="muted">${notices.rows[0].count} posted</span>
       </div>
-      <div class="card"><h3>Fundraising</h3>
-        ${tenant.has_fundraising ? '<a href="/fundraising" class="btn btn-gold btn-sm" style="margin-top:8px">Fundraising Hub</a><br><a href="/fundraising/analytics" class="btn btn-sm" style="margin-top:4px">Analytics</a><br><a href="/discover" class="btn btn-sm" style="margin-top:4px;background:#4f46e5;color:white">Public Discovery</a>' : '<a href="/upgrade/fundraising" class="btn btn-sm" style="margin-top:8px">+ Add Fundraising</a>'}
-      </div>
-      <div class="card"><h3>Campaigns</h3>
-        <a href="/campaigns" class="btn btn-sm btn-gold">Fundraising</a>
+    `)}
+    ${ds('💰', 'Finance', `
+      <div class="grid">
+      <div class="card"><h3>Finance</h3>
+        <a href="/org/finance" class="btn btn-sm">Income/Expense</a>
+        <a href="/org/finance/categories" class="btn btn-sm" style="margin-top:8px">Budget vs Actual</a>
+        <a href="/org/reports" class="btn btn-sm" style="margin-top:8px">Reports</a>
       </div>
       <div class="card"><h3>Income</h3>
         <a href="/income" class="btn btn-sm btn-green">Income Tracking</a>
@@ -5419,48 +5447,76 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       <div class="card"><h3>Billing</h3>
         <a href="/billing" class="btn btn-sm btn-gold">Subscriptions</a>
       </div>
-      <div class="card"><h3>Documents</h3>
-        <a href="/documents" class="btn btn-sm">Library</a>
-      </div>
-      <div class="card"><h3>Roles</h3>
-        <a href="/roles" class="btn btn-sm">Permissions</a>
-      </div>
       <div class="card"><h3>Bills</h3>
         <a href="/bill-reminders" class="btn btn-sm btn-red">Reminders</a>
       </div>
-      <div class="card" style="background:#eff6ff;border:2px solid #1e40af"><h3 style="color:#1e40af">NEW: Resolutions</h3><a href="/org/resolutions" class="btn btn-sm">Board Votes</a></div>
-      <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Assets</h3><a href="/org/assets" class="btn btn-sm">Fixed Assets</a></div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Partners</h3><a href="/org/partners" class="btn btn-sm">Donor Mgmt</a></div>
-      <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">NEW: Ticketing</h3><a href="/org/ticketing" class="btn btn-sm">Event Tickets</a></div>
-      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Committees</h3><a href="/org/committees" class="btn btn-sm">Working Groups</a></div>
       <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">Budget</h3><a href="/org/finance/categories" class="btn btn-sm">Budget vs Actual</a></div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #15803d"><h3 style="color:#15803d">Import</h3><a href="/org/members/import" class="btn btn-sm">CSV Import</a></div>
-      <div class="card" style="background:#eff6ff;border:2px solid #1e40af"><h3 style="color:#1e40af">Tasks</h3><a href="/org/tasks" class="btn btn-sm">Task Manager</a></div>
-      <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">Notifications</h3><a href="/org/notifications" class="btn btn-sm">In-App Alerts</a></div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Analytics</h3><a href="/org/analytics" class="btn btn-sm">Engagement</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Budget</h3><a href="/org/budget" class="btn btn-sm">Budget vs Actual</a></div>
+      </div>
+    `)}
+    ${ds('📣', 'Communication', `
+      <div class="grid">
+      <div class="card"><h3>Notices</h3>
+        <a href="/org/notices" class="btn btn-sm">Notice Board</a>
+        <span class="muted">${notices.rows[0].count} posted</span>
+      </div>
+      <div class="card"><h3>Campaigns</h3>
+        <a href="/campaigns" class="btn btn-sm btn-gold">Fundraising</a>
+      </div>
+      <div class="card" style="background:#fff7ed;border:2px solid #ea580c"><h3 style="color:#ea580c">Broadcast</h3><a href="/org/broadcast" class="btn btn-sm">Mass Notify</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Discussions</h3><a href="/org/discussions" class="btn btn-sm">Forum</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">Surveys</h3><a href="/org/surveys" class="btn btn-sm">Polls & Surveys</a></div>
+      <div class="card" style="background:#fee2e2;border:2px solid #dc2626"><h3 style="color:#dc2626">Reminders</h3><a href="/org/reminders" class="btn btn-sm">Alerts</a></div>
+      </div>
+    `)}
+    ${ds('📅', 'Events & Planning', `
+      <div class="grid">
+      <div class="card"><h3>Events</h3>
+        <a href="/org/events" class="btn btn-sm">Events</a>
+        <a href="/org/events/new" class="btn btn-sm" style="margin-top:8px">New Event</a>
+      </div>
       <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Calendar</h3><a href="/org/calendar" class="btn btn-sm">Calendar View</a></div>
       <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">Activity</h3><a href="/org/activity" class="btn btn-sm">Activity Feed</a></div>
-      <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">Bulk Actions</h3><a href="/org/members/bulk" class="btn btn-sm">Bulk Manage</a></div>
-      <div class="card" style="background:#f8fafc;border:2px solid #475569"><h3 style="color:#475569">Settings</h3><a href="/org/settings" class="btn btn-sm">Org Settings</a></div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #15803d"><h3 style="color:#15803d">My Portal</h3><a href="/my-portal" class="btn btn-sm">Self-Service</a></div>
-      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Health</h3><a href="/org/health" class="btn btn-sm">Org Health</a></div>
-      <div class="card" style="background:#fee2e2;border:2px solid #dc2626"><h3 style="color:#dc2626">Reminders</h3><a href="/org/reminders" class="btn btn-sm">Alerts</a></div>
-      <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Export</h3><a href="/org/export" class="btn btn-sm">Data Export</a></div>
-      <div class="card" style="background:#f5f3ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">Access</h3><a href="/org/roles" class="btn btn-sm">Permissions</a></div>
-      <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">PDF Reports</h3><a href="/org/reports" class="btn btn-sm">Generate PDF</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #1e40af"><h3 style="color:#1e40af">NEW: Resolutions</h3><a href="/org/resolutions" class="btn btn-sm">Board Votes</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Committees</h3><a href="/org/committees" class="btn btn-sm">Working Groups</a></div>
       <div class="card" style="background:#eff6ff;border:2px solid #4f46e5"><h3 style="color:#4f46e5">Minutes</h3><a href="/org/minutes" class="btn btn-sm">Meeting Notes</a></div>
-      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">Surveys</h3><a href="/org/surveys" class="btn btn-sm">Polls & Surveys</a></div>
-      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Discussions</h3><a href="/org/discussions" class="btn btn-sm">Forum</a></div>
       <div class="card" style="background:#f0f9ff;border:2px solid #0ea5e9"><h3 style="color:#0ea5e9">Kanban</h3><a href="/org/tasks/board" class="btn btn-sm">Task Board</a></div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Budget</h3><a href="/org/budget" class="btn btn-sm">Budget vs Actual</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #1e40af"><h3 style="color:#1e40af">Tasks</h3><a href="/org/tasks" class="btn btn-sm">Task Manager</a></div>
+      </div>
+    `)}
+    ${ds('📦', 'Resources', `
+      <div class="grid">
+      <div class="card"><h3>Documents</h3>
+        <a href="/documents" class="btn btn-sm">Library</a>
+      </div>
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Templates</h3><a href="/org/templates" class="btn btn-sm">Email Templates</a></div>
-      <div class="card" style="background:#fff7ed;border:2px solid #ea580c"><h3 style="color:#ea580c">Broadcast</h3><a href="/org/broadcast" class="btn btn-sm">Mass Notify</a></div>
-      <div class="card" style="background:#f8fafc;border:2px solid #475569"><h3 style="color:#475569">Search</h3><a href="/org/search" class="btn btn-sm">Global Search</a></div>
-      <div class="card" style="background:#f1f5f9;border:2px solid #334155"><h3 style="color:#334155">Backup</h3><a href="/org/backup" class="btn btn-sm">Data Backup</a></div>
-      <div class="card" style="background:#fef2f2;border:2px solid #b91c1c"><h3 style="color:#b91c1c">Churn AI</h3><a href="/org/churn-enhanced" class="btn btn-sm">Enhanced Churn</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Partners</h3><a href="/org/partners" class="btn btn-sm">Donor Mgmt</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Sick Bay</h3><p class="muted" style="font-size:12px">First aid for staff & visitors</p><a href="/sickbay" class="btn btn-sm" style="background:#ec4899;color:white">Sick Bay</a></div>
-    </div>
+      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Health</h3><a href="/org/health" class="btn btn-sm">Org Health</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #15803d"><h3 style="color:#15803d">Import</h3><a href="/org/members/import" class="btn btn-sm">CSV Import</a></div>
+      <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Export</h3><a href="/org/export" class="btn btn-sm">Data Export</a></div>
+      <div class="card" style="background:#f5f3ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">Access</h3><a href="/org/roles" class="btn btn-sm">Permissions</a></div>
+      </div>
+    `)}
+    ${ds('🛠️', 'Tools', `
+      <div class="grid">
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Analytics</h3><a href="/org/analytics" class="btn btn-sm">Engagement</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">Notifications</h3><a href="/org/notifications" class="btn btn-sm">In-App Alerts</a></div>
+      <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">Bulk Actions</h3><a href="/org/members/bulk" class="btn btn-sm">Bulk Manage</a></div>
+      <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">PDF Reports</h3><a href="/org/reports" class="btn btn-sm">Generate PDF</a></div>
+      <div class="card" style="background:#f8fafc;border:2px solid #475569"><h3 style="color:#475569">Search</h3><a href="/org/search" class="btn btn-sm">Global Search</a></div>
+      <div class="card" style="background:#f1f5f9;border:2px solid #334155"><h3 style="color:#334155">Backup</h3><a href="/org/backup" class="btn btn-sm">Data Backup</a></div>
+      <div class="card" style="background:#f8fafc;border:2px solid #475569"><h3 style="color:#475569">Settings</h3><a href="/org/settings" class="btn btn-sm">Org Settings</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #15803d"><h3 style="color:#15803d">My Portal</h3><a href="/my-portal" class="btn btn-sm">Self-Service</a></div>
+      <div class="card" style="background:#fef2f2;border:2px solid #b91c1c"><h3 style="color:#b91c1c">Churn AI</h3><a href="/org/churn-enhanced" class="btn btn-sm">Enhanced Churn</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Assets</h3><a href="/org/assets" class="btn btn-sm">Fixed Assets</a></div>
+      <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">NEW: Ticketing</h3><a href="/org/ticketing" class="btn btn-sm">Event Tickets</a></div>
+      <div class="card"><h3>Fundraising</h3>
+        ${tenant.has_fundraising ? '<a href="/fundraising" class="btn btn-gold btn-sm" style="margin-top:8px">Fundraising Hub</a><br><a href="/fundraising/analytics" class="btn btn-sm" style="margin-top:4px">Analytics</a><br><a href="/discover" class="btn btn-sm" style="margin-top:4px;background:#4f46e5;color:white">Public Discovery</a>' : '<a href="/upgrade/fundraising" class="btn btn-sm" style="margin-top:8px">+ Add Fundraising</a>'}
+      </div>
+      </div>
+    `)}
     <div class="grid" style="margin-top:15px">
       <div class="card" style="border-left:4px solid #dc2626">
         <h3 style="color:#dc2626">Overdue Tasks</h3>
@@ -6075,48 +6131,49 @@ app.get('/portal/church', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="stat-card"><div class="stat-num">${sermons.rows[0].count}</div><div>Sermons</div></div>
       <div class="stat-card"><div class="stat-num">${prayers.rows[0].count}</div><div>Prayer Requests</div></div>
     </div>
-    <div class="grid">
+${ds('👥','Congregation',`
       <div class="card"><h3>Congregation</h3>
         <a href="/org/members" class="btn btn-sm">Members</a>
         <a href="/org/register" class="btn btn-sm" style="margin-top:8px">Add Member</a>
-      </div>
-      <div class="card"><h3>Tithes & Offerings</h3>
-        <a href="/church/tithes" class="btn btn-sm">Record Tithe/Offering</a>
-        <a href="/org/finance" class="btn btn-sm" style="margin-top:8px">All Finance</a>
-      </div>
-      <div class="card"><h3>Sermons</h3>
-        <a href="/church/sermons" class="btn btn-sm">Sermon Archive</a>
-        <a href="/church/sermons/new" class="btn btn-sm" style="margin-top:8px">New Sermon</a>
-      </div>
-      <div class="card"><h3>Prayer Requests</h3>
-        <a href="/church/prayers" class="btn btn-sm">View Requests</a>
-        <a href="/church/prayers/new" class="btn btn-sm" style="margin-top:8px">New Request</a>
-      </div>
-      <div class="card"><h3>Services</h3>
-        <a href="/church/schedule" class="btn btn-sm">Service Schedule</a>
       </div>
       <div class="card"><h3>Members</h3>
         <a href="/church/members" class="btn btn-sm">Church Members</a>
         <a href="/church/members/new" class="btn btn-sm" style="margin-top:8px">Add Member</a>
       </div>
-      <div class="card"><h3>Donations</h3>
-        <a href="/church/donations" class="btn btn-sm">Donation Tracker</a>
-      </div>
-      <div class="card"><h3>Events</h3>
-        <a href="/org/events" class="btn btn-sm">Events</a>
-        <a href="/org/notices" class="btn btn-sm" style="margin-top:8px">Notices</a>
-      </div>
       <div class="card"><h3>Attendance</h3>
         <a href="/church/attendance" class="btn btn-sm">Mark Attendance</a>
-      </div>
-      <div class="card"><h3>Tithe Statement</h3>
-        <a href="/church/tithe-statement" class="btn btn-sm">Generate</a>
       </div>
       <div class="card"><h3>Birthdays</h3>
         <a href="/church/birthdays" class="btn btn-sm btn-green">Birthday SMS</a>
       </div>
-      <div class="card"><h3>Campaigns</h3>
-        <a href="/campaigns" class="btn btn-sm btn-gold">Fundraising</a>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Member Portal</h3><a href="/church/login" class="btn btn-sm">Member Login</a><a href="/church/members/generate-passwords" class="btn btn-sm btn-green" style="margin-top:8px">Gen Passwords</a></div>
+`)}
+${ds('⛪','Worship & Ministry',`
+      <div class="card"><h3>Services</h3>
+        <a href="/church/schedule" class="btn btn-sm">Service Schedule</a>
+      </div>
+      <div class="card"><h3>Sermons</h3>
+        <a href="/church/sermons" class="btn btn-sm">Sermon Archive</a>
+        <a href="/church/sermons/new" class="btn btn-sm" style="margin-top:8px">New Sermon</a>
+      </div>
+      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">NEW: Sermon Archive</h3><a href="/church/sermons" class="btn btn-sm">Full Archive</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Choir</h3><a href="/church/choir" class="btn btn-sm">Worship Team</a></div>
+      <div class="card" style="background:#fff7ed;border:2px solid #b45309"><h3 style="color:#b45309">NEW: Sacraments</h3><a href="/church/sacraments" class="btn btn-sm">Records</a></div>
+      <div class="card"><h3>Prayer Requests</h3>
+        <a href="/church/prayers" class="btn btn-sm">View Requests</a>
+        <a href="/church/prayers/new" class="btn btn-sm" style="margin-top:8px">New Request</a>
+      </div>
+      <div class="card" style="background:#fffbeb;border:2px solid #f59e0b"><h3 style="color:#f59e0b">NEW: Prayer Requests</h3><a href="/church/prayer-requests" class="btn btn-sm">Prayer Wall</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Cell Groups</h3><a href="/church/cell-groups" class="btn btn-sm">Small Groups</a></div>
+      <div class="card" style="background:#f0fdfa;border:2px solid #14b8a6"><h3 style="color:#14b8a6">NEW: Volunteers</h3><a href="/church/volunteers" class="btn btn-sm">Scheduling</a></div>
+`)}
+${ds('💰','Finance',`
+      <div class="card"><h3>Tithes & Offerings</h3>
+        <a href="/church/tithes" class="btn btn-sm">Record Tithe/Offering</a>
+        <a href="/org/finance" class="btn btn-sm" style="margin-top:8px">All Finance</a>
+      </div>
+      <div class="card"><h3>Donations</h3>
+        <a href="/church/donations" class="btn btn-sm">Donation Tracker</a>
       </div>
       <div class="card"><h3>Income</h3>
         <a href="/income" class="btn btn-sm">Income Tracking</a>
@@ -6124,21 +6181,28 @@ app.get('/portal/church', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card"><h3>Billing</h3>
         <a href="/billing" class="btn btn-sm">Subscriptions</a>
       </div>
+      <div class="card" style="background:#d1fae5;border:2px solid #059669"><h3 style="color:#059669">🎯 Fundraising</h3><a href="/fundraising" class="btn btn-sm">Campaigns</a></div>
+`)}
+${ds('📅','Events & Communication',`
+      <div class="card"><h3>Events</h3>
+        <a href="/org/events" class="btn btn-sm">Events</a>
+        <a href="/org/notices" class="btn btn-sm" style="margin-top:8px">Notices</a>
+      </div>
+      <div class="card"><h3>Campaigns</h3>
+        <a href="/campaigns" class="btn btn-sm btn-gold">Fundraising</a>
+      </div>
+      <div class="card"><h3>Tithe Statement</h3>
+        <a href="/church/tithe-statement" class="btn btn-sm">Generate</a>
+      </div>
+`)}
+${ds('📦','Resources',`
       <div class="card"><h3>Documents</h3>
         <a href="/documents" class="btn btn-sm">Library</a>
       </div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Member Portal</h3><a href="/church/login" class="btn btn-sm">Member Login</a><a href="/church/members/generate-passwords" class="btn btn-sm btn-green" style="margin-top:8px">Gen Passwords</a></div>
-      <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Choir</h3><a href="/church/choir" class="btn btn-sm">Worship Team</a></div>
-      <div class="card" style="background:#fff7ed;border:2px solid #b45309"><h3 style="color:#b45309">NEW: Sacraments</h3><a href="/church/sacraments" class="btn btn-sm">Records</a></div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Cell Groups</h3><a href="/church/cell-groups" class="btn btn-sm">Small Groups</a></div>
-      <div class="card" style="background:#f0fdfa;border:2px solid #14b8a6"><h3 style="color:#14b8a6">NEW: Volunteers</h3><a href="/church/volunteers" class="btn btn-sm">Scheduling</a></div>
-      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">NEW: Sermon Archive</h3><a href="/church/sermons" class="btn btn-sm">Full Archive</a></div>
-      <div class="card" style="background:#fffbeb;border:2px solid #f59e0b"><h3 style="color:#f59e0b">NEW: Prayer Requests</h3><a href="/church/prayer-requests" class="btn btn-sm">Prayer Wall</a></div>
       <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">🌐 Public Site</h3><a href="/public-site" class="btn btn-sm">Website Builder</a></div>
-      <div class="card" style="background:#d1fae5;border:2px solid #059669"><h3 style="color:#059669">🎯 Fundraising</h3><a href="/fundraising" class="btn btn-sm">Campaigns</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">🎬 Entertainment</h3><a href="/entertainment" class="btn btn-sm">Hub</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
-    </div>
+`)}
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Tithes Trend</h3><canvas id="tithesChart"></canvas></div>
     <div class="card"><h3>Donation Types</h3><canvas id="donationTypesChart"></canvas></div>
@@ -6498,104 +6562,101 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
       <div class="stat-card"><div class="stat-num">${invoices.rows[0].count}</div><div>Unpaid Invoices</div></div>
       <div class="stat-card"><div class="stat-num">${customers.rows[0].count}</div><div>Customers</div></div>
     </div>
-    <div class="grid">
+    ${ds('🛒', 'Sales & POS', `<div class="grid">
       <div class="card"><h3>Point of Sale</h3><a href="/business/pos" class="btn btn-sm">New Sale</a><a href="/business/sales" class="btn btn-sm" style="margin-top:8px">Sales History</a></div>
-      ${hasInventory ? `<div class="card"><h3>Inventory</h3><a href="/business/inventory" class="btn btn-sm">Stock Management</a><a href="/business/inventory/add" class="btn btn-sm" style="margin-top:8px">Add Product</a></div>` : lockCard(`<div class="card"><h3>Inventory</h3><a href="/business/inventory" class="btn btn-sm">Stock Management</a><a href="/business/inventory/add" class="btn btn-sm" style="margin-top:8px">Add Product</a></div>`, 'Basic Plan')}
       <div class="card"><h3>Invoices</h3><a href="/business/invoices" class="btn btn-sm">Manage Invoices</a></div>
-      <div class="card"><h3>Expenses</h3><a href="/business/expenses" class="btn btn-sm">Record Expense</a><a href="/business/profit-loss" class="btn btn-sm" style="margin-top:8px">Profit/Loss</a></div>
       <div class="card"><h3>Customers</h3><a href="/business/customers" class="btn btn-sm">Customer Directory</a></div>
-      ${hasReports ? `<div class="card"><h3>Reports</h3><a href="/business/monthly-report" class="btn btn-gold btn-sm">Monthly Report</a></div>` : lockCard(`<div class="card"><h3>Reports</h3><a href="/business/monthly-report" class="btn btn-gold btn-sm">Monthly Report</a></div>`, 'Basic Plan')}
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Quotations</h3><a href="/business/quotations" class="btn btn-sm">Quotes</a></div>
       <div class="card"><h3>Debts</h3><a href="/business/debts" class="btn btn-sm btn-red">Customer Debts</a></div>
-      <div class="card"><h3>Purchase Orders</h3><a href="/business/purchase-orders" class="btn btn-sm">Manage POs</a></div>
-      <div class="card"><h3>Tax (VAT/URA)</h3><a href="/business/tax" class="btn btn-sm">Tax Reports</a></div>
+    </div>`)}
+    ${ds('📦', 'Inventory & Products', `<div class="grid">
+      ${hasInventory ? `<div class="card"><h3>Inventory</h3><a href="/business/inventory" class="btn btn-sm">Stock Management</a><a href="/business/inventory/add" class="btn btn-sm" style="margin-top:8px">Add Product</a></div>` : lockCard(`<div class="card"><h3>Inventory</h3><a href="/business/inventory" class="btn btn-sm">Stock Management</a><a href="/business/inventory/add" class="btn btn-sm" style="margin-top:8px">Add Product</a></div>`, 'Basic Plan')}
       <div class="card"><h3>Barcodes</h3><a href="/barcode" class="btn btn-sm">Scan / Generate</a></div>
-      <div class="card"><h3>Bills</h3><a href="/bill-reminders" class="btn btn-sm btn-red">Bill Reminders</a></div>
-      <div class="card"><h3>Income</h3><a href="/income" class="btn btn-sm btn-green">Income Tracking</a></div>
-      <div class="card"><h3>Billing</h3><a href="/billing" class="btn btn-sm btn-gold">Subscriptions</a></div>
-      <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Library</a></div>
-      <div class="card"><h3>API</h3><a href="/api-keys" class="btn btn-sm">API Keys</a></div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #0f766e"><h3 style="color:#0f766e">NEW: Payroll</h3><a href="/business/payroll" class="btn btn-sm">Salary Mgmt</a></div>
-      <div class="card" style="background:#eff6ff;border:2px solid #2563eb"><h3 style="color:#2563eb">NEW: HR/Leave</h3><a href="/business/leave" class="btn btn-sm">Leave Mgmt</a></div>
-      <div class="card" style="background:#faf5ff;border:2px solid #6366f1"><h3 style="color:#6366f1">NEW: Projects</h3><a href="/business/projects" class="btn btn-sm">PM Board</a></div>
-      <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">NEW: CRM</h3><a href="/business/crm" class="btn btn-sm">Lead Pipeline</a></div>
       <div class="card" style="background:#fffbeb;border:2px solid #ca8a04"><h3 style="color:#ca8a04">NEW: Stock Take</h3><a href="/business/stock-take" class="btn btn-sm">Physical Count</a></div>
       <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">NEW: Warranties</h3><a href="/business/warranties" class="btn btn-sm">Track Warranties</a></div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Quotations</h3><a href="/business/quotations" class="btn btn-sm">Quotes</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Deliveries</h3><a href="/business/deliveries" class="btn btn-sm">Track Deliveries</a></div>
-      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">🌐 Public Site</h3><a href="/public-site" class="btn btn-sm">Website Builder</a></div>
-      <div class="card" style="background:#d1fae5;border:2px solid #059669"><h3 style="color:#059669">🎯 Fundraising</h3><a href="/fundraising" class="btn btn-sm">Campaigns</a></div>
-      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">🎬 Entertainment</h3><a href="/entertainment" class="btn btn-sm">Hub</a></div>
+    </div>`)}
+    ${ds('💰', 'Finance', `<div class="grid">
+      <div class="card"><h3>Expenses</h3><a href="/business/expenses" class="btn btn-sm">Record Expense</a><a href="/business/profit-loss" class="btn btn-sm" style="margin-top:8px">Profit/Loss</a></div>
+      <div class="card"><h3>Income</h3><a href="/income" class="btn btn-sm btn-green">Income Tracking</a></div>
+      <div class="card"><h3>Billing</h3><a href="/billing" class="btn btn-sm btn-gold">Subscriptions</a></div>
+      <div class="card"><h3>Tax (VAT/URA)</h3><a href="/business/tax" class="btn btn-sm">Tax Reports</a></div>
+      <div class="card"><h3>Bills</h3><a href="/bill-reminders" class="btn btn-sm btn-red">Bill Reminders</a></div>
+      <div class="card"><h3>Purchase Orders</h3><a href="/business/purchase-orders" class="btn btn-sm">Manage POs</a></div>
+    </div>`)}
+    ${ds('👥', 'People', `<div class="grid">
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
-
-    ${bizType === 'hotel' ? `
-    <h2 style="font-size:18px;margin:24px 0 12px;color:#dc2626;border-bottom:2px solid #dc2626;padding-bottom:4px">Hotel & Lodge Features</h2>
-    <div class="grid">
+      <div class="card" style="background:#f0fdf4;border:2px solid #0f766e"><h3 style="color:#0f766e">NEW: Payroll</h3><a href="/business/payroll" class="btn btn-sm">Salary Mgmt</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #2563eb"><h3 style="color:#2563eb">NEW: HR/Leave</h3><a href="/business/leave" class="btn btn-sm">Leave Mgmt</a></div>
+    </div>`)}
+    ${ds('🛠️', 'Business Tools', `<div class="grid">
+      ${hasReports ? `<div class="card"><h3>Reports</h3><a href="/business/monthly-report" class="btn btn-gold btn-sm">Monthly Report</a></div>` : lockCard(`<div class="card"><h3>Reports</h3><a href="/business/monthly-report" class="btn btn-gold btn-sm">Monthly Report</a></div>`, 'Basic Plan')}
+      <div class="card"><h3>API</h3><a href="/api-keys" class="btn btn-sm">API Keys</a></div>
+      <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Library</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #6366f1"><h3 style="color:#6366f1">NEW: Projects</h3><a href="/business/projects" class="btn btn-sm">PM Board</a></div>
+      <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">NEW: CRM</h3><a href="/business/crm" class="btn btn-sm">Lead Pipeline</a></div>
+    </div>`)}
+    ${ds('🏢', 'Industry Specific', bizType ? (() => {
+      const sections = {
+        hotel: ds('🏨', 'Hotel & Lodge', `<div class="grid">
       <div class="card" style="border-top:4px solid #dc2626"><h3 style="color:#dc2626">Room Management</h3><p class="muted" style="font-size:13px">Room types, rates, availability calendar</p><a href="/business/rooms" class="btn btn-sm" style="background:#dc2626;color:white;margin-top:10px">Rooms</a></div>
       <div class="card" style="border-top:4px solid #f59e0b"><h3 style="color:#f59e0b">Reservations</h3><p class="muted" style="font-size:13px">Bookings, check-in, check-out, guest ledger</p><a href="/business/reservations" class="btn btn-sm" style="background:#f59e0b;color:white;margin-top:10px">Reservations</a></div>
       <div class="card" style="border-top:4px solid #8b5cf6"><h3 style="color:#8b5cf6">Housekeeping</h3><p class="muted" style="font-size:13px">Room cleaning schedule, maintenance requests</p><a href="/business/housekeeping" class="btn btn-sm" style="background:#8b5cf6;color:white;margin-top:10px">Housekeeping</a></div>
       <div class="card" style="border-top:4px solid #14b8a6"><h3 style="color:#14b8a6">Guest Services</h3><p class="muted" style="font-size:13px">Laundry, room service, complaints, feedback</p><a href="/business/guest-services" class="btn btn-sm" style="background:#14b8a6;color:white;margin-top:10px">Guest Services</a></div>
-    </div>` : ''}
-    ${bizType === 'restaurant' ? `
-    <h2 style="font-size:18px;margin:24px 0 12px;color:#ea580c;border-bottom:2px solid #ea580c;padding-bottom:4px">Restaurant Features</h2>
-    <div class="grid">
+    </div>`),
+        restaurant: ds('🍽️', 'Restaurant', `<div class="grid">
       <div class="card" style="border-top:4px solid #ea580c"><h3 style="color:#ea580c">Menu Management</h3><p class="muted" style="font-size:13px">Categories, items, pricing, modifiers</p><a href="/business/menu" class="btn btn-sm" style="background:#ea580c;color:white;margin-top:10px">Menu</a></div>
       <div class="card" style="border-top:4px solid #f59e0b"><h3 style="color:#f59e0b">Orders & Kitchen</h3><p class="muted" style="font-size:13px">Take orders, kitchen display, order status</p><a href="/business/kitchen-orders" class="btn btn-sm" style="background:#f59e0b;color:white;margin-top:10px">Kitchen</a></div>
       <div class="card" style="border-top:4px solid #059669"><h3 style="color:#059669">Tables & Reservations</h3><p class="muted" style="font-size:13px">Table layout, seating, reservations</p><a href="/business/tables" class="btn btn-sm" style="background:#059669;color:white;margin-top:10px">Tables</a></div>
       <div class="card" style="border-top:4px solid #3b82f6"><h3 style="color:#3b82f6">Deliveries</h3><p class="muted" style="font-size:13px">Delivery orders, riders, tracking</p><a href="/business/deliveries" class="btn btn-sm" style="background:#3b82f6;color:white;margin-top:10px">Deliveries</a></div>
-    </div>` : ''}
-    ${bizType === 'retail' ? `
-    <h2 style="font-size:18px;margin:24px 0 12px;color:#e11d48;border-bottom:2px solid #e11d48;padding-bottom:4px">Retail Shop Features</h2>
-    <div class="grid">
+    </div>`),
+        retail: ds('🛍️', 'Retail Shop', `<div class="grid">
       <div class="card" style="border-top:4px solid #e11d48"><h3 style="color:#e11d48">Barcode System</h3><p class="muted" style="font-size:13px">Scan & generate barcodes, SKU management</p><a href="/barcode" class="btn btn-sm" style="background:#e11d48;color:white;margin-top:10px">Barcodes</a></div>
       <div class="card" style="border-top:4px solid #f59e0b"><h3 style="color:#f59e0b">Loyalty Program</h3><p class="muted" style="font-size:13px">Points, rewards, customer retention</p><a href="/business/loyalty" class="btn btn-sm" style="background:#f59e0b;color:white;margin-top:10px">Loyalty</a></div>
       <div class="card" style="border-top:4px solid #8b5cf6"><h3 style="color:#8b5cf6">Promotions</h3><p class="muted" style="font-size:13px">Discounts, sales, bundle deals</p><a href="/business/promotions" class="btn btn-sm" style="background:#8b5cf6;color:white;margin-top:10px">Promotions</a></div>
       <div class="card" style="border-top:4px solid #059669"><h3 style="color:#059669">Purchases & Suppliers</h3><p class="muted" style="font-size:13px">Purchase orders, supplier management</p><a href="/business/purchase-orders" class="btn btn-sm" style="background:#059669;color:white;margin-top:10px">Purchases</a></div>
-    </div>` : ''}
-    ${bizType === 'salon' ? `
-    <h2 style="font-size:18px;margin:24px 0 12px;color:#db2777;border-bottom:2px solid #db2777;padding-bottom:4px">Salon & Spa Features</h2>
-    <div class="grid">
+    </div>`),
+        salon: ds('💇', 'Salon & Spa', `<div class="grid">
       <div class="card" style="border-top:4px solid #db2777"><h3 style="color:#db2777">Services & Pricing</h3><p class="muted" style="font-size:13px">Hair, nails, spa treatments, packages</p><a href="/business/services" class="btn btn-sm" style="background:#db2777;color:white;margin-top:10px">Services</a></div>
       <div class="card" style="border-top:4px solid #f59e0b"><h3 style="color:#f59e0b">Appointments</h3><p class="muted" style="font-size:13px">Booking calendar, stylist scheduling</p><a href="/business/appointments" class="btn btn-sm" style="background:#f59e0b;color:white;margin-top:10px">Appointments</a></div>
       <div class="card" style="border-top:4px solid #8b5cf6"><h3 style="color:#8b5cf6">Stylists & Commission</h3><p class="muted" style="font-size:13px">Staff management, commission tracking</p><a href="/business/stylists" class="btn btn-sm" style="background:#8b5cf6;color:white;margin-top:10px">Stylists</a></div>
-    </div>` : ''}
-    ${bizType === 'gym' ? `
-    <h2 style="font-size:18px;margin:24px 0 12px;color:#16a34a;border-bottom:2px solid #16a34a;padding-bottom:4px">Gym & Fitness Features</h2>
-    <div class="grid">
+    </div>`),
+        gym: ds('🏋️', 'Gym & Fitness', `<div class="grid">
       <div class="card" style="border-top:4px solid #16a34a"><h3 style="color:#16a34a">Memberships</h3><p class="muted" style="font-size:13px">Plans, renewals, expiration alerts</p><a href="/business/memberships" class="btn btn-sm" style="background:#16a34a;color:white;margin-top:10px">Memberships</a></div>
       <div class="card" style="border-top:4px solid #f59e0b"><h3 style="color:#f59e0b">Check-ins</h3><p class="muted" style="font-size:13px">Daily attendance, peak hours analytics</p><a href="/business/checkins" class="btn btn-sm" style="background:#f59e0b;color:white;margin-top:10px">Check-ins</a></div>
       <div class="card" style="border-top:4px solid #3b82f6"><h3 style="color:#3b82f6">Classes & Trainers</h3><p class="muted" style="font-size:13px">Group classes, personal training sessions</p><a href="/business/classes" class="btn btn-sm" style="background:#3b82f6;color:white;margin-top:10px">Classes</a></div>
       <div class="card" style="border-top:4px solid #8b5cf6"><h3 style="color:#8b5cf6">Equipment</h3><p class="muted" style="font-size:13px">Equipment inventory, maintenance schedule</p><a href="/business/equipment" class="btn btn-sm" style="background:#8b5cf6;color:white;margin-top:10px">Equipment</a></div>
-    </div>` : ''}
-    ${bizType === 'hardware' ? `
-    <h2 style="font-size:18px;margin:24px 0 12px;color:#ca8a04;border-bottom:2px solid #ca8a04;padding-bottom:4px">Hardware Store Features</h2>
-    <div class="grid">
+    </div>`),
+        hardware: ds('🔧', 'Hardware Store', `<div class="grid">
       <div class="card" style="border-top:4px solid #ca8a04"><h3 style="color:#ca8a04">Products & Catalog</h3><p class="muted" style="font-size:13px">Building materials, tools, bulk pricing</p><a href="/business/inventory" class="btn btn-sm" style="background:#ca8a04;color:white;margin-top:10px">Products</a></div>
       <div class="card" style="border-top:4px solid #3b82f6"><h3 style="color:#3b82f6">Quotations</h3><p class="muted" style="font-size:13px">Project quotes, cost estimates</p><a href="/business/quotations" class="btn btn-sm" style="background:#3b82f6;color:white;margin-top:10px">Quotations</a></div>
       <div class="card" style="border-top:4px solid #059669"><h3 style="color:#059669">Suppliers</h3><p class="muted" style="font-size:13px">Supplier management, purchase orders</p><a href="/business/purchase-orders" class="btn btn-sm" style="background:#059669;color:white;margin-top:10px">Suppliers</a></div>
-    </div>` : ''}
-    ${bizType === 'supermarket' ? `
-    <h2 style="font-size:18px;margin:24px 0 12px;color:#0d9488;border-bottom:2px solid #0d9488;padding-bottom:4px">Supermarket Features</h2>
-    <div class="grid">
+    </div>`),
+        supermarket: ds('🛒', 'Supermarket', `<div class="grid">
       <div class="card" style="border-top:4px solid #0d9488"><h3 style="color:#0d9488">Shelf Management</h3><p class="muted" style="font-size:13px">Aisles, shelves, product placement</p><a href="/business/shelves" class="btn btn-sm" style="background:#0d9488;color:white;margin-top:10px">Shelves</a></div>
       <div class="card" style="border-top:4px solid #f59e0b"><h3 style="color:#f59e0b">Perishables</h3><p class="muted" style="font-size:13px">Expiry tracking, waste management</p><a href="/business/perishables" class="btn btn-sm" style="background:#f59e0b;color:white;margin-top:10px">Perishables</a></div>
       <div class="card" style="border-top:4px solid #e11d48"><h3 style="color:#e11d48">Daily Sales</h3><p class="muted" style="font-size:13px">End-of-day reports, cash register</p><a href="/business/sales" class="btn btn-sm" style="background:#e11d48;color:white;margin-top:10px">Sales</a></div>
       <div class="card" style="border-top:4px solid #3b82f6"><h3 style="color:#3b82f6">Bulk Pricing</h3><p class="muted" style="font-size:13px">Wholesale pricing, volume discounts</p><a href="/business/bulk-pricing" class="btn btn-sm" style="background:#3b82f6;color:white;margin-top:10px">Bulk Pricing</a></div>
-    </div>` : ''}
-    ${bizType === 'transport' ? `
-    <h2 style="font-size:18px;margin:24px 0 12px;color:#4f46e5;border-bottom:2px solid #4f46e5;padding-bottom:4px">Transport & Logistics Features</h2>
-    <div class="grid">
+    </div>`),
+        transport: ds('🚛', 'Transport & Logistics', `<div class="grid">
       <div class="card" style="border-top:4px solid #4f46e5"><h3 style="color:#4f46e5">Fleet Management</h3><p class="muted" style="font-size:13px">Vehicles, registration, insurance</p><a href="/business/fleet" class="btn btn-sm" style="background:#4f46e5;color:white;margin-top:10px">Fleet</a></div>
       <div class="card" style="border-top:4px solid #f59e0b"><h3 style="color:#f59e0b">Bookings</h3><p class="muted" style="font-size:13px">Trip bookings, scheduling, dispatch</p><a href="/business/trip-bookings" class="btn btn-sm" style="background:#f59e0b;color:white;margin-top:10px">Bookings</a></div>
       <div class="card" style="border-top:4px solid #059669"><h3 style="color:#059669">Drivers</h3><p class="muted" style="font-size:13px">Driver management, licenses, ratings</p><a href="/business/drivers" class="btn btn-sm" style="background:#059669;color:white;margin-top:10px">Drivers</a></div>
       <div class="card" style="border-top:4px solid #dc2626"><h3 style="color:#dc2626">Maintenance</h3><p class="muted" style="font-size:13px">Service schedules, repair tracking</p><a href="/business/maintenance" class="btn btn-sm" style="background:#dc2626;color:white;margin-top:10px">Maintenance</a></div>
-    </div>` : ''}
-    ${bizType === 'electronics' ? `
-    <h2 style="font-size:18px;margin:24px 0 12px;color:#6366f1;border-bottom:2px solid #6366f1;padding-bottom:4px">Electronics Shop Features</h2>
-    <div class="grid">
+    </div>`),
+        electronics: ds('🔌', 'Electronics Shop', `<div class="grid">
       <div class="card" style="border-top:4px solid #6366f1"><h3 style="color:#6366f1">Product Catalog</h3><p class="muted" style="font-size:13px">Electronics, accessories, serial numbers</p><a href="/business/inventory" class="btn btn-sm" style="background:#6366f1;color:white;margin-top:10px">Products</a></div>
       <div class="card" style="border-top:4px solid #f59e0b"><h3 style="color:#f59e0b">Repairs</h3><p class="muted" style="font-size:13px">Repair jobs, technician assignment, status</p><a href="/business/repairs" class="btn btn-sm" style="background:#f59e0b;color:white;margin-top:10px">Repairs</a></div>
       <div class="card" style="border-top:4px solid #059669"><h3 style="color:#059669">Warranties</h3><p class="muted" style="font-size:13px">Warranty tracking, expiry alerts</p><a href="/business/warranties" class="btn btn-sm" style="background:#059669;color:white;margin-top:10px">Warranties</a></div>
-    </div>` : ''}
+    </div>`)
+      };
+      return sections[bizType] || '';
+    })() : '')}
+    ${ds('🚀', 'Growth', `<div class="grid">
+      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">🌐 Public Site</h3><a href="/public-site" class="btn btn-sm">Website Builder</a></div>
+      <div class="card" style="background:#d1fae5;border:2px solid #059669"><h3 style="color:#059669">🎯 Fundraising</h3><a href="/fundraising" class="btn btn-sm">Campaigns</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">🎬 Entertainment</h3><a href="/entertainment" class="btn btn-sm">Hub</a></div>
+    </div>`)}
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Sales Trend</h3><canvas id="salesChart"></canvas></div>
     <div class="card"><h3>Expenses Breakdown</h3><canvas id="expensesChart"></canvas></div>
@@ -7215,20 +7276,32 @@ app.get('/portal/health', requireAuth, requireNotBanned, ah(async (req, res) => 
       </div>
     </div>
 
-    <div class="grid">
+    ${ds('\u{1F3E5}', 'Clinical', `<div class="grid">
       <div class="card" style="border-left:4px solid #f59e0b"><h3>&#128269; Patient Queue / Triage</h3><p class="muted">${waiting} waiting, ${seeing} being seen, ${done} done</p><a href="/clinic/queue" class="btn btn-sm">View Queue</a><a href="/clinic/queue/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Add Patient</a></div>
-      ${hasEnhancedClinic ? `<div class="card" style="border-left:4px solid #3b82f6"><h3>&#129657; Patient Registry</h3><p class="muted">${patientTotal} registered patients</p><a href="/clinic-enhanced/patients" class="btn btn-sm">Patient List</a><a href="/clinic-enhanced/patients/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Register</a></div>` : lockCard(`<div class="card" style="border-left:4px solid #3b82f6"><h3>&#129657; Patient Registry</h3><p class="muted">${patientTotal} registered patients</p><a href="/clinic-enhanced/patients" class="btn btn-sm">Patient List</a><a href="/clinic-enhanced/patients/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Register</a></div>`, 'Pro Plan')}
       <div class="card" style="border-left:4px solid #10b981"><h3>&#128137; Consultations</h3><p class="muted">${consultToday} consultations today</p><a href="/clinic/consultation/new" class="btn btn-sm">New Consultation</a><a href="/clinic/consultations" class="btn btn-sm" style="margin-top:6px">History</a></div>
       <div class="card" style="border-left:4px solid #8b5cf6"><h3>&#128138; Prescriptions</h3><p class="muted">${rxToday} prescriptions today</p><a href="/clinic/prescription/new" class="btn btn-sm">New Prescription</a><a href="/clinic/prescriptions" class="btn btn-sm" style="margin-top:6px">View All</a></div>
-      ${hasPatientLab ? `<div class="card" style="border-left:4px solid #ec4899"><h3>&#128300; Laboratory</h3><p class="muted">${pendingLabs} pending, ${inProgressLabs} in progress</p><a href="/clinic/lab" class="btn btn-sm">Lab Center</a><a href="/clinic/lab/new" class="btn btn-sm btn-green" style="margin-top:6px">+ New Request</a></div>` : lockCard(`<div class="card" style="border-left:4px solid #ec4899"><h3>&#128300; Laboratory</h3><p class="muted">${pendingLabs} pending, ${inProgressLabs} in progress</p><a href="/clinic/lab" class="btn btn-sm">Lab Center</a><a href="/clinic/lab/new" class="btn btn-sm btn-green" style="margin-top:6px">+ New Request</a></div>`, 'Pro Plan')}
-      <div class="card" style="border-left:4px solid #f97316"><h3>&#128197; Appointments</h3><p class="muted">${apptToday} appointments today</p><a href="/clinic/appointments" class="btn btn-sm">All Appointments</a><a href="/clinic/appointments/today" class="btn btn-sm" style="margin-top:6px">Today</a><a href="/clinic/appointments/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Book</a></div>
       <div class="card" style="border-left:4px solid #06b6d4"><h3>&#128138; Pharmacy</h3><p class="muted">${invRow.rows[0].cnt} items low stock</p><a href="/clinic/pharmacy/inventory" class="btn btn-sm">Inventory</a><a href="/clinic/pharmacy/inventory/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Add Drug</a></div>
-      <div class="card" style="border-left:4px solid #dc2626"><h3>&#127973; Bed Management</h3><p class="muted">${bedsOccupied}/${bedsTotal} beds occupied</p><a href="/clinic/beds" class="btn btn-sm">View Beds</a><a href="/clinic/beds/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Add Bed</a></div>
-      ${hasPatientEHR ? `<div class="card" style="border-left:4px solid #65a30d"><h3>&#128203; Electronic Health Records</h3><p class="muted">Patient history, vitals, allergies</p><a href="/clinic/ehr-search" class="btn btn-sm">Search EHR</a></div>` : lockCard(`<div class="card" style="border-left:4px solid #65a30d"><h3>&#128203; Electronic Health Records</h3><p class="muted">Patient history, vitals, allergies</p><a href="/clinic/ehr-search" class="btn btn-sm">Search EHR</a></div>`, 'Pro Plan')}
-      <div class="card" style="border-left:4px solid #eab308"><h3>&#128179; Insurance & Billing</h3><p class="muted">Claims, invoices, payments</p><a href="/clinic/insurance" class="btn btn-sm">Insurance</a><a href="/clinic/claims" class="btn btn-sm" style="margin-top:6px">Claims</a></div>
       <div class="card" style="border-left:4px solid #6366f1"><h3>&#129302; Clinical Decision Support</h3><p class="muted">Drug interactions, dosage calc</p><a href="/clinic/cds" class="btn btn-sm">CDS Dashboard</a></div>
+    </div>`)}
+
+    ${ds('\u{1F465}', 'Patient Management', `<div class="grid">
+      ${hasEnhancedClinic ? `<div class="card" style="border-left:4px solid #3b82f6"><h3>&#129657; Patient Registry</h3><p class="muted">${patientTotal} registered patients</p><a href="/clinic-enhanced/patients" class="btn btn-sm">Patient List</a><a href="/clinic-enhanced/patients/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Register</a></div>` : lockCard(`<div class="card" style="border-left:4px solid #3b82f6"><h3>&#129657; Patient Registry</h3><p class="muted">${patientTotal} registered patients</p><a href="/clinic-enhanced/patients" class="btn btn-sm">Patient List</a><a href="/clinic-enhanced/patients/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Register</a></div>`, 'Pro Plan')}
+      ${hasPatientEHR ? `<div class="card" style="border-left:4px solid #65a30d"><h3>&#128203; Electronic Health Records</h3><p class="muted">Patient history, vitals, allergies</p><a href="/clinic/ehr-search" class="btn btn-sm">Search EHR</a></div>` : lockCard(`<div class="card" style="border-left:4px solid #65a30d"><h3>&#128203; Electronic Health Records</h3><p class="muted">Patient history, vitals, allergies</p><a href="/clinic/ehr-search" class="btn btn-sm">Search EHR</a></div>`, 'Pro Plan')}
+      <div class="card" style="border-left:4px solid #f97316"><h3>&#128197; Appointments</h3><p class="muted">${apptToday} appointments today</p><a href="/clinic/appointments" class="btn btn-sm">All Appointments</a><a href="/clinic/appointments/today" class="btn btn-sm" style="margin-top:6px">Today</a><a href="/clinic/appointments/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Book</a></div>
+      <div class="card" style="border-left:4px solid #dc2626"><h3>&#127973; Bed Management</h3><p class="muted">${bedsOccupied}/${bedsTotal} beds occupied</p><a href="/clinic/beds" class="btn btn-sm">View Beds</a><a href="/clinic/beds/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Add Bed</a></div>
+    </div>`)}
+
+    ${ds('\u{1F9EA}', 'Diagnostics', `<div class="grid">
+      ${hasPatientLab ? `<div class="card" style="border-left:4px solid #ec4899"><h3>&#128300; Laboratory</h3><p class="muted">${pendingLabs} pending, ${inProgressLabs} in progress</p><a href="/clinic/lab" class="btn btn-sm">Lab Center</a><a href="/clinic/lab/new" class="btn btn-sm btn-green" style="margin-top:6px">+ New Request</a></div>` : lockCard(`<div class="card" style="border-left:4px solid #ec4899"><h3>&#128300; Laboratory</h3><p class="muted">${pendingLabs} pending, ${inProgressLabs} in progress</p><a href="/clinic/lab" class="btn btn-sm">Lab Center</a><a href="/clinic/lab/new" class="btn btn-sm btn-green" style="margin-top:6px">+ New Request</a></div>`, 'Pro Plan')}
+    </div>`)}
+
+    ${ds('\u{1F4B0}', 'Finance', `<div class="grid">
+      <div class="card" style="border-left:4px solid #eab308"><h3>&#128179; Insurance & Billing</h3><p class="muted">Claims, invoices, payments</p><a href="/clinic/insurance" class="btn btn-sm">Insurance</a><a href="/clinic/claims" class="btn btn-sm" style="margin-top:6px">Claims</a></div>
+    </div>`)}
+
+    ${ds('\u{1F4CA}', 'Analytics', `<div class="grid">
       ${hasReports ? `<div class="card" style="border-left:4px solid #475569"><h3>&#128202; Reports & Analytics</h3><p class="muted">Revenue, diagnoses, trends</p><a href="/clinic/reports" class="btn btn-sm">View Reports</a></div>` : lockCard(`<div class="card" style="border-left:4px solid #475569"><h3>&#128202; Reports & Analytics</h3><p class="muted">Revenue, diagnoses, trends</p><a href="/clinic/reports" class="btn btn-sm">View Reports</a></div>`, 'Basic Plan')}
-    </div>
+    </div>`)}
 
     ${recentQueue.length ? `<div class="card" style="margin-top:20px"><h3>Current Queue</h3>
       <div style="overflow-x:auto"><table><tr><th>#</th><th>Patient</th><th>Priority</th><th>Complaint</th><th>Status</th><th>Time</th></tr>
@@ -7696,17 +7769,21 @@ app.get('/portal/individual', requireAuth, requireNotBanned, ah(async (req, res)
       <div class="stat-card"><div class="stat-num">UGX ${parseInt(budgetItems.rows[0].planned).toLocaleString()}</div><div>Budget Planned</div></div>
       <div class="stat-card"><div class="stat-num">UGX ${parseInt(budgetItems.rows[0].actual).toLocaleString()}</div><div>Budget Spent</div></div>
     </div>
-    <div class="grid">
+    ${ds('💰', 'Personal Finance', `
       <div class="card"><h3>Budget Tracker</h3><a href="/individual/budget" class="btn btn-sm">Manage Budget</a></div>
       <div class="card"><h3>Goals</h3><a href="/individual/goals" class="btn btn-sm">Set Goals</a></div>
-      <div class="card"><h3>Notes</h3><a href="/individual/notes" class="btn btn-sm">My Notes</a></div>
-      <div class="card"><h3>Documents</h3><a href="/individual/docs" class="btn btn-sm">My Documents</a></div>
       <div class="card"><h3>Bill Reminders</h3><a href="/bill-reminders" class="btn btn-sm btn-red">Reminders</a></div>
       <div class="card"><h3>Income</h3><a href="/income" class="btn btn-sm btn-green">Income Tracking</a></div>
+    `)}
+    ${ds('📋', 'Productivity', `
+      <div class="card"><h3>Notes</h3><a href="/individual/notes" class="btn btn-sm">My Notes</a></div>
+      <div class="card"><h3>Documents</h3><a href="/individual/docs" class="btn btn-sm">My Documents</a></div>
       <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Document Library</a></div>
+    `)}
+    ${ds('⚙️', 'Account', `
       <div class="card"><h3>Billing</h3><a href="/billing" class="btn btn-sm btn-gold">Subscriptions</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
-    </div>
+    `)}
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Budget: Planned vs Actual</h3><canvas id="budgetChart"></canvas></div>
     <script>
@@ -33477,16 +33554,24 @@ app.get('/portal/:type', requireAuth, requireNotBanned, ah(async (req, res) => {
       <div class="stat-card"><div class="stat-num">#${t}</div><div>Tenant ID</div></div>
       <div class="stat-card"><div class="stat-num" style="color:#059669">Active</div><div>Status</div></div>
     </div>
-    <div class="grid">
+    ${ds('🏠', 'Core', `
       <div class="card"><h3>Dashboard</h3><a href="/dashboard" class="btn btn-sm">Main Dashboard</a></div>
-      ${hasInventory ? `<div class="card"><h3>Inventory</h3><a href="/inventory" class="btn btn-sm">Stock Management</a></div>` : lockCard(`<div class="card"><h3>Inventory</h3><a href="/inventory" class="btn btn-sm">Stock Management</a></div>`, 'Basic Plan')}
       <div class="card"><h3>Staff</h3><a href="/roles" class="btn btn-sm">Roles & Permissions</a></div>
-      <div class="card"><h3>Finance</h3><a href="/billing" class="btn btn-sm">Subscriptions</a></div>
-      <div class="card"><h3>Fundraising</h3><a href="/fundraising" class="btn btn-sm btn-green">Campaigns</a></div>
-      ${hasReports ? `<div class="card"><h3>Reports</h3><a href="/reports" class="btn btn-sm">View Reports</a></div>` : lockCard(`<div class="card"><h3>Reports</h3><a href="/reports" class="btn btn-sm">View Reports</a></div>`, 'Basic Plan')}
       <div class="card"><h3>Settings</h3><a href="/settings/profile" class="btn btn-sm">Edit Profile</a></div>
+    `)}
+    ${ds('💼', 'Business', `
+      ${hasInventory ? `<div class="card"><h3>Inventory</h3><a href="/inventory" class="btn btn-sm">Stock Management</a></div>` : lockCard(`<div class="card"><h3>Inventory</h3><a href="/inventory" class="btn btn-sm">Stock Management</a></div>`, 'Basic Plan')}
+      <div class="card"><h3>Finance</h3><a href="/billing" class="btn btn-sm">Subscriptions</a></div>
+    `)}
+    ${ds('📈', 'Growth', `
+      <div class="card"><h3>Fundraising</h3><a href="/fundraising" class="btn btn-sm btn-green">Campaigns</a></div>
+    `)}
+    ${ds('📊', 'Analytics', `
+      ${hasReports ? `<div class="card"><h3>Reports</h3><a href="/reports" class="btn btn-sm">View Reports</a></div>` : lockCard(`<div class="card"><h3>Reports</h3><a href="/reports" class="btn btn-sm">View Reports</a></div>`, 'Basic Plan')}
+    `)}
+    ${ds('👥', 'People', `
       <div class="card"><h3>Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a></div>
-    </div>
+    `)}
     <div class="card" style="margin-top:24px;text-align:center;padding:40px">
       <h3 style="margin-bottom:8px">More features coming soon!</h3>
       <p class="muted">This portal type is in development. Use the links above to access available modules, or switch portals from the navigation.</p>
