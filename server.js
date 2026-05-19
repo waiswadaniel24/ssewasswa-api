@@ -4484,10 +4484,10 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
   res.send(renderPage('School Dashboard', `
     <div data-dashboard><div class="hero"><h1>School Portal <span class=\"live-indicator\"><span class=\"live-dot\"></span> Live</span></h1><p>Manage students, fees, exams, attendance, reports</p><div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div></div>
     <div class="stats">
-      <div class="stat-card"><div class="stat-num" data-stat="student_count">${students.rows[0].count}</div><div>Students</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="fee_total">UGX ${parseInt(fees.rows[0].coalesce).toLocaleString()}</div><div>Fees Due</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="exam_count">${exams.rows[0].count}</div><div>Exams</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="attendance_today" style="color:#059669">${attendance.rows[0].count}</div><div>Present Today</div></div>
+      <div class="stat-card" data-widget="students"><div class="stat-num" data-stat="student_count">${students.rows[0].count}</div><div>Students</div></div>
+      <div class="stat-card" data-widget="fees"><div class="stat-num" data-stat="fee_total">UGX ${parseInt(fees.rows[0].coalesce).toLocaleString()}</div><div>Fees Due</div></div>
+      <div class="stat-card" data-widget="exams"><div class="stat-num" data-stat="exam_count">${exams.rows[0].count}</div><div>Exams</div></div>
+      <div class="stat-card" data-widget="attendance"><div class="stat-num" data-stat="attendance_today" style="color:#059669">${attendance.rows[0].count}</div><div>Present Today</div></div>
     </div></div>
     ${ds('📚', 'Academics', `
       <div class="card"><h3>Students</h3><a href="/school/students" class="btn">Manage Students</a><a href="/school/students/import" class="btn btn-green btn-sm" style="margin-top:8px">CSV Import</a></div>
@@ -4698,6 +4698,11 @@ app.post('/school/students/save', requireAuth, requireNotBanned, validate({ name
   await pool.query('INSERT INTO students(tenant_id,admission_no,name,class,stream,guardian_name,guardian_phone) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, admission_no, name, finalClass, finalStream, guardian_name, guardian_phone]);
   await audit(req.session.user.email, 'add_student', `Added student: ${name}`, req.session.user.tenant_id, req);
   wsBroadcast(t, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
+  // Enhanced: send actual data payload so client can update without HTTP round-trip
+  try {
+    const newCount = (await pool.query('SELECT COUNT(*) FROM students WHERE tenant_id=$1', [t])).rows[0].count;
+    wsBroadcast(t, { type: 'dashboard:update', data: { student_count: newCount }, timestamp: Date.now() });
+  } catch(e) {}
   res.redirect('/school/students');
 }));
 
@@ -4883,6 +4888,14 @@ app.post('/school/fees/pay/save', requireAuth, requireNotBanned, ah(async (req, 
   await pool.query('UPDATE fees SET paid=paid+$1 WHERE id=$2 AND tenant_id=$3', [amount, fee_id, t]);
   await audit(req.session.user.email, 'fee_payment', `Payment UGX ${amount} on fee #${fee_id}`, req.session.user.tenant_id, req);
   wsBroadcast(t, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
+  // Enhanced: send actual data payload so client can update without HTTP round-trip
+  try {
+    const [feeTotal, feePaid] = await Promise.all([
+      pool.query('SELECT COALESCE(SUM(amount),0) as total FROM fees WHERE tenant_id=$1', [t]),
+      pool.query('SELECT COALESCE(SUM(paid),0) as total FROM fees WHERE tenant_id=$1', [t])
+    ]);
+    wsBroadcast(t, { type: 'dashboard:update', data: { fee_total: parseInt(feeTotal.rows[0].total), fee_collected: parseInt(feePaid.rows[0].total) }, timestamp: Date.now() });
+  } catch(e) {}
   // v1.0: Fee balance SMS + email notification to parent
   try {
     const fee = (await pool.query('SELECT f.*,s.name as student_name,s.guardian_phone,s.parent_email FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.id=$1 AND f.tenant_id=$2', [fee_id, t])).rows[0];
@@ -6209,10 +6222,10 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       <h1>Organization Portal <span class="live-indicator"><span class="live-dot"></span> Live</span></h1><p>Manage members, projects, events, meetings, notices</p>
     </div>
     <div class="stats">
-      <div class="stat-card"><div class="stat-num" data-stat="member_count">${members.rows[0].count}</div><div>Members</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="project_count">${projects.rows[0].count}</div><div>Projects</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="event_count">${events.rows[0].count}</div><div>Events</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="income_total">UGX ${parseInt(budget.rows[0].coalesce).toLocaleString()}</div><div>Income</div></div>
+      <div class="stat-card" data-widget="members"><div class="stat-num" data-stat="member_count">${members.rows[0].count}</div><div>Members</div></div>
+      <div class="stat-card" data-widget="projects"><div class="stat-num" data-stat="project_count">${projects.rows[0].count}</div><div>Projects</div></div>
+      <div class="stat-card" data-widget="events"><div class="stat-num" data-stat="event_count">${events.rows[0].count}</div><div>Events</div></div>
+      <div class="stat-card" data-widget="income"><div class="stat-num" data-stat="income_total">UGX ${parseInt(budget.rows[0].coalesce).toLocaleString()}</div><div>Income</div></div>
     </div></div>
     ${ds('🏢', 'Core', `
       <div class="grid">
@@ -6434,6 +6447,11 @@ app.post('/org/register/save', requireAuth, requireNotBanned, ah(async (req, res
   await pool.query('INSERT INTO members(tenant_id,name,email,phone,role) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, name, email, phone, role]);
   await audit(req.session.user.email, 'add_member', `Added member: ${name}`, req.session.user.tenant_id, req);
   wsBroadcast(req.session.user.tenant_id, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
+  // Enhanced: send actual data payload so client can update without HTTP round-trip
+  try {
+    const newCount = (await pool.query('SELECT COUNT(*) FROM members WHERE tenant_id=$1', [req.session.user.tenant_id])).rows[0].count;
+    wsBroadcast(req.session.user.tenant_id, { type: 'dashboard:update', data: { member_count: newCount }, timestamp: Date.now() });
+  } catch(e) {}
   res.redirect('/org/members');
 }));
 
@@ -6927,10 +6945,10 @@ app.get('/portal/church', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div>
     </div>
     <div class="stats">
-      <div class="stat-card"><div class="stat-num" data-stat="member_count">${members.rows[0].count}</div><div>Members</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="tithe_total">UGX ${parseInt(tithes.rows[0].coalesce).toLocaleString()}</div><div>Total Tithes</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="sermon_count">${sermons.rows[0].count}</div><div>Sermons</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="prayer_count">${prayers.rows[0].count}</div><div>Prayer Requests</div></div>
+      <div class="stat-card" data-widget="members"><div class="stat-num" data-stat="member_count">${members.rows[0].count}</div><div>Members</div></div>
+      <div class="stat-card" data-widget="tithes"><div class="stat-num" data-stat="tithe_total">UGX ${parseInt(tithes.rows[0].coalesce).toLocaleString()}</div><div>Total Tithes</div></div>
+      <div class="stat-card" data-widget="sermons"><div class="stat-num" data-stat="sermon_count">${sermons.rows[0].count}</div><div>Sermons</div></div>
+      <div class="stat-card" data-widget="prayers"><div class="stat-num" data-stat="prayer_count">${prayers.rows[0].count}</div><div>Prayer Requests</div></div>
     </div></div>
 ${ds('👥','Congregation',`
       <div class="card"><h3>Congregation</h3>
@@ -7257,6 +7275,11 @@ app.post('/church/members/save', requireAuth, requireNotBanned, ah(async (req, r
   await pool.query('INSERT INTO church_members(tenant_id,name,email,phone,address,role,date_of_birth) VALUES($1,$2,$3,$4,$5,$6,$7)', [req.session.user.tenant_id, name, email, phone, address, role, date_of_birth || null]);
   await audit(req.session.user.email, 'add_church_member', `Added church member: ${name}`, req.session.user.tenant_id, req);
   wsBroadcast(req.session.user.tenant_id, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
+  // Enhanced: send actual data payload so client can update without HTTP round-trip
+  try {
+    const newCount = (await pool.query('SELECT COUNT(*) FROM church_members WHERE tenant_id=$1', [req.session.user.tenant_id])).rows[0].count;
+    wsBroadcast(req.session.user.tenant_id, { type: 'dashboard:update', data: { member_count: newCount }, timestamp: Date.now() });
+  } catch(e) {}
   res.redirect('/church/members');
 }));
 
@@ -7325,6 +7348,14 @@ app.post('/church/donations/save', requireAuth, requireNotBanned, ah(async (req,
   await pool.query('INSERT INTO donations(tenant_id,donor_name,amount,type,method,reference) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, donor_name, amount, type, method, reference]);
   await audit(req.session.user.email, 'add_donation', `Donation UGX ${amount} from ${donor_name}`, req.session.user.tenant_id, req);
   wsBroadcast(req.session.user.tenant_id, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
+  // Enhanced: send actual data payload so client can update without HTTP round-trip
+  try {
+    const [titheRes, donationRes] = await Promise.all([
+      pool.query("SELECT COALESCE(SUM(amount),0) as total FROM org_finance WHERE tenant_id=$1 AND type='income' AND description ILIKE '%tithe%'", [req.session.user.tenant_id]),
+      pool.query("SELECT COALESCE(SUM(amount),0) as total FROM donations WHERE tenant_id=$1", [req.session.user.tenant_id])
+    ]);
+    wsBroadcast(req.session.user.tenant_id, { type: 'dashboard:update', data: { tithe_total: parseInt(titheRes.rows[0].total), donation_total: parseInt(donationRes.rows[0].total) }, timestamp: Date.now() });
+  } catch(e) {}
   res.redirect('/church/donations');
 }));
 
@@ -7359,11 +7390,11 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
       <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div>
     </div>
     <div class="stats">
-      <div class="stat-card"><div class="stat-num" data-stat="revenue_total">UGX ${parseInt(sales.rows[0].coalesce).toLocaleString()}</div><div>Month Sales</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="net_profit" style="color:${profit >= 0 ? '#059669' : '#dc2626'}">UGX ${profit.toLocaleString()}</div><div>Net Profit</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="low_stock_count" style="color:#dc2626">${inventory.rows[0].count}</div><div>Low Stock</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="unpaid_invoices">${invoices.rows[0].count}</div><div>Unpaid Invoices</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="customer_count">${customers.rows[0].count}</div><div>Customers</div></div>
+      <div class="stat-card" data-widget="revenue"><div class="stat-num" data-stat="revenue_total">UGX ${parseInt(sales.rows[0].coalesce).toLocaleString()}</div><div>Month Sales</div></div>
+      <div class="stat-card" data-widget="profit"><div class="stat-num" data-stat="net_profit" style="color:${profit >= 0 ? '#059669' : '#dc2626'}">UGX ${profit.toLocaleString()}</div><div>Net Profit</div></div>
+      <div class="stat-card" data-widget="inventory"><div class="stat-num" data-stat="low_stock_count" style="color:#dc2626">${inventory.rows[0].count}</div><div>Low Stock</div></div>
+      <div class="stat-card" data-widget="invoices"><div class="stat-num" data-stat="unpaid_invoices">${invoices.rows[0].count}</div><div>Unpaid Invoices</div></div>
+      <div class="stat-card" data-widget="customers"><div class="stat-num" data-stat="customer_count">${customers.rows[0].count}</div><div>Customers</div></div>
     </div></div>
     ${ds('🛒', 'Sales & POS', `<div class="grid">
       <div class="card"><h3>Point of Sale</h3><a href="/business/pos" class="btn btn-sm">New Sale</a><a href="/business/sales" class="btn btn-sm" style="margin-top:8px">Sales History</a></div>
@@ -7574,6 +7605,17 @@ app.post('/business/pos/checkout', requireAuth, requireNotBanned, requireTenantA
   const sale = (await pool.query('INSERT INTO sales(tenant_id,customer_name,total,paid,status) VALUES($1,$2,$3,$4,$5) RETURNING id',
     [t, finalCustomerName, total, payment_status === 'paid' ? total : 0, payment_status])).rows[0];
   wsBroadcast(t, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
+  // Enhanced: send actual data payload so client can update without HTTP round-trip
+  try {
+    const [salesRes, invRes, expRes] = await Promise.all([
+      pool.query("SELECT COALESCE(SUM(total),0) as total FROM sales WHERE tenant_id=$1 AND created_at>DATE_TRUNC('month', NOW())", [t]),
+      pool.query('SELECT COUNT(*) as cnt FROM inventory WHERE tenant_id=$1 AND quantity<5', [t]),
+      pool.query("SELECT COALESCE(SUM(amount),0) as total FROM expenses WHERE tenant_id=$1 AND COALESCE(expense_date, created_at::date)>DATE_TRUNC('month', NOW())", [t])
+    ]);
+    const revTotal = parseInt(salesRes.rows[0].total);
+    const expTotal = parseInt(expRes.rows[0].total);
+    wsBroadcast(t, { type: 'dashboard:update', data: { revenue_total: revTotal, low_stock_count: parseInt(invRes.rows[0].cnt), net_profit: revTotal - expTotal }, timestamp: Date.now() });
+  } catch(e) {}
   for (let item of items) {
     await pool.query('INSERT INTO sale_items(sale_id,inventory_id,quantity,price) VALUES($1,$2,$3,$4)', [sale.id, item.id, item.qty, item.price]);
   }
@@ -8049,14 +8091,14 @@ app.get('/portal/health', requireAuth, requireNotBanned, ah(async (req, res) => 
     </div>` : ''}
 
     <div class="stats">
-      <div class="stat-card"><div class="stat-num" data-stat="patient_count">${patientTotal}</div><div>Total Patients</div></div>
-      <div class="stat-card" style="border-left:4px solid #f59e0b"><div class="stat-num" data-stat="appointment_today" style="color:#f59e0b">${waiting}</div><div>Waiting Now</div></div>
-      <div class="stat-card" style="border-left:4px solid #3b82f6"><div class="stat-num" data-stat="consult_today">${consultToday}</div><div>Today Consults</div></div>
-      <div class="stat-card" style="border-left:4px solid #8b5cf6"><div class="stat-num">${completedToday}</div><div>Completed</div></div>
-      <div class="stat-card" style="border-left:4px solid #10b981"><div class="stat-num">${rxToday}</div><div>Today Rx</div></div>
-      <div class="stat-card" style="border-left:4px solid #ec4899"><div class="stat-num">${pendingLabs}</div><div>Pending Labs</div></div>
-      <div class="stat-card" style="border-left:4px solid #f97316"><div class="stat-num">${apptToday}</div><div>Appts Today</div></div>
-      <div class="stat-card" style="border-left:4px solid #dc2626"><div class="stat-num">${invRow.rows[0].cnt}</div><div>Low Stock</div></div>
+      <div class="stat-card" data-widget="patients"><div class="stat-num" data-stat="patient_count">${patientTotal}</div><div>Total Patients</div></div>
+      <div class="stat-card" style="border-left:4px solid #f59e0b" data-widget="waiting"><div class="stat-num" data-stat="appointment_today" style="color:#f59e0b">${waiting}</div><div>Waiting Now</div></div>
+      <div class="stat-card" style="border-left:4px solid #3b82f6" data-widget="consults"><div class="stat-num" data-stat="consult_today">${consultToday}</div><div>Today Consults</div></div>
+      <div class="stat-card" style="border-left:4px solid #8b5cf6" data-widget="completed"><div class="stat-num">${completedToday}</div><div>Completed</div></div>
+      <div class="stat-card" style="border-left:4px solid #10b981" data-widget="prescriptions"><div class="stat-num">${rxToday}</div><div>Today Rx</div></div>
+      <div class="stat-card" style="border-left:4px solid #ec4899" data-widget="labs"><div class="stat-num">${pendingLabs}</div><div>Pending Labs</div></div>
+      <div class="stat-card" style="border-left:4px solid #f97316" data-widget="appointments"><div class="stat-num">${apptToday}</div><div>Appts Today</div></div>
+      <div class="stat-card" style="border-left:4px solid #dc2626" data-widget="low_stock"><div class="stat-num">${invRow.rows[0].cnt}</div><div>Low Stock</div></div>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px">
@@ -8568,10 +8610,10 @@ app.get('/portal/individual', requireAuth, requireNotBanned, ah(async (req, res)
       <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div>
     </div>
     <div class="stats">
-      <div class="stat-card"><div class="stat-num" data-stat="goal_count">${goals.rows[0].count}</div><div>Goals</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="note_count">${notes.rows[0].count}</div><div>Notes</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="budget_planned">UGX ${parseInt(budgetItems.rows[0].planned).toLocaleString()}</div><div>Budget Planned</div></div>
-      <div class="stat-card"><div class="stat-num" data-stat="budget_actual">UGX ${parseInt(budgetItems.rows[0].actual).toLocaleString()}</div><div>Budget Spent</div></div>
+      <div class="stat-card" data-widget="goals"><div class="stat-num" data-stat="goal_count">${goals.rows[0].count}</div><div>Goals</div></div>
+      <div class="stat-card" data-widget="notes"><div class="stat-num" data-stat="note_count">${notes.rows[0].count}</div><div>Notes</div></div>
+      <div class="stat-card" data-widget="budget"><div class="stat-num" data-stat="budget_planned">UGX ${parseInt(budgetItems.rows[0].planned).toLocaleString()}</div><div>Budget Planned</div></div>
+      <div class="stat-card" data-widget="budget_spent"><div class="stat-num" data-stat="budget_actual">UGX ${parseInt(budgetItems.rows[0].actual).toLocaleString()}</div><div>Budget Spent</div></div>
     </div></div>
     ${ds('💰', 'Personal Finance', `
       <div class="card"><h3>Budget Tracker</h3><a href="/individual/budget" class="btn btn-sm">Manage Budget</a></div>
@@ -17721,6 +17763,30 @@ app.get('/api/dashboard/chart-data', requireAuth, ah(async (req, res) => {
 }));
 
 // =============================================
+// DASHBOARD CUSTOMIZATION: Per-user prefs
+// =============================================
+// Get user's dashboard preferences
+app.get('/api/dashboard/prefs', requireAuth, ah(async (req, res) => {
+  const result = await pool.query(
+    'SELECT widgets, layout FROM user_dashboard_prefs WHERE user_id=$1 AND portal_type=$2',
+    [req.session.user.id, req.session.user.tenant_type || 'school']
+  );
+  res.json(result.rows[0] || { widgets: [], layout: 'default' });
+}));
+
+// Save user's dashboard preferences
+app.post('/api/dashboard/prefs', requireAuth, ah(async (req, res) => {
+  const { widgets, layout } = req.body;
+  await pool.query(
+    `INSERT INTO user_dashboard_prefs (user_id, portal_type, widgets, layout, updated_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (user_id, portal_type) DO UPDATE SET widgets=$3, layout=$4, updated_at=NOW()`,
+    [req.session.user.id, req.session.user.tenant_type || 'school', JSON.stringify(widgets || []), layout || 'default']
+  );
+  res.json({ success: true });
+}));
+
+// =============================================
 // v8.0: DEEP LINKING
 // =============================================
 app.post('/deep-links/create', requireAuth, ah(async (req, res) => {
@@ -23327,6 +23393,14 @@ app.post('/clinic/queue/save', requireAuth, requireNotBanned, requireFeature('pa
   const { patient_type, patient_id, patient_name, complaint, priority, triage_notes, queue_number } = req.body;
   await pool.query('INSERT INTO patient_queue(tenant_id,patient_type,patient_id,patient_name,complaint,priority,triage_notes,queue_number) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, patient_type||'student', patient_id||null, patient_name, complaint, priority||'normal', triage_notes||null, queue_number||1]);
   wsBroadcast(t, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
+  // Enhanced: send actual data payload so client can update without HTTP round-trip
+  try {
+    const [patientRes, apptRes] = await Promise.all([
+      pool.query('SELECT COUNT(*) as cnt FROM clinic_patients WHERE tenant_id=$1', [t]),
+      pool.query("SELECT COUNT(*) as cnt FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=CURRENT_DATE", [t])
+    ]);
+    wsBroadcast(t, { type: 'dashboard:update', data: { patient_count: parseInt(patientRes.rows[0].cnt), appointment_today: parseInt(apptRes.rows[0].cnt) }, timestamp: Date.now() });
+  } catch(e) {}
   res.redirect('/clinic/queue');
 }));
 
@@ -28540,6 +28614,11 @@ app.post('/fundraising/:id/donate-save', requireAuth, requireNotBanned, requireF
     if (_processDonationEffects) await _processDonationEffects({ tenant_id: t, campaign_id: req.params.id, donation_id: donationId, donor_name: displayName, donor_email: donorEmail, donor_phone: donorPhone, amount, method, message, is_anonymous: isAnonymous });
   } catch(e) { /* non-blocking */ }
   wsBroadcast(t, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
+  // Enhanced: send actual data payload so client can update without HTTP round-trip
+  try {
+    const donationTotal = (await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM campaign_donations WHERE tenant_id=$1', [t])).rows[0].total;
+    wsBroadcast(t, { type: 'dashboard:update', data: { donation_total: parseInt(donationTotal) }, timestamp: Date.now() });
+  } catch(e) {}
   res.redirect('/fundraising/'+req.params.id);
 }));
 
@@ -35774,17 +35853,17 @@ app.get('/portal/public', requireAuth, ah(async (req, res) => {
       <p style="opacity:0.9;margin-top:8px">${esc(tenant?.type || 'Organization')} Public Portal</p>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
-      <div class="card" style="text-align:center;cursor:pointer" onclick="document.getElementById('pub-pages').scrollIntoView({behavior:'smooth'})">
+      <div class="card" style="text-align:center;cursor:pointer" data-widget="pages" onclick="document.getElementById('pub-pages').scrollIntoView({behavior:'smooth'})">
         <div style="font-size:36px;margin-bottom:8px">📄</div>
         <h3>Pages</h3>
         <p class="muted">${pages.length} published</p>
       </div>
-      <div class="card" style="text-align:center;cursor:pointer" onclick="document.getElementById('pub-posts').scrollIntoView({behavior:'smooth'})">
+      <div class="card" style="text-align:center;cursor:pointer" data-widget="posts" onclick="document.getElementById('pub-posts').scrollIntoView({behavior:'smooth'})">
         <div style="font-size:36px;margin-bottom:8px">📰</div>
         <h3>Posts</h3>
         <p class="muted">${posts.length} total</p>
       </div>
-      <div class="card" style="text-align:center;cursor:pointer" onclick="document.getElementById('pub-shop').scrollIntoView({behavior:'smooth'})">
+      <div class="card" style="text-align:center;cursor:pointer" data-widget="shop" onclick="document.getElementById('pub-shop').scrollIntoView({behavior:'smooth'})">
         <div style="font-size:36px;margin-bottom:8px">🛒</div>
         <h3>Shop</h3>
         <p class="muted">${shopItems.length} items</p>
@@ -41261,7 +41340,21 @@ app.use((err, req, res, next) => {
 // === ATTACH WEBSOCKET SERVER ===
 try {
   const wss = new WebSocketServer({ server, path: '/ws/notifications' });
+
+  // Heartbeat: ping every 30s, terminate if no pong in 60s
+  const wsHeartbeat = setInterval(function() {
+    wss.clients.forEach(function(ws) {
+      if (!ws.isAlive) return ws.terminate();
+      ws.isAlive = false;
+      ws.ping();
+    });
+  }, 30000);
+  wss.on('close', function() { clearInterval(wsHeartbeat); });
+
   wss.on('connection', (ws, req) => {
+    ws.isAlive = true;
+    ws.on('pong', function() { ws.isAlive = true; });
+
     // Parse session from cookie for auth
     const cookieHeader = req.headers.cookie || '';
     const sidMatch = cookieHeader.match(/connect\.sid=([^;]+)/);

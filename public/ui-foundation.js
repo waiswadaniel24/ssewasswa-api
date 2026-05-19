@@ -328,7 +328,7 @@
   var lastRefresh = 0;
   var MIN_REFRESH_GAP = 5000; // Don't refresh more than once per 5s
 
-  // Try WebSocket first — listen for dashboard:refresh events
+  // Try WebSocket first — listen for dashboard:refresh and dashboard:update events
   function attachWsListener() {
     var ws = window._ws;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -342,10 +342,33 @@
               refreshDashboardData(data.section || 'all');
             }
           }
+          // Enhanced: handle direct data payloads without HTTP round-trip
+          if (data.type === 'dashboard:update' && data.data) {
+            Object.keys(data.data).forEach(function(key) {
+              var el = document.querySelector('[data-stat="' + key + '"]');
+              if (el) {
+                var oldVal = el.textContent.trim();
+                var newVal = formatStatValue(data.data[key]);
+                if (oldVal !== newVal) {
+                  el.textContent = newVal;
+                  el.style.transition = 'background 0.3s';
+                  el.style.background = 'rgba(16, 185, 129, 0.15)';
+                  el.style.borderRadius = '4px';
+                  setTimeout(function() { el.style.background = ''; }, 1500);
+                  // Show toast for significant changes
+                  var oldNum = parseInt(oldVal.replace(/[^\d-]/g, ''));
+                  var newNum = parseInt(newVal.replace(/[^\d-]/g, ''));
+                  if (!isNaN(oldNum) && !isNaN(newNum) && Math.abs(newNum - oldNum) > 0) {
+                    if (typeof showToast === 'function') showToast('Dashboard updated', 'info', 2000);
+                  }
+                }
+              }
+            });
+          }
         } catch(err) {}
       });
       wsRefreshEnabled = true;
-      console.log('[Dashboard Auto-Refresh] WebSocket listener attached');
+      console.log('[Dashboard Auto-Refresh] WebSocket listener attached (with dashboard:update support)');
     }
   }
 
@@ -435,4 +458,185 @@
   }
 
   console.log('[Dashboard Auto-Refresh] Initialized (WS: ' + wsRefreshEnabled + ', polling: 60s)');
+})();
+
+// === Dashboard Customization ===
+(function() {
+  'use strict';
+
+  // Only activate on dashboard pages
+  if (!document.querySelector('[data-dashboard]')) return;
+
+  // Create the customization panel HTML and inject it
+  var panel = document.createElement('div');
+  panel.id = 'dashboard-customize-panel';
+  panel.style.cssText = 'display:none;position:fixed;right:0;top:0;width:320px;height:100%;background:#1e293b;color:#fff;z-index:9990;padding:24px;overflow-y:auto;box-shadow:-4px 0 20px rgba(0,0,0,0.3);transition:transform 0.3s ease;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
+  panel.innerHTML = '<h3 style="margin:0 0 20px;font-size:18px">Customize Dashboard</h3>' +
+    '<div id="widget-toggles" style="display:flex;flex-direction:column;gap:12px"></div>' +
+    '<div style="margin-top:20px"><label style="display:block;margin-bottom:8px;font-size:14px;color:#94a3b8">Layout</label>' +
+    '<select id="dashboard-layout" style="width:100%;padding:8px;background:#334155;color:#fff;border:1px solid #475569;border-radius:6px;font-size:14px">' +
+    '<option value="default">Default (4 columns)</option>' +
+    '<option value="2col">2 Columns</option>' +
+    '<option value="3col">3 Columns</option>' +
+    '<option value="full">Full Width</option>' +
+    '</select></div>' +
+    '<div style="margin-top:24px;display:flex;gap:8px">' +
+    '<button onclick="saveDashboardPrefs()" style="flex:1;padding:10px;background:#4f46e5;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">Save</button>' +
+    '<button onclick="resetDashboardPrefs()" style="flex:1;padding:10px;background:#64748b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">Reset</button>' +
+    '<button onclick="toggleCustomizePanel()" style="padding:10px 16px;background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">Close</button>' +
+    '</div>';
+  document.body.appendChild(panel);
+
+  // Add the "Customize" button next to each dashboard hero
+  var dashboards = document.querySelectorAll('[data-dashboard]');
+  dashboards.forEach(function(container) {
+    var hero = container.querySelector('.hero, h1');
+    if (hero && !container.querySelector('.dashboard-customize-btn')) {
+      var btn = document.createElement('button');
+      btn.className = 'dashboard-customize-btn';
+      btn.innerHTML = '&#9881; Customize';
+      btn.style.cssText = 'position:absolute;top:16px;right:16px;background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.3);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;z-index:10;backdrop-filter:blur(4px)';
+      btn.onclick = function(e) { e.preventDefault(); window.toggleCustomizePanel(); };
+      // Make the hero position relative so button is positioned correctly
+      var heroParent = hero.closest('.hero') || hero.parentElement;
+      if (heroParent) {
+        heroParent.style.position = 'relative';
+        heroParent.appendChild(btn);
+      }
+    }
+  });
+
+  // Load saved preferences on page load
+  loadDashboardPrefs();
+
+  // Toggle customization panel
+  window.toggleCustomizePanel = function() {
+    var panel = document.getElementById('dashboard-customize-panel');
+    if (!panel) return;
+    if (panel.style.display === 'none') {
+      panel.style.display = 'block';
+      populateWidgetToggles();
+    } else {
+      panel.style.display = 'none';
+    }
+  };
+
+  // Populate toggle switches in the panel based on current widgets
+  function populateWidgetToggles() {
+    var togglesContainer = document.getElementById('widget-toggles');
+    if (!togglesContainer) return;
+    togglesContainer.innerHTML = '';
+    var widgets = document.querySelectorAll('[data-widget]');
+    widgets.forEach(function(el) {
+      var widgetName = el.dataset.widget;
+      var label = widgetName.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+      var isVisible = el.style.display !== 'none';
+      var toggleRow = document.createElement('div');
+      toggleRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #334155';
+      toggleRow.innerHTML = '<span style="font-size:14px">' + label + '</span>' +
+        '<label style="position:relative;display:inline-block;width:44px;height:24px">' +
+        '<input type="checkbox" id="toggle-' + widgetName + '" ' + (isVisible ? 'checked' : '') +
+        ' style="opacity:0;width:0;height:0" onchange="toggleWidget(\'' + widgetName + '\', this.checked)">' +
+        '<span style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:' + (isVisible ? '#4f46e5' : '#475569') + ';border-radius:24px;transition:0.3s"></span>' +
+        '<span style="position:absolute;content:\'\';height:18px;width:18px;left:' + (isVisible ? '22px' : '4px') + ';bottom:3px;background:white;border-radius:50%;transition:0.3s"></span>' +
+        '</label>';
+      togglesContainer.appendChild(toggleRow);
+    });
+  }
+
+  // Toggle a widget's visibility
+  window.toggleWidget = function(widgetId, visible) {
+    var el = document.querySelector('[data-widget="' + widgetId + '"]');
+    if (el) {
+      el.style.display = visible ? '' : 'none';
+    }
+    // Update toggle switch visual
+    var toggle = document.getElementById('toggle-' + widgetId);
+    if (toggle) {
+      var slider = toggle.parentElement.querySelector('span:first-of-type');
+      var dot = toggle.parentElement.querySelector('span:last-of-type');
+      if (slider) slider.style.background = visible ? '#4f46e5' : '#475569';
+      if (dot) dot.style.left = visible ? '22px' : '4px';
+    }
+  };
+
+  // Load dashboard preferences from API
+  window.loadDashboardPrefs = function() {
+    fetch('/api/dashboard/prefs').then(function(r) { return r.json(); }).then(function(d) {
+      // Apply layout
+      var container = document.querySelector('[data-dashboard]');
+      if (container && d.layout && d.layout !== 'default') {
+        // Remove any existing layout classes
+        container.className = container.className.replace(/dashboard-layout-\S+/g, '').trim();
+        container.classList.add('dashboard-layout-' + d.layout);
+        applyLayoutCSS(d.layout);
+      }
+      // Apply widget visibility
+      if (d.widgets && Array.isArray(d.widgets)) {
+        d.widgets.forEach(function(w) {
+          var el = document.querySelector('[data-widget="' + w.id + '"]');
+          if (el) el.style.display = w.visible ? '' : 'none';
+        });
+      }
+    }).catch(function() { /* silent fail */ });
+  };
+
+  // Save dashboard preferences
+  window.saveDashboardPrefs = function() {
+    var widgets = [];
+    document.querySelectorAll('[data-widget]').forEach(function(el) {
+      var toggle = document.getElementById('toggle-' + el.dataset.widget);
+      widgets.push({ id: el.dataset.widget, visible: toggle ? toggle.checked : true });
+    });
+    var layoutEl = document.getElementById('dashboard-layout');
+    var layout = layoutEl ? layoutEl.value : 'default';
+    fetch('/api/dashboard/prefs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.CSRF_TOKEN || '' },
+      body: JSON.stringify({ widgets: widgets, layout: layout })
+    }).then(function(r) { return r.json(); }).then(function(d) {
+      if (d.success) {
+        if (typeof showToast === 'function') showToast('Dashboard preferences saved!', 'success');
+        toggleCustomizePanel();
+        loadDashboardPrefs();
+      }
+    }).catch(function() {
+      if (typeof showToast === 'function') showToast('Error saving preferences', 'error');
+    });
+  };
+
+  // Reset dashboard preferences
+  window.resetDashboardPrefs = function() {
+    document.querySelectorAll('[data-widget]').forEach(function(el) { el.style.display = ''; });
+    var container = document.querySelector('[data-dashboard]');
+    if (container) container.className = container.className.replace(/dashboard-layout-\S+/g, '').trim();
+    removeLayoutCSS();
+    if (typeof showToast === 'function') showToast('Dashboard reset to default', 'info');
+  };
+
+  // Apply layout CSS dynamically
+  function applyLayoutCSS(layout) {
+    removeLayoutCSS();
+    var style = document.createElement('style');
+    style.id = 'dashboard-layout-style';
+    var css = '';
+    if (layout === '2col') {
+      css = '[data-dashboard] .stats { grid-template-columns: repeat(2, 1fr) !important; }';
+    } else if (layout === '3col') {
+      css = '[data-dashboard] .stats { grid-template-columns: repeat(3, 1fr) !important; }';
+    } else if (layout === 'full') {
+      css = '[data-dashboard] .stats { grid-template-columns: 1fr !important; }';
+    }
+    if (css) {
+      style.textContent = css;
+      document.head.appendChild(style);
+    }
+  }
+
+  function removeLayoutCSS() {
+    var existing = document.getElementById('dashboard-layout-style');
+    if (existing) existing.remove();
+  }
+
+  console.log('[Dashboard Customization] Initialized');
 })();

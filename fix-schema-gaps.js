@@ -137,6 +137,19 @@ module.exports = async function (pool) {
       currency TEXT DEFAULT 'UGX',
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
+
+    // --- user_dashboard_prefs ---
+    // Per-user dashboard customization (widget visibility, layout)
+    `CREATE TABLE IF NOT EXISTS user_dashboard_prefs (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      portal_type VARCHAR(50),
+      widgets JSONB DEFAULT '[]',
+      layout VARCHAR(20) DEFAULT 'default',
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(user_id, portal_type)
+    )`,
   ];
 
   for (const sql of missingTables) {
@@ -293,7 +306,7 @@ module.exports = async function (pool) {
   // ============================================================
   if (typeof VALID_TABLES !== 'undefined') {
     ['scraped_content', 'scraped_jobs', 'scraped_opportunities',
-     'developer_revenue', 'poll_options', 'ad_clicks'
+     'developer_revenue', 'poll_options', 'ad_clicks', 'user_dashboard_prefs'
     ].forEach(t => VALID_TABLES.add(t));
   }
 
