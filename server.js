@@ -2466,6 +2466,8 @@ const renderPage = (title, content, user, csrfTokenOrReq) => {
       'nav.portal': { lg: 'Akabinja', sw: 'Lango', fr: 'Portail' },
       'nav.settings': { lg: 'Enteekateeka', sw: 'Mipangilio', fr: 'Parametres' },
       'nav.parent': { lg: 'Muziro', sw: 'Mzazi', fr: 'Parent' },
+      'nav.worker': { lg: 'Mukazi', sw: 'Mfanyakazi', fr: 'Travailleur' },
+      'nav.guide': { lg: 'Enyamba', sw: 'Mwongozo', fr: 'Guide' },
       'nav.logout': { lg: 'Woloka', sw: 'Toka', fr: 'Deconnexion' },
       'nav.login': { lg: 'Yingira', sw: 'Ingia', fr: 'Connexion' },
       'nav.register': { lg: 'Wandikira', sw: 'Jisajili', fr: 'Inscription' },
@@ -2550,47 +2552,6 @@ const renderPage = (title, content, user, csrfTokenOrReq) => {
   };
   // Extract CSRF token from either a string or a request object
   const csrfToken = typeof csrfTokenOrReq === 'string' ? csrfTokenOrReq : (csrfTokenOrReq?.csrfToken || null);
-  // Inline translation helper for UI text
-  const uiT = (key) => {
-    const dict = {
-      'nav.dashboard': { lg: 'Olutimbe', sw: 'Dashibodi', fr: 'Tableau de bord' },
-      'nav.notifications': { lg: 'Ebyogerwa', sw: 'Arifa', fr: 'Notifications' },
-      'nav.modules': { lg: 'Amasomo', sw: 'Moduli', fr: 'Modules' },
-      'nav.search': { lg: 'Noonya', sw: 'Tafuta', fr: 'Rechercher' },
-      'nav.portal': { lg: 'Akabinja', sw: 'Lango', fr: 'Portail' },
-      'nav.settings': { lg: 'Enteekateeka', sw: 'Mipangilio', fr: 'Parametres' },
-      'nav.parent': { lg: 'Muziro', sw: 'Mzazi', fr: 'Parent' },
-      'nav.worker': { lg: 'Mukazi', sw: 'Mfanyakazi', fr: 'Travailleur' },
-      'nav.guide': { lg: 'Enyamba', sw: 'Mwongozo', fr: 'Guide' },
-      'nav.logout': { lg: 'Woloka', sw: 'Toka', fr: 'Deconnexion' },
-      'nav.login': { lg: 'Yingira', sw: 'Ingia', fr: 'Connexion' },
-      'nav.register': { lg: 'Wandikira', sw: 'Jisajili', fr: 'Inscription' },
-      'nav.pricing': { lg: 'Enteekateeka', sw: 'Bei', fr: 'Tarifs' },
-      'nav.faq': { lg: 'Ebibuuzo', sw: 'Maswali', fr: 'FAQ' },
-      'nav.blog': { lg: 'Obulamwa', sw: 'Blogu', fr: 'Blog' },
-      'nav.library': { lg: 'Essomero', sw: 'Maktaba', fr: 'Bibliotheque' },
-      'nav.mark_all_read': { lg: 'Soma Byonna', sw: 'Soma Zote', fr: 'Tout marquer lu' },
-      'nav.view_all': { lg: 'Labye Byonna', sw: 'Tazama Zote', fr: 'Voir tout' },
-      'nav.loading': { lg: 'Kutegereza...', sw: 'Inapakia...', fr: 'Chargement...' },
-      'nav.error_loading': { lg: 'Kiremya', sw: 'Hitilafu', fr: 'Erreur' },
-      'mod.hr': { lg: 'Abakazzi', sw: 'Rasilimali', fr: 'RH' },
-      'mod.bookings': { lg: 'Okubooka', sw: 'Uhifadhi', fr: 'Reservations' },
-      'mod.procurement': { lg: 'Okugaba', sw: 'Manunuzi', fr: 'Approvisionnement' },
-      'mod.incidents': { lg: 'Ebintu', sw: 'Matukio', fr: 'Incidents' },
-      'mod.fleet': { lg: 'Emotoka', sw: 'Magari', fr: 'Flotte' },
-      'mod.tickets': { lg: 'Kaarata', sw: 'Tiketi', fr: 'Tickets' },
-      'mod.kb': { lg: 'Ebisomo', sw: 'Ujuzi', fr: 'Base de connaissances' },
-      'bottom.home': { lg: 'Awaka', sw: 'Nyumbani', fr: 'Accueil' },
-      'bottom.search': { lg: 'Noonya', sw: 'Tafuta', fr: 'Rechercher' },
-      'bottom.alerts': { lg: 'Amakuru', sw: 'Arifa', fr: 'Alertes' },
-      'bottom.install': { lg: 'Tegeka', sw: 'Sakinisha', fr: 'Installer' },
-      'bottom.me': { lg: 'Anze', sw: 'Mimi', fr: 'Moi' },
-      'footer.tagline': { lg: "Amasomero, Amatali, Amakyaala n'Amakolero", sw: 'Shule, Vituo vya Afya, Makanisa na Biashara', fr: 'Ecoles, Cliniques, Eglises et Entreprises' },
-    };
-    const entry = dict[key];
-    if (!entry) return key;
-    return entry[lang] || key;
-  };
   // Auto-inject CSRF token into forms that don't already have one
   let safeContent = content || '';
   if (csrfToken && safeContent.includes('<form')) {
@@ -2652,11 +2613,27 @@ h1,h2,h3,h4{font-family:'Plus Jakarta Sans','Inter',sans-serif;font-weight:700;l
 .dd-menu .dd-header{padding:8px 14px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--text-dim)}
 @keyframes ddFadeIn{from{opacity:0;transform:translateY(-8px) scale(0.96)}to{opacity:1;transform:translateY(0) scale(1)}}
 /* ── CARDS ── */
-.card{background:var(--bg-card);border-radius:var(--radius);padding:24px;margin-bottom:16px;box-shadow:var(--shadow-sm);border:1px solid var(--border);transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden}
+.card{background:var(--bg-card);border-radius:var(--radius);padding:20px;margin-bottom:0;box-shadow:var(--shadow-sm);border:1px solid var(--border);transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden}
 .card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--primary),var(--accent));opacity:0;transition:opacity 0.3s ease}
-.card:hover{transform:translateY(-4px);box-shadow:var(--shadow-lg);border-color:var(--primary-light);background:var(--bg-card-hover)}
+.card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg);border-color:var(--primary-light);background:var(--bg-card-hover)}
 .card:hover::before{opacity:1}
-.card h3{font-family:'Plus Jakarta Sans','Inter',sans-serif;font-size:15px;font-weight:700;margin-bottom:8px;letter-spacing:-0.02em}
+.card h3{font-family:'Plus Jakarta Sans','Inter',sans-serif;font-size:14px;font-weight:700;margin-bottom:6px;letter-spacing:-0.02em;display:flex;align-items:center;gap:6px}
+.card .card-desc{color:var(--text-muted);font-size:12px;line-height:1.4;margin-bottom:8px}
+.card .card-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.card .card-actions .btn-sm{font-size:11px;padding:5px 12px}
+/* Standalone cards (outside dash-section) keep bottom margin */
+.grid .card,.stats+.card,.hero+.card{margin-bottom:0}
+.card:not(.dash-section-body .card):not(.grid .card){margin-bottom:16px}
+/* Page header bar */
+.page-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.page-header h2{margin:0;font-size:20px}
+.page-header .page-actions{display:flex;gap:8px;flex-wrap:wrap}
+/* Info banner */
+.info-banner{display:flex;align-items:center;gap:12px;padding:14px 20px;border-radius:12px;margin-bottom:16px;font-size:13px;font-weight:500;border:1px solid transparent}
+.info-banner.info-success{background:#d1fae5;color:#065f46;border-color:#a7f3d0}
+.info-banner.info-error{background:#fee2e2;color:#991b1b;border-color:#fecaca}
+.info-banner.info-warning{background:#fef3c7;color:#92400e;border-color:#fde68a}
+.info-banner.info-info{background:#dbeafe;color:#1e40af;border-color:#bfdbfe}
 /* ── BUTTONS ── */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:11px 22px;background:linear-gradient(135deg,var(--primary-dark),var(--primary-light));color:white;text-decoration:none;border-radius:10px;font-weight:600;border:none;cursor:pointer;transition:all 0.25s cubic-bezier(0.16,1,0.3,1);font-size:13.5px;box-shadow:0 2px 8px rgba(99,102,241,0.25);letter-spacing:-0.01em}
 .btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(99,102,241,0.35);text-decoration:none;color:white}
@@ -2679,11 +2656,17 @@ input,select,textarea{width:100%;padding:12px 16px;margin:6px 0;border:2px solid
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(99,102,241,0.1)}
 input::placeholder,textarea::placeholder{color:var(--text-dim)}
 /* ── TABLES ── */
-table{width:100%;border-collapse:separate;border-spacing:0;margin-top:12px;font-size:13.5px;border-radius:12px;overflow:hidden;border:1px solid var(--border)}
-th{background:${dark ? 'rgba(99,102,241,0.1)' : '#f0f4ff'};font-weight:600;color:var(--text);padding:12px 16px;text-align:left;white-space:nowrap;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid var(--border)}
-td{padding:12px 16px;border-bottom:1px solid var(--border-light);transition:background 0.15s ease}
+table{width:100%;border-collapse:separate;border-spacing:0;margin-top:12px;font-size:13.5px;border-radius:14px;overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow-sm)}
+th{background:${dark ? 'rgba(99,102,241,0.1)' : '#f0f4ff'};font-weight:700;color:var(--text);padding:14px 16px;text-align:left;white-space:nowrap;font-size:11px;text-transform:uppercase;letter-spacing:0.8px;border-bottom:2px solid var(--border);position:sticky;top:0;z-index:2}
+td{padding:12px 16px;border-bottom:1px solid var(--border-light);transition:background 0.15s ease;vertical-align:middle}
 tr:last-child td{border-bottom:none}
-tbody tr:hover{background:${dark ? 'rgba(99,102,241,0.06)' : 'rgba(99,102,241,0.03)'}}
+tbody tr:nth-child(even){background:${dark ? 'rgba(99,102,241,0.03)' : 'rgba(99,102,241,0.015)'}
+tbody tr:hover{background:${dark ? 'rgba(99,102,241,0.08)' : 'rgba(99,102,241,0.05)'}
+td .btn-sm{white-space:nowrap}
+/* Table action cell */
+td:last-child{white-space:nowrap}
+/* Status cell badges */
+.status-active{color:#059669;font-weight:600}.status-inactive{color:#94a3b8;font-weight:600}.status-pending{color:#f59e0b;font-weight:600}.status-paid{color:#059669;font-weight:600}.status-unpaid{color:#dc2626;font-weight:600}
 /* ── HERO ── */
 .hero{background:linear-gradient(135deg,var(--primary-dark) 0%,#7c3aed 50%,var(--accent) 100%);color:white;padding:48px 32px;border-radius:20px;text-align:center;margin-bottom:28px;position:relative;overflow:hidden;box-shadow:0 8px 32px rgba(99,102,241,0.3)}
 .hero::before{content:'';position:absolute;top:-50%;right:-20%;width:400px;height:400px;background:radial-gradient(circle,rgba(255,255,255,0.1) 0%,transparent 60%);border-radius:50%;animation:heroPulse 6s ease-in-out infinite}
@@ -2701,15 +2684,22 @@ tbody tr:hover{background:${dark ? 'rgba(99,102,241,0.06)' : 'rgba(99,102,241,0.
 /* ── GRID ── */
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;transition:all 0.3s ease}
 /* ── SECTIONS ── */
-.dash-section{margin-bottom:20px}
-.dash-section-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:${dark ? 'rgba(99,102,241,0.08)' : '#f0f4ff'};border:1px solid var(--border);border-radius:14px 14px 0 0;cursor:pointer;user-select:none;transition:all 0.2s ease}
-.dash-section-header:hover{background:${dark ? 'rgba(99,102,241,0.14)' : '#e8edff'};border-color:var(--primary-light)}
+.dash-section{margin-bottom:16px;animation:fadeInUp 0.4s ease forwards}
+.dash-section-header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:linear-gradient(135deg,${dark ? 'rgba(99,102,241,0.1)' : '#f0f4ff'},${dark ? 'rgba(6,182,212,0.06)' : '#ecfeff'});border:1px solid var(--border);border-radius:16px 16px 0 0;cursor:pointer;user-select:none;transition:all 0.2s ease}
+.dash-section-header:hover{background:linear-gradient(135deg,${dark ? 'rgba(99,102,241,0.16)' : '#e8edff'},${dark ? 'rgba(6,182,212,0.1)' : '#cffafe'});border-color:var(--primary-light)}
 .dash-section-header h3{font-size:14px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px;margin:0;font-family:'Plus Jakarta Sans','Inter',sans-serif}
-.dash-section-header .ds-count{background:var(--border);color:var(--text-muted);font-size:11px;padding:2px 10px;border-radius:20px;font-weight:600;letter-spacing:0.02em}
+.dash-section-header .ds-count{background:${dark ? 'rgba(99,102,241,0.15)' : '#e0e7ff'};color:var(--primary);font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600;letter-spacing:0.02em}
 .dash-section-header .ds-toggle{font-size:12px;color:var(--text-muted);transition:transform 0.25s ease}
 .dash-section.collapsed .ds-toggle{transform:rotate(-90deg)}
 .dash-section.collapsed .dash-section-body{display:none}
-.dash-section-body{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;padding:16px 18px;border:1px solid var(--border);border-top:none;border-radius:0 0 14px 14px;background:var(--bg-card)}
+.dash-section-body{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;padding:18px 20px;border:1px solid var(--border);border-top:none;border-radius:0 0 16px 16px;background:var(--bg-card);transition:all 0.2s ease}
+/* Module search bar */
+.dash-search{display:flex;align-items:center;gap:10px;margin-bottom:20px;padding:10px 18px;background:var(--bg-card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-sm);transition:all 0.2s ease}
+.dash-search:focus-within{border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,0.1)}
+.dash-search input{flex:1;border:none;background:transparent;font-size:14px;padding:4px 0;margin:0;box-shadow:none}
+.dash-search input:focus{box-shadow:none;border:none}
+.dash-search .search-icon{color:var(--text-muted);font-size:16px}
+.dash-search .search-count{color:var(--text-muted);font-size:12px;font-weight:600;white-space:nowrap}
 /* ── TAG ── */
 .tag{display:inline-block;padding:4px 12px;background:${dark ? 'rgba(99,102,241,0.15)' : '#e0e7ff'};color:var(--primary);border-radius:20px;font-size:12px;font-weight:600;letter-spacing:0.02em}
 /* ── ALERTS ── */
@@ -2735,7 +2725,7 @@ a{color:var(--primary);text-decoration:none;font-weight:500;transition:color 0.2
 /* ── SCROLLBAR ── */
 ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-track{background:${dark ? '#0c1222' : '#f0f4ff'}}::-webkit-scrollbar-thumb{background:${dark ? '#2a3a5c' : '#c7d2fe'};border-radius:4px}::-webkit-scrollbar-thumb:hover{background:${dark ? '#3a4f7a' : '#a5b4fc'}}
 /* ── RESPONSIVE ── */
-@media(max-width:768px){.nav{flex-wrap:wrap;flex-direction:column;align-items:stretch;padding:10px 16px;gap:4px;height:auto}.nav .nav-links{display:none;flex-direction:column;width:100%;padding-top:8px;border-top:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}}.nav.open .nav-links{display:flex!important}.nav .nav-links a,.nav .nav-links button,.nav .nav-links select,.nav .nav-links span{width:100%;text-align:left;padding:10px 12px;font-size:14px}.nav .nav-links .dd{width:100%}.nav .nav-links .dd-btn{width:100%;justify-content:space-between}.nav .nav-links .dd-menu{right:auto;left:0;position:static;box-shadow:none;border:none;border-radius:0;background:transparent;padding:0;margin-top:0;animation:none;display:none;min-width:0}.nav .nav-links .dd.open .dd-menu{display:block}.nav .nav-links .dd-menu a{color:${dark ? '#e2e8f0' : '#475569'};padding:10px 16px 10px 32px;font-size:13px}.nav .nav-links .dd-menu a:hover{background:${dark ? 'rgba(99,102,241,0.12)' : 'rgba(99,102,241,0.06)'}}.nav .nav-links .dd-menu .dd-divider{background:${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};margin:2px 16px}.nav .nav-links .dd-menu .dd-header{color:var(--text-dim);padding:6px 16px 2px;font-size:9px}.stats{grid-template-columns:repeat(2,1fr);gap:10px}.grid{grid-template-columns:repeat(2,1fr);gap:12px}.tab-bar{flex-direction:column}.hero{padding:28px 18px;border-radius:14px}.container{padding:0 14px}.card{padding:16px;margin-bottom:10px;border-radius:12px}.card:hover{transform:translateY(-2px)}.card h3{font-size:14px;margin-bottom:6px}.btn{padding:10px 18px;font-size:13px}.btn-sm{padding:7px 12px;font-size:11px}.btn-group{gap:6px}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}.search-bar{flex-direction:column}.tab-bar a{padding:10px;font-size:13px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}body{padding-bottom:72px}form input,form select,form textarea{font-size:16px!important}.tag{font-size:11px;padding:2px 6px}h2{font-size:18px}h3{font-size:15px}.stat-num{font-size:24px}.stat-card{padding:14px 10px}.stat-card>div:last-child{font-size:11px}.dash-section{font-size:12px;margin:18px 0 8px}.dash-section-header{padding:12px 14px;border-radius:12px 12px 0 0}.dash-section-header h3{font-size:13px}.dash-section-body{grid-template-columns:1fr!important;padding:12px 14px;border-radius:0 0 12px 12px}.dash-section-header .ds-count{display:none}}
+@media(max-width:768px){.nav{flex-wrap:wrap;flex-direction:column;align-items:stretch;padding:10px 16px;gap:4px;height:auto}.nav .nav-links{display:none;flex-direction:column;width:100%;padding-top:8px;border-top:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}}.nav.open .nav-links{display:flex!important}.nav .nav-links a,.nav .nav-links button,.nav .nav-links select,.nav .nav-links span{width:100%;text-align:left;padding:10px 12px;font-size:14px}.nav .nav-links .dd{width:100%}.nav .nav-links .dd-btn{width:100%;justify-content:space-between}.nav .nav-links .dd-menu{right:auto;left:0;position:static;box-shadow:none;border:none;border-radius:0;background:transparent;padding:0;margin-top:0;animation:none;display:none;min-width:0}.nav .nav-links .dd.open .dd-menu{display:block}.nav .nav-links .dd-menu a{color:${dark ? '#e2e8f0' : '#475569'};padding:10px 16px 10px 32px;font-size:13px}.nav .nav-links .dd-menu a:hover{background:${dark ? 'rgba(99,102,241,0.12)' : 'rgba(99,102,241,0.06)'}}.nav .nav-links .dd-menu .dd-divider{background:${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};margin:2px 16px}.nav .nav-links .dd-menu .dd-header{color:var(--text-dim);padding:6px 16px 2px;font-size:9px}.stats{grid-template-columns:repeat(2,1fr);gap:10px}.grid{grid-template-columns:repeat(2,1fr);gap:12px}.tab-bar{flex-direction:column}.hero{padding:28px 18px;border-radius:14px}.container{padding:0 14px}.card{padding:14px;border-radius:12px}.card:hover{transform:translateY(-2px)}.card h3{font-size:13px;margin-bottom:4px}.btn{padding:10px 18px;font-size:13px}.btn-sm{padding:7px 12px;font-size:11px}.btn-group{gap:6px}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;font-size:12px}.search-bar{flex-direction:column}.tab-bar a{padding:10px;font-size:13px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}body{padding-bottom:72px}form input,form select,form textarea{font-size:16px!important}.tag{font-size:11px;padding:2px 6px}h2{font-size:18px}h3{font-size:15px}.stat-num{font-size:24px}.stat-card{padding:14px 10px}.stat-card>div:last-child{font-size:11px}.dash-section{font-size:12px;margin:14px 0 8px}.dash-section-header{padding:12px 14px;border-radius:12px 12px 0 0}.dash-section-header h3{font-size:13px}.dash-section-body{grid-template-columns:1fr!important;padding:12px 14px;border-radius:0 0 12px 12px}.dash-section-header .ds-count{display:none}.dash-search{margin-bottom:12px;padding:8px 14px}.page-header{flex-direction:column;align-items:flex-start;gap:8px}.page-header h2{font-size:18px}
 @media(max-width:480px){.grid{grid-template-columns:repeat(2,1fr)!important;gap:10px}.stats{grid-template-columns:repeat(2,1fr)!important;gap:8px}.card{padding:14px;margin-bottom:8px;border-radius:12px}.card:hover{transform:none}.card h3{font-size:13px;margin-bottom:4px}.card .btn-sm{padding:6px 10px;font-size:11px}.card p{font-size:11px}.stat-num{font-size:22px}.hero{padding:22px 16px}}
 @media(min-width:769px) and (max-width:1024px){.stats{grid-template-columns:repeat(4,1fr)}.grid{grid-template-columns:repeat(2,1fr)}.stat-num{font-size:28px}}
 @media(max-width:380px){.grid{grid-template-columns:1fr!important;gap:8px}}
@@ -2835,15 +2825,10 @@ if(_isStandalone){_hideInstallBtns();}
       </div>
       ${user.role === 'super_admin' ? `<a href="/dev/master" style="background:linear-gradient(135deg,#fbbf24,#f59e0b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:700">Dev Hub</a>` : ''}
       <div style="position:relative;display:inline-block" id="notifDropdown">
-<<<<<<< Updated upstream:server.js
         <button onclick="closeAllDropdowns('notif');toggleNotifPanel()" style="background:none;border:none;cursor:pointer;font-size:20px;position:relative;padding:6px;border-radius:10px;transition:all 0.2s" title="Notifications">
-=======
-        <button onclick="closeAllDropdowns('notif');toggleNotifPanel()" style="background:none;border:none;cursor:pointer;font-size:20px;position:relative" title="${esc(uiT('nav.notifications'))}">
->>>>>>> Stashed changes:ssewasswa-api/server.js
           🔔
           <span id="notifBadge" style="position:absolute;top:2px;right:-2px;background:linear-gradient(135deg,#ef4444,#f87171);color:white;font-size:9px;padding:1px 6px;border-radius:10px;display:none;font-weight:700">0</span>
         </button>
-<<<<<<< Updated upstream:server.js
         <div id="notifPanel" style="display:none;position:absolute;right:0;top:calc(100% + 8px);width:380px;max-height:420px;overflow-y:auto;background:${dark ? '#151d30' : 'white'};border:1px solid ${dark ? '#1e2d4a' : '#e0e7ff'};border-radius:14px;box-shadow:0 16px 48px ${dark ? 'rgba(0,0,0,0.4)' : 'rgba(99,102,241,0.12)'};z-index:1000;animation:ddFadeIn 0.2s cubic-bezier(0.16,1,0.3,1)">
           <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
             <strong style="font-size:14px">${esc(uiT('nav.notifications'))}</strong>
@@ -2852,21 +2837,10 @@ if(_isStandalone){_hideInstallBtns();}
           <div id="notifList"><div style="padding:20px;text-align:center" class="muted">${esc(uiT('nav.loading'))}</div></div>
           <div style="padding:10px;border-top:1px solid var(--border);text-align:center">
             <a href="/notifications" style="font-size:13px;color:var(--primary);font-weight:600">${esc(uiT('nav.view_all'))} ${esc(uiT('nav.notifications'))}</a>
-=======
-        <div id="notifPanel" style="display:none;position:absolute;right:0;top:35px;width:350px;max-height:400px;overflow-y:auto;background:${dark ? '#1e293b' : 'white'};border:1px solid ${dark ? '#334155' : '#e2e8f0'};border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.15);z-index:1000">
-          <div style="padding:12px;border-bottom:1px solid ${dark ? '#334155' : '#e2e8f0'};display:flex;justify-content:space-between;align-items:center">
-            <strong>${esc(uiT('nav.notifications'))}</strong>
-            <a href="#" onclick="markAllRead();return false" style="font-size:12px;color:#4f46e5">${esc(uiT('nav.mark_all_read'))}</a>
-          </div>
-          <div id="notifList"><div style="padding:20px;text-align:center" class="muted">${esc(uiT('nav.loading'))}</div></div>
-          <div style="padding:10px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};text-align:center">
-            <a href="/notifications" style="font-size:13px;color:#4f46e5">${esc(uiT('nav.view_all'))} ${esc(uiT('nav.notifications'))}</a>
->>>>>>> Stashed changes:ssewasswa-api/server.js
           </div>
         </div>
       </div>
       <a href="/dashboard">${esc(uiT('nav.dashboard'))}</a>
-<<<<<<< Updated upstream:server.js
       <div class="dd" id="ddModules">
         <button class="dd-btn" onclick="toggleDD('ddModules')">${esc(uiT('nav.modules'))} <span class="dd-arrow">▾</span></button>
         <div class="dd-menu">
@@ -2915,6 +2889,7 @@ if(_isStandalone){_hideInstallBtns();}
   </div>
 </nav>
 <main id="main" role="main"><div class="container">${safeContent}</div></main>
+${user ? `<div style="max-width:1240px;margin:-10px auto 10px;padding:0 24px"><div class="dash-search"><span class="search-icon">&#128269;</span><input type="text" id="dashModuleSearch" placeholder="Search modules... (press / to focus)" autocomplete="off"><span class="search-count" id="dashSearchCount"></span></div></div>` : ''}
 ${user ? `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;left:0;right:0;background:${dark ? 'rgba(15,20,40,0.9)' : 'rgba(255,255,255,0.9)'};backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};padding:6px 0 8px;z-index:1000;justify-content:space-around"><a href="/" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🏠</span>Home</a><a href="/dashboard" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">📊</span>Dashboard</a><a href="/search" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🔍</span>Search</a><a href="/notifications" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🔔</span>Alerts</a><a href="/logout" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:#ef4444;text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🚪</span>Logout</a></nav>` : `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;left:0;right:0;background:${dark ? 'rgba(15,20,40,0.9)' : 'rgba(255,255,255,0.9)'};backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};padding:6px 0 8px;z-index:1000;justify-content:space-around"><a href="/" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🏠</span>Home</a><a href="/login" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--primary);text-decoration:none;padding:4px 8px;border-radius:8px;font-weight:600;transition:all 0.2s"><span style="font-size:20px">🔑</span>Login</a><a href="/register" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--success);text-decoration:none;padding:4px 8px;border-radius:8px;font-weight:600;transition:all 0.2s"><span style="font-size:20px">✨</span>Register</a></nav>`}
 <footer style="background:${dark ? '#0c1222' : '#eef2ff'};padding:48px 24px 24px;margin-top:60px;border-top:1px solid ${dark ? '#1e2d4a' : '#e0e7ff'}">
   <div style="max-width:1240px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:32px">
@@ -2924,45 +2899,6 @@ ${user ? `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;le
       ${platformSettings.support_phone ? `<p class="muted">Phone: <a href="tel:${esc(platformSettings.support_phone)}" style="color:var(--primary)">${esc(platformSettings.support_phone)}</a></p>` : ''}
       ${platformSettings.whatsapp_link ? `<p class="muted"><a href="${esc(platformSettings.whatsapp_link)}" target="_blank" style="color:var(--primary)">WhatsApp Us</a></p>` : ''}
       <p class="muted"><a href="/help" style="color:var(--primary)">Help Center & FAQs</a></p>
-=======
-      <div style="position:relative;display:inline-block" id="modulesDropdown">
-        <button onclick="closeAllDropdowns('modules');var m=document.getElementById('modulesMenu');m.style.display=m.style.display==='none'?'block':'none'" style="background:none;border:none;cursor:pointer;color:white;font-size:14px;padding:4px 8px">${esc(uiT('nav.modules'))} ▾</button>
-        <div id="modulesMenu" style="display:none;position:absolute;right:0;top:30px;width:220px;background:${dark ? '#1e293b' : 'white'};border:1px solid ${dark ? '#334155' : '#e2e8f0'};border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,0.15);z-index:1000;padding:6px 0">
-          <a href="/hr" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">👥 ${esc(uiT('mod.hr'))}</a>
-          <a href="/bookings" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">📅 ${esc(uiT('mod.bookings'))}</a>
-          <a href="/procurement" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">🛒 ${esc(uiT('mod.procurement'))}</a>
-          <a href="/incidents" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">🚨 ${esc(uiT('mod.incidents'))}</a>
-          <a href="/fleet" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">🚗 ${esc(uiT('mod.fleet'))}</a>
-          <a href="/tickets" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">🎫 ${esc(uiT('mod.tickets'))}</a>
-          <a href="/kb" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">📚 ${esc(uiT('mod.kb'))}</a>
-        </div>
-      </div>
-      <a href="/search">${esc(uiT('nav.search'))}</a>
-      <a href="/switch-portal" style="color:#c084fc;font-weight:600" title="Switch Portal Type">&#127760; ${esc(uiT('nav.portal'))}</a>
-      <a href="/settings/profile">${esc(uiT('nav.settings'))}</a>
-      <a href="/parent/login" style="font-size:12px">${esc(uiT('nav.parent'))}</a>
-      <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
-      <select onchange="fetch('/settings/language',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'${esc(csrfToken || '')}'},body:JSON.stringify({language:this.value})}).then(function(){location.reload()})" style="background:${dark ? '#334155' : '#f1f5f9'};border:1px solid ${dark ? '#475569' : '#e2e8f0'};color:${dark ? '#e2e8f0' : '#1e293b'};border-radius:6px;padding:4px 6px;font-size:12px;cursor:pointer" title="Language">
-        <option value="en" ${(user.language||'en')==='en'?'selected':''}>EN</option>
-        <option value="lg" ${user.language==='lg'?'selected':''}>LG</option>
-        <option value="sw" ${user.language==='sw'?'selected':''}>SW</option>
-        <option value="fr" ${user.language==='fr'?'selected':''}>FR</option>
-      </select>
-      <a href="/logout">${esc(uiT('nav.logout'))}</a>
-    ` : `<a href="/login">${esc(uiT('nav.login'))}</a><a href="/register">${esc(uiT('nav.register'))}</a><a href="/#pricing" style="font-size:13px">${esc(uiT('nav.pricing'))}</a><a href="/#faq" style="font-size:13px">${esc(uiT('nav.faq'))}</a><a href="/blog" style="font-size:13px">${esc(uiT('nav.blog'))}</a><a href="/library" style="font-size:13px">${esc(uiT('nav.library'))}</a>`}
-  </div>
-</nav>
-<main id="main" role="main"><div class="container">${safeContent}</div></main>
-${user ? `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;left:0;right:0;background:${dark ? '#1e293b' : 'white'};border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};padding:8px 0;z-index:1000;justify-content:space-around"><a href="/dashboard" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🏠</span>${esc(uiT('bottom.home'))}</a><a href="/search" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔍</span>${esc(uiT('bottom.search'))}</a><a href="/notifications" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔔</span>${esc(uiT('bottom.alerts'))}</a><a href="#" id="install-btn" style="display:none;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">&#128241;</span>${esc(uiT('bottom.install'))}</a><a href="/settings/profile" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">👤</span>${esc(uiT('bottom.me'))}</a></nav>` : ''}
-<footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
-  <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
-    <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - ${esc(uiT('footer.tagline'))}</p></div>
-    <div><strong>Need Help?</strong>
-      <p class="muted" style="margin-top:6px">Email: <a href="mailto:${esc(platformSettings.support_email)}" style="color:#4f46e5">${esc(platformSettings.support_email)}</a></p>
-      ${platformSettings.support_phone ? `<p class="muted">Phone: <a href="tel:${esc(platformSettings.support_phone)}" style="color:#4f46e5">${esc(platformSettings.support_phone)}</a></p>` : ''}
-      ${platformSettings.whatsapp_link ? `<p class="muted"><a href="${esc(platformSettings.whatsapp_link)}" target="_blank" style="color:#4f46e5">WhatsApp Us</a></p>` : ''}
-      <p class="muted"><a href="/help" style="color:#4f46e5">Help Center & FAQs</a></p>
->>>>>>> Stashed changes:ssewasswa-api/server.js
     </div>
     <div><strong style="font-size:14px;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim)">Quick Links</strong>
       <p class="muted" style="margin-top:8px"><a href="/blog" style="color:var(--primary)">Blog & News</a></p>
@@ -3103,6 +3039,42 @@ ${user ? `<script>
       }
     });
   }).catch(function(){});
+})();
+// Universal dashboard module search
+(function(){
+  var searchInput=document.getElementById('dashModuleSearch');
+  var searchCount=document.getElementById('dashSearchCount');
+  if(!searchInput)return;
+  searchInput.addEventListener('input',function(){
+    var q=this.value.toLowerCase().trim();
+    var sections=document.querySelectorAll('.dash-section');
+    var totalVisible=0;
+    sections.forEach(function(sec){
+      var cards=sec.querySelectorAll('.dash-section-body .card');
+      var visibleCount=0;
+      cards.forEach(function(c){
+        var text=(c.textContent||'').toLowerCase();
+        var match=!q||text.indexOf(q)>-1;
+        c.style.display=match?'':'none';
+        if(match)visibleCount++;
+      });
+      sec.style.display=visibleCount>0?'':'none';
+      // Update count badge
+      var countEl=sec.querySelector('.ds-count');
+      if(countEl&&q)countEl.textContent=visibleCount+' found';
+      else if(countEl)countEl.textContent=countEl.textContent.replace(/ found/g,'');
+      totalVisible+=visibleCount;
+    });
+    if(searchCount){
+      searchCount.textContent=q?(totalVisible+' module'+(totalVisible!==1?'s':'')+' found'):'';
+    }
+  });
+  // Auto-focus search on / key
+  document.addEventListener('keydown',function(e){
+    if(e.key==='/'&&!e.ctrlKey&&!e.metaKey&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='TEXTAREA'){
+      e.preventDefault();searchInput.focus();
+    }
+  });
 })();
 </script>` : ''}
 </body></html>`;
@@ -14030,35 +14002,6 @@ const paginationHtml = (currentPage, totalCount, perPage, baseUrl) => {
 const renderPageV3 = (title, content, user, meta = {}) => {
   const dark = user?.dark_mode || false;
   const lang = user?.language || 'en';
-<<<<<<< Updated upstream:server.js
-=======
-  // Inline translation helper (same as renderPage)
-  const uiT = (key) => {
-    const dict = {
-      'nav.dashboard': { lg: 'Olutimbe', sw: 'Dashibodi', fr: 'Tableau de bord' },
-      'nav.notifications': { lg: 'Ebyogerwa', sw: 'Arifa', fr: 'Notifications' },
-      'nav.search': { lg: 'Noonya', sw: 'Tafuta', fr: 'Rechercher' },
-      'nav.settings': { lg: 'Enteekateeka', sw: 'Mipangilio', fr: 'Parametres' },
-      'nav.parent': { lg: 'Muziro', sw: 'Mzazi', fr: 'Parent' },
-      'nav.worker': { lg: 'Mukazi', sw: 'Mfanyakazi', fr: 'Travailleur' },
-      'nav.guide': { lg: 'Enyamba', sw: 'Mwongozo', fr: 'Guide' },
-      'nav.logout': { lg: 'Woloka', sw: 'Toka', fr: 'Deconnexion' },
-      'nav.login': { lg: 'Yingira', sw: 'Ingia', fr: 'Connexion' },
-      'nav.register': { lg: 'Wandikira', sw: 'Jisajili', fr: 'Inscription' },
-      'nav.pricing': { lg: 'Enteekateeka', sw: 'Bei', fr: 'Tarifs' },
-      'nav.faq': { lg: 'Ebibuuzo', sw: 'Maswali', fr: 'FAQ' },
-      'nav.blog': { lg: 'Obulamwa', sw: 'Blogu', fr: 'Blog' },
-      'nav.library': { lg: 'Essomero', sw: 'Maktaba', fr: 'Bibliotheque' },
-      'nav.mark_all_read': { lg: 'Soma Byonna', sw: 'Soma Zote', fr: 'Tout marquer lu' },
-      'nav.view_all': { lg: 'Labye Byonna', sw: 'Tazama Zote', fr: 'Voir tout' },
-      'nav.loading': { lg: 'Kutegereza...', sw: 'Inapakia...', fr: 'Chargement...' },
-      'footer.tagline': { lg: "Amasomero, Amatali, Amakyaala n'Amakolero", sw: 'Shule, Vituo vya Afya, Makanisa na Biashara', fr: 'Ecoles, Cliniques, Eglises et Entreprises' },
-    };
-    const entry = dict[key];
-    if (!entry) return key;
-    return entry[lang] || key;
-  };
->>>>>>> Stashed changes:ssewasswa-api/server.js
   const description = meta.description || `${title} - Comfort All-in-One Management Platform`;
   const keywords = meta.keywords || 'school management, church management, business management, Uganda, Comfort, clinic management, SaaS Africa';
   const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
@@ -14098,10 +14041,6 @@ const renderPageV3 = (title, content, user, meta = {}) => {
   };
   return `<!DOCTYPE html>
 <html${dark ? ' class="dark"' : ''} lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<<<<<<< Updated upstream:server.js
-=======
-<title>${esc(title)} | Comfort</title>
->>>>>>> Stashed changes:ssewasswa-api/server.js
 ${googleVerification ? `<meta name="google-site-verification" content="${esc(googleVerification)}">` : ''}
 <meta name="description" content="${esc(description)}">
 <meta name="keywords" content="${esc(keywords)}">
@@ -14119,7 +14058,6 @@ ${googleVerification ? `<meta name="google-site-verification" content="${esc(goo
 <meta name="twitter:image" content="${baseUrl}/icon.png">
 <link rel="manifest" href="/manifest.json">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<<<<<<< Updated upstream:server.js
 <link rel="icon" type="image/png" sizes="16x16" href="/icon-16.png">
 <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
@@ -14139,10 +14077,6 @@ ${googleVerification ? `<meta name="google-site-verification" content="${esc(goo
 <meta name="msapplication-TileColor" content="#059669">
 <meta name="msapplication-TileImage" content="/icon-512.png">
 <title>${esc(title)} | Comfort</title>
-=======
-<link rel="icon" type="image/png" sizes="1024x1024" href="/icon.png">
-<meta name="theme-color" content="#4f46e5">
->>>>>>> Stashed changes:ssewasswa-api/server.js
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:${dark ? '#0f172a' : '#f8fafc'};color:${dark ? '#e2e8f0' : '#1e293b'};line-height:1.6;transition:background 0.3s,color 0.3s}
@@ -14220,15 +14154,10 @@ ${process.env.GA_TRACKING_ID ? `
       </div>
       ${user.role === 'super_admin' ? `<a href="/dev/master" style="background:linear-gradient(135deg,#fbbf24,#f59e0b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:700">Dev Hub</a>` : ''}
       <div style="position:relative;display:inline-block" id="notifDropdown">
-<<<<<<< Updated upstream:server.js
         <button onclick="closeAllDropdowns('notif');toggleNotifPanel()" style="background:none;border:none;cursor:pointer;font-size:20px;position:relative;padding:6px;border-radius:10px;transition:all 0.2s" title="Notifications">
-=======
-        <button onclick="closeAllDropdowns('notif');toggleNotifPanel()" style="background:none;border:none;cursor:pointer;font-size:20px;position:relative" title="${esc(uiT('nav.notifications'))}">
->>>>>>> Stashed changes:ssewasswa-api/server.js
           🔔
           <span id="notifBadge" style="position:absolute;top:2px;right:-2px;background:linear-gradient(135deg,#ef4444,#f87171);color:white;font-size:9px;padding:1px 6px;border-radius:10px;display:none;font-weight:700">0</span>
         </button>
-<<<<<<< Updated upstream:server.js
         <div id="notifPanel" style="display:none;position:absolute;right:0;top:calc(100% + 8px);width:380px;max-height:420px;overflow-y:auto;background:${dark ? '#151d30' : 'white'};border:1px solid ${dark ? '#1e2d4a' : '#e0e7ff'};border-radius:14px;box-shadow:0 16px 48px ${dark ? 'rgba(0,0,0,0.4)' : 'rgba(99,102,241,0.12)'};z-index:1000;animation:ddFadeIn 0.2s cubic-bezier(0.16,1,0.3,1)">
           <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
             <strong style="font-size:14px">${esc(uiT('nav.notifications'))}</strong>
@@ -14237,22 +14166,11 @@ ${process.env.GA_TRACKING_ID ? `
           <div id="notifList"><div style="padding:20px;text-align:center" class="muted">${esc(uiT('nav.loading'))}</div></div>
           <div style="padding:10px;border-top:1px solid var(--border);text-align:center">
             <a href="/notifications" style="font-size:13px;color:var(--primary);font-weight:600">${esc(uiT('nav.view_all'))} ${esc(uiT('nav.notifications'))}</a>
-=======
-        <div id="notifPanel" style="display:none;position:absolute;right:0;top:35px;width:350px;max-height:400px;overflow-y:auto;background:${dark ? '#1e293b' : 'white'};border:1px solid ${dark ? '#334155' : '#e2e8f0'};border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.15);z-index:1000">
-          <div style="padding:12px;border-bottom:1px solid ${dark ? '#334155' : '#e2e8f0'};display:flex;justify-content:space-between;align-items:center">
-            <strong>${esc(uiT('nav.notifications'))}</strong>
-            <a href="#" onclick="markAllRead();return false" style="font-size:12px;color:#4f46e5">${esc(uiT('nav.mark_all_read'))}</a>
-          </div>
-          <div id="notifList"><div style="padding:20px;text-align:center" class="muted">${esc(uiT('nav.loading'))}</div></div>
-          <div style="padding:10px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};text-align:center">
-            <a href="/notifications" style="font-size:13px;color:#4f46e5">${esc(uiT('nav.view_all'))} ${esc(uiT('nav.notifications'))}</a>
->>>>>>> Stashed changes:ssewasswa-api/server.js
           </div>
         </div>
       </div>
       <a href="/dashboard">${esc(uiT('nav.dashboard'))}</a>
       <a href="/search">${esc(uiT('nav.search'))}</a>
-<<<<<<< Updated upstream:server.js
       <div class="dd" id="ddMore3">
         <button class="dd-btn" onclick="toggleDD('ddMore3')">More <span class="dd-arrow">▾</span></button>
         <div class="dd-menu">
@@ -14283,26 +14201,6 @@ ${user ? `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;le
       ${platformSettings.support_phone ? `<p class="muted">Phone: <a href="tel:${esc(platformSettings.support_phone)}" style="color:var(--primary)">${esc(platformSettings.support_phone)}</a></p>` : ''}
       ${platformSettings.whatsapp_link ? `<p class="muted"><a href="${esc(platformSettings.whatsapp_link)}" target="_blank" style="color:var(--primary)">WhatsApp Us</a></p>` : ''}
       <p class="muted"><a href="/help" style="color:var(--primary)">Help Center & FAQs</a></p>
-=======
-      <a href="/settings/profile">${esc(uiT('nav.settings'))}</a>
-      <a href="/guide" style="font-size:12px">${esc(uiT('nav.guide'))}</a>
-      <a href="/parent/login" style="font-size:12px">${esc(uiT('nav.parent'))}</a>
-      <a href="/worker/login" style="font-size:12px">${esc(uiT('nav.worker'))}</a>
-      <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
-      <a href="/logout">${esc(uiT('nav.logout'))}</a>
-    ` : `<a href="/login">${esc(uiT('nav.login'))}</a><a href="/register">${esc(uiT('nav.register'))}</a><a href="/#pricing" style="font-size:13px">${esc(uiT('nav.pricing'))}</a><a href="/#faq" style="font-size:13px">${esc(uiT('nav.faq'))}</a><a href="/blog" style="font-size:13px">${esc(uiT('nav.blog'))}</a><a href="/library" style="font-size:13px">${esc(uiT('nav.library'))}</a>`}
-  </div>
-</nav>
-<main id="main" role="main"><div class="container">${safeContent}</div></main>
-<footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
-  <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
-    <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - ${esc(uiT('footer.tagline'))}</p></div>
-    <div><strong>Need Help?</strong>
-      <p class="muted" style="margin-top:6px">Email: <a href="mailto:${esc(platformSettings.support_email)}" style="color:#4f46e5">${esc(platformSettings.support_email)}</a></p>
-      ${platformSettings.support_phone ? `<p class="muted">Phone: <a href="tel:${esc(platformSettings.support_phone)}" style="color:#4f46e5">${esc(platformSettings.support_phone)}</a></p>` : ''}
-      ${platformSettings.whatsapp_link ? `<p class="muted"><a href="${esc(platformSettings.whatsapp_link)}" target="_blank" style="color:#4f46e5">WhatsApp Us</a></p>` : ''}
-      <p class="muted"><a href="/help" style="color:#4f46e5">Help Center & FAQs</a></p>
->>>>>>> Stashed changes:ssewasswa-api/server.js
     </div>
     <div><strong style="font-size:14px;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim)">Quick Links</strong>
       <p class="muted" style="margin-top:8px"><a href="/blog" style="color:var(--primary)">Blog & News</a></p>
@@ -14331,15 +14229,10 @@ function updateNotifBadge(count){ if(!_notifBadge) return; if(count>0){_notifBad
   } catch(e){ startPolling(); }
   function startPolling(){ setInterval(function(){ fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){updateBadge(d.count)}).catch(function(){}); }, 30000); }
 })();
-<<<<<<< Updated upstream:server.js
-=======
-// Dropdown close manager (V3)
->>>>>>> Stashed changes:ssewasswa-api/server.js
 var _openDropdown = null;
 function closeAllDropdowns(except) {
   var notifPanel = document.getElementById('notifPanel');
   if (notifPanel && except !== 'notif') { notifPanel.style.display = 'none'; _notifPanelOpen = false; }
-<<<<<<< Updated upstream:server.js
   document.querySelectorAll('.dd.open').forEach(function(dd) {
     if (dd.id !== except) dd.classList.remove('open');
   });
@@ -14379,14 +14272,6 @@ document.addEventListener('click', function(e) {
 })();
 // Close dropdowns on Escape key
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeAllDropdowns();});
-=======
-  _openDropdown = except || null;
-}
-document.addEventListener('click', function(e) {
-  var dd = document.getElementById('notifDropdown');
-  if (dd && !dd.contains(e.target)) { closeAllDropdowns(); }
-});
->>>>>>> Stashed changes:ssewasswa-api/server.js
 var _notifPanelOpen = false;
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
 function timeAgo(d){var s=Math.floor((Date.now()-new Date(d))/1000);if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'}
