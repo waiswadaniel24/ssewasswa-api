@@ -616,7 +616,7 @@ const requireWorkerRole = (...roles) => (req, res, next) => {
   res.status(403).send(renderPage('Access Denied', '<div class="card"><div class="alert alert-error">You do not have permission for this action.</div><a href="/worker/dashboard" class="btn">Back to Dashboard</a></div>', null));
 };
 
-const audit = (email, action, details) => pool.query('INSERT INTO audit_logs(user_email,action,details) VALUES($1,$2,$3)', [email, action, typeof details === 'object' ? JSON.stringify(details) : (details || '')]).catch(e => console.error('[Audit Error]', e.message));
+const audit = (email, action, details, tenantId, req) => pool.query('INSERT INTO audit_logs(tenant_id,user_email,action,details,ip_address) VALUES($1,$2,$3,$4,$5)', [tenantId || null, email, action, typeof details === 'object' ? JSON.stringify(details) : (details || ''), req?.ip || null]).catch(e => console.error('[Audit Error]', e.message));
 const notify = (tenantId, email, title, message, type) => {
   pool.query('INSERT INTO notifications(tenant_id,user_email,title,message,type) VALUES($1,$2,$3,$4,$5)', [tenantId, email, title, message, type || 'info']).catch(e => console.error('[DB Error]', e.message));
   // Real-time WebSocket push
@@ -1351,6 +1351,7 @@ const migrations = [
   `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
   // tenant_id for tables missing it (multi-tenancy data isolation)
   `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+  `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS ip_address TEXT`,
   `ALTER TABLE marks ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
   `ALTER TABLE login_history ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
   `ALTER TABLE student_portal_sessions ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
@@ -2460,7 +2461,7 @@ const uniqueConstraintMigrations = [
       const devEmail = process.env.DEV_EMAIL || 'admin@ssewasswa.com';
       const devPass = process.env.DEV_PASSWORD || 'Admin123';
       {
-      const devHash = await bcrypt.hash(devPass, 10);
+      const devHash = await bcrypt.hash(devPass, 12);
       const devTenant = await pool.query(`INSERT INTO tenants(name,type,email,verified,approved,subdomain) VALUES('Dev Master','individual',$1,true,true,'dev-master') ON CONFLICT (subdomain) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [devEmail]);
       // Try inserting with both password columns — if one doesn't exist, catch and retry with the other
       try {
@@ -2486,7 +2487,7 @@ const uniqueConstraintMigrations = [
       const ownerEmail = 'waiswadaniel24@gmail.com';
       const ownerPass = 'Daniel@123';
       {
-        const ownerHash = await bcrypt.hash(ownerPass, 10);
+        const ownerHash = await bcrypt.hash(ownerPass, 12);
         const ownerTenant = await pool.query(`INSERT INTO tenants(name,type,email,verified,approved,subdomain) VALUES('Comfort Zone','school',$1,true,true,'comfort-zone') ON CONFLICT (subdomain) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [ownerEmail]);
         try {
           await pool.query(`INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,password_hash=EXCLUDED.password,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [ownerTenant.rows[0].id, ownerEmail, ownerHash]);
@@ -3317,7 +3318,7 @@ app.post('/login', validate({ email: { required: true, email: true }, password: 
   if (!(await bcrypt.compare(password, storedHash))) {
     // Track failed attempt in DB
     await pool.query('INSERT INTO login_attempts(email,attempts,last_attempt) VALUES($1,1,NOW()) ON CONFLICT (email) DO UPDATE SET attempts=login_attempts.attempts+1,last_attempt=NOW()', [email]);
-    await audit(email, 'login_failed', `Failed login attempt from IP: ${req.ip}`);
+    await audit(email, 'login_failed', `Failed login attempt from IP: ${req.ip}`, u?.tenant_id, req);
     return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials</div>', null));
   }
   // Clear lockout on successful login
@@ -3328,7 +3329,7 @@ app.post('/login', validate({ email: { required: true, email: true }, password: 
     return res.redirect('/login/2fa');
   }
   req.session.user = u;
-  await audit(email, 'login', 'User logged in');
+  await audit(email, 'login', 'User logged in', u.tenant_id, req);
   res.redirect('/dashboard');
 }));
 
@@ -3397,7 +3398,7 @@ app.post('/login/2fa', ah(async (req, res) => {
   }
   delete req.session._pending2FA;
   req.session.user = user;
-  await audit(pendingEmail, 'login', 'User logged in with 2FA');
+  await audit(pendingEmail, 'login', 'User logged in with 2FA', user?.tenant_id, req);
   res.redirect('/dashboard');
 }));
 
@@ -3513,8 +3514,8 @@ app.get('/register', (req, res) => {
           ${planRadios}
           <input name="email" type="email" placeholder="Your Email" required class="auth-input">
           <input name="phone" placeholder="Phone +256..." required class="auth-input">
-          <input name="password" type="password" placeholder="Choose a Password (min 4 chars)" minlength="4" required class="auth-input">
-          <input name="confirm_password" type="password" placeholder="Confirm Password" minlength="4" required class="auth-input">
+          <input name="password" type="password" placeholder="Choose a Password (min 8 chars)" minlength="8" required class="auth-input">
+          <input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required class="auth-input">
           <button type="submit" class="auth-btn">Create Account &rarr;</button>
         </form>
         <div class="auth-links">Already have an account? <a href="/login">Login here</a></div>
@@ -3537,7 +3538,7 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
   const { name, org_name, type, email, phone, password, confirm_password, plan, business_type } = req.body;
   // Basic password validation
   const passwordErrors = [];
-  if (!password || password.length < 4) passwordErrors.push('Password must be at least 4 characters long');
+  if (!password || password.length < 8) passwordErrors.push('Password must be at least 8 characters long');
   if (password !== confirm_password) passwordErrors.push('Passwords do not match');
   if (passwordErrors.length > 0) {
     return res.redirect('/register?type=' + encodeURIComponent(type || '') + '&plan=' + encodeURIComponent(plan || '') + '&business_type=' + encodeURIComponent(business_type || ''));
@@ -3562,7 +3563,7 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
       await pool.query('INSERT INTO users(tenant_id,email,name,password,role,approved) VALUES($1,$2,$3,$4,$5,true)', [tenant.rows[0].id, email, name, hash, type]);
     } else throw e;
   }
-  await audit(email, 'register', `New ${type} account: ${org_name}`);
+  await audit(email, 'register', `New ${type} account: ${org_name}`, newTenantId, req);
   // v1.0: Welcome email
   const welcomeHtml = `<div style="font-family:'Segoe UI',system-ui,sans-serif;max-width:600px;margin:0 auto;background:#f8fafc;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0">
   <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:40px 30px;text-align:center">
@@ -3703,7 +3704,7 @@ app.post('/forgot-password', rateLimit({ windowMs: 60 * 60 * 1000, max: 3 }), ah
   const showToken = !process.env.GMAIL_USER || process.env.NODE_ENV !== 'production';
   const tokenInfo = showToken ? `<div class="alert alert-info" style="margin-top:15px;word-break:break-all"><strong>Reset URL:</strong> <a href="${resetUrl}">${resetUrl}</a></div>` : '';
 
-  await audit(email, 'password_reset_request', 'Password reset requested');
+  await audit(email, 'password_reset_request', 'Password reset requested', null, req);
   res.send(renderPage('Forgot Password', successMsg.replace('</div>', tokenInfo + '</div>'), null));
 }));
 
@@ -3717,7 +3718,7 @@ app.get('/reset-password', ah(async (req, res) => {
       <h2 style="text-align:center;margin-bottom:20px">Set New Password</h2>
       <form method="POST" action="/reset-password">
         <input type="hidden" name="token" value="${esc(token)}">
-        <input name="password" type="password" placeholder="New Password (min 4 chars)" minlength="4" required>
+        <input name="password" type="password" placeholder="New Password (min 8 chars)" minlength="8" required>
         <input name="confirm_password" type="password" placeholder="Confirm Password" required>
         <button class="btn" style="width:100%">Reset Password</button>
       </form>
@@ -3730,7 +3731,7 @@ app.post('/reset-password', ah(async (req, res) => {
   if (password !== confirm_password) return res.send(renderPage('Reset Password', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Passwords do not match</div><a href="/reset-password?token=' + esc(token) + '" class="btn">Try Again</a></div>', null));
   const reset = (await pool.query('SELECT * FROM password_resets WHERE token=$1 AND used=false AND expires_at>NOW()', [token])).rows[0];
   if (!reset) return res.send(renderPage('Reset Password', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">This reset link is invalid or expired.</div><a href="/forgot-password" class="btn">Request New Link</a></div>', null));
-  const hash = await bcrypt.hash(password, 10);
+  const hash = await bcrypt.hash(password, 12);
   // Update password in both columns
   try {
     await pool.query('UPDATE users SET password=$1,password_hash=$1 WHERE email=$2', [hash, reset.email]);
@@ -3740,7 +3741,7 @@ app.post('/reset-password', ah(async (req, res) => {
     } else throw e;
   }
   await pool.query('UPDATE password_resets SET used=true WHERE token=$1', [token]);
-  await audit(reset.email, 'password_reset', 'Password reset completed');
+  await audit(reset.email, 'password_reset', 'Password reset completed', null, req);
   res.send(renderPage('Password Reset', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-success">Password reset successfully! You can now login.</div><a href="/login" class="btn">Login</a></div>', null));
 }));
 
@@ -3869,7 +3870,7 @@ app.get('/go-portal/:type', requireAuth, requireNotBanned, ah(async (req, res) =
   if (user.role !== 'super_admin') {
     req.session.user.role = newType;
   }
-  await audit(user.email, 'portal_switch', 'Switched portal type to ' + newType + ' via dashboard');
+  await audit(user.email, 'portal_switch', 'Switched portal type to ' + newType + ' via dashboard', user.tenant_id, req);
   // Clear plan cache
   _planCache && _planCache.delete(tid);
   res.redirect('/portal/' + newType);
@@ -4167,7 +4168,7 @@ app.post('/school/students/save', requireAuth, requireNotBanned, validate({ name
   const finalStream = stream === '__other' ? (stream_other || '') : stream;
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO students(tenant_id,admission_no,name,class,stream,guardian_name,guardian_phone) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, admission_no, name, finalClass, finalStream, guardian_name, guardian_phone]);
-  await audit(req.session.user.email, 'add_student', `Added student: ${name}`);
+  await audit(req.session.user.email, 'add_student', `Added student: ${name}`, req.session.user.tenant_id, req);
   res.redirect('/school/students');
 }));
 
@@ -4215,13 +4216,13 @@ app.post('/school/students/:id/update', requireAuth, requireNotBanned, ah(async 
   const finalStream = stream === '__other' ? (stream_other || '') : stream;
   await pool.query('UPDATE students SET admission_no=$1,name=$2,class=$3,stream=$4,guardian_name=$5,guardian_phone=$6 WHERE id=$7 AND tenant_id=$8',
     [admission_no, name, finalClass, finalStream, guardian_name, guardian_phone, req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'edit_student', `Edited student: ${name}`);
+  await audit(req.session.user.email, 'edit_student', `Edited student: ${name}`, req.session.user.tenant_id, req);
   res.redirect('/school/students');
 }));
 
 app.get('/school/students/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM students WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'delete_student', `Deleted student ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_student', `Deleted student ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/school/students');
 }));
 
@@ -4250,7 +4251,7 @@ app.post('/school/students/import/save', requireAuth, requireNotBanned, ah(async
       imported++;
     }
   }
-  await audit(req.session.user.email, 'csv_import', `Imported ${imported} students`);
+  await audit(req.session.user.email, 'csv_import', `Imported ${imported} students`, req.session.user.tenant_id, req);
   res.send(renderPage('Import Complete', `<div class="card"><div class="alert alert-success">Successfully imported ${imported} students.</div><a href="/school/students" class="btn">View Students</a></div>`, req.session.user));
 }));
 
@@ -4351,7 +4352,7 @@ app.post('/school/fees/pay/save', requireAuth, requireNotBanned, ah(async (req, 
   const { fee_id, amount } = req.body;
   const t = req.session.user.tenant_id;
   await pool.query('UPDATE fees SET paid=paid+$1 WHERE id=$2 AND tenant_id=$3', [amount, fee_id, t]);
-  await audit(req.session.user.email, 'fee_payment', `Payment UGX ${amount} on fee #${fee_id}`);
+  await audit(req.session.user.email, 'fee_payment', `Payment UGX ${amount} on fee #${fee_id}`, req.session.user.tenant_id, req);
   // v1.0: Fee balance SMS + email notification to parent
   try {
     const fee = (await pool.query('SELECT f.*,s.name as student_name,s.guardian_phone,s.parent_email FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.id=$1', [fee_id])).rows[0];
@@ -4590,7 +4591,7 @@ app.get('/school/staff/new', requireAuth, requireNotBanned, requireRole('head_te
       <form method="POST" action="/school/staff/save">
         <input name="name" placeholder="Full Name" required>
         <input name="email" type="email" placeholder="Email" required>
-        <input name="password" type="password" placeholder="Password (min 4 chars)" minlength="4" required>
+        <input name="password" type="password" placeholder="Password (min 8 chars)" minlength="8" required>
         <select name="role" required>
           <option value="head_teacher">Head Teacher</option>
           <option value="deputy">Deputy Head</option>
@@ -4608,7 +4609,7 @@ app.get('/school/staff/new', requireAuth, requireNotBanned, requireRole('head_te
 app.post('/school/staff/save', requireAuth, requireNotBanned, requireRole('head_teacher', 'school'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { name, email, password, role } = req.body;
-  const hash = await bcrypt.hash(password, 10);
+  const hash = await bcrypt.hash(password, 12);
   try {
     await pool.query('INSERT INTO staff(tenant_id,email,password,password_hash,name,role,approved) VALUES($1,$2,$3,$3,$4,$5,true)', [t, email, hash, name, role]);
   } catch (e) {
@@ -4617,7 +4618,7 @@ app.post('/school/staff/save', requireAuth, requireNotBanned, requireRole('head_
     }
     throw e;
   }
-  await audit(req.session.user.email, 'add_staff', `Added staff: ${name} (${role})`);
+  await audit(req.session.user.email, 'add_staff', `Added staff: ${name} (${role})`, req.session.user.tenant_id, req);
   res.redirect('/school/staff');
 }));
 
@@ -4646,7 +4647,7 @@ app.get('/school/staff/:id/edit', requireAuth, requireNotBanned, ah(async (req, 
 app.post('/school/staff/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { name, email, role } = req.body;
   await pool.query('UPDATE staff SET name=$1,email=$2,role=$3 WHERE id=$4 AND tenant_id=$5', [name, email, role, req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'edit_staff', `Updated staff: ${name}`);
+  await audit(req.session.user.email, 'edit_staff', `Updated staff: ${name}`, req.session.user.tenant_id, req);
   res.redirect('/school/staff');
 }));
 
@@ -4654,13 +4655,13 @@ app.get('/school/staff/:id/ban', requireAuth, requireNotBanned, ah(async (req, r
   const s = (await pool.query('SELECT * FROM staff WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
   if (!s) return res.status(404).send('Not found');
   await pool.query('UPDATE staff SET banned=$1 WHERE id=$2 AND tenant_id=$3', [!s.banned, req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'toggle_ban_staff', `${s.banned?'Unbanned':'Banned'} staff: ${s.name}`);
+  await audit(req.session.user.email, 'toggle_ban_staff', `${s.banned?'Unbanned':'Banned'} staff: ${s.name}`, req.session.user.tenant_id, req);
   res.redirect('/school/staff');
 }));
 
 app.get('/school/staff/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM staff WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'delete_staff', `Deleted staff ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_staff', `Deleted staff ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/school/staff');
 }));
 
@@ -4736,7 +4737,7 @@ app.post('/school/timetable/save', requireAuth, requireNotBanned, ah(async (req,
   const finalSubject = subject === '__other' ? (subject_other || '') : subject;
   await pool.query('INSERT INTO timetable(tenant_id,class,day,period,subject,teacher,start_time,end_time) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
     [req.session.user.tenant_id, cls, day, period, finalSubject, teacher, start_time, end_time]);
-  await audit(req.session.user.email, 'add_timetable', `Added ${finalSubject} for ${cls} ${day} P${period}`);
+  await audit(req.session.user.email, 'add_timetable', `Added ${finalSubject} for ${cls} ${day} P${period}`, req.session.user.tenant_id, req);
   res.redirect('/school/timetable');
 }));
 
@@ -4772,7 +4773,7 @@ app.get('/school/grading', requireAuth, requireNotBanned, ah(async (req, res) =>
 app.post('/school/grading/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { min_score, max_score, grade, comment } = req.body;
   await pool.query('INSERT INTO grading_scales(tenant_id,min_score,max_score,grade,comment) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, min_score, max_score, grade, comment]);
-  await audit(req.session.user.email, 'add_grade_range', `Added grade ${grade} (${min_score}-${max_score})`);
+  await audit(req.session.user.email, 'add_grade_range', `Added grade ${grade} (${min_score}-${max_score})`, req.session.user.tenant_id, req);
   res.redirect('/school/grading');
 }));
 
@@ -4853,7 +4854,7 @@ app.post('/school/fee-structures/save', requireAuth, requireNotBanned, ah(async 
   } else {
     await pool.query('INSERT INTO fee_structures(tenant_id,class,term,amount,year) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, cls, finalTerm, amount, year]);
   }
-  await audit(req.session.user.email, 'add_fee_structure', `Added fee structure: ${cls} ${finalTerm} UGX ${amount}`);
+  await audit(req.session.user.email, 'add_fee_structure', `Added fee structure: ${cls} ${finalTerm} UGX ${amount}`, req.session.user.tenant_id, req);
   res.redirect('/school/fee-structures');
 }));
 
@@ -4876,7 +4877,7 @@ app.post('/school/fee-structures/generate', requireAuth, requireNotBanned, ah(as
       generated++;
     }
   }
-  await audit(req.session.user.email, 'generate_fees', `Generated ${generated} fee records for ${cls} ${term}`);
+  await audit(req.session.user.email, 'generate_fees', `Generated ${generated} fee records for ${cls} ${term}`, req.session.user.tenant_id, req);
   res.send(renderPage('Fee Records Generated', `<div class="card"><div class="alert alert-success">Generated ${generated} fee records for ${esc(cls)} ${esc(term)} at UGX ${parseInt(structure.amount).toLocaleString()} each.</div><a href="/school/fees" class="btn">View Fees</a></div>`, req.session.user));
 }));
 
@@ -4907,7 +4908,7 @@ app.post('/school/promote/execute', requireAuth, requireNotBanned, ah(async (req
   const { from_class, to_class, to_class_other } = req.body;
   const finalToClass = to_class === '__other' ? (to_class_other || '') : to_class;
   const result = await pool.query('UPDATE students SET class=$1 WHERE tenant_id=$2 AND class=$3', [finalToClass, t, from_class]);
-  await audit(req.session.user.email, 'student_promotion', `Promoted ${result.rowCount} students from ${from_class} to ${finalToClass}`);
+  await audit(req.session.user.email, 'student_promotion', `Promoted ${result.rowCount} students from ${from_class} to ${finalToClass}`, req.session.user.tenant_id, req);
   res.send(renderPage('Promotion Complete', `<div class="card"><div class="alert alert-success">Successfully promoted ${result.rowCount} students from ${esc(from_class)} to ${esc(finalToClass)}.</div><a href="/school/students" class="btn">View Students</a></div>`, req.session.user));
 }));
 
@@ -5208,7 +5209,7 @@ app.post('/school/signin/clock-in', requireAuth, requireNotBanned, ah(async (req
   if (existing) return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">This staff member is already clocked in and has not clocked out.</div><a href="/school/signin" class="btn">Back</a></div>', req.session.user));
   await pool.query('INSERT INTO sign_in_out(tenant_id,staff_id,name,role,clock_in,date,notes) VALUES($1,$2,$3,$4,NOW(),CURRENT_DATE,$5)', [t, staff_id, staff.name, staff.role, notes]);
   await notify(t, req.session.user.email, 'Staff Clock In', staff.name + ' signed in', 'attendance');
-  await audit(req.session.user.email, 'clock_in', staff.name + ' clocked in');
+  await audit(req.session.user.email, 'clock_in', staff.name + ' clocked in', req.session.user.tenant_id, req);
   res.redirect('/school/signin');
 }));
 
@@ -5217,7 +5218,7 @@ app.get('/school/signin/:id/clock-out', requireAuth, requireNotBanned, ah(async 
   const record = (await pool.query('SELECT * FROM sign_in_out WHERE id=$1 AND tenant_id=$2 AND clock_out IS NULL', [req.params.id, t])).rows[0];
   if (!record) return res.redirect('/school/signin');
   await pool.query('UPDATE sign_in_out SET clock_out=NOW() WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-  await audit(req.session.user.email, 'clock_out', (record.name || 'Staff') + ' clocked out');
+  await audit(req.session.user.email, 'clock_out', (record.name || 'Staff') + ' clocked out', req.session.user.tenant_id, req);
   res.redirect('/school/signin');
 }));
 
@@ -5642,7 +5643,7 @@ app.post('/school/notify/send', requireAuth, requireNotBanned, ah(async (req, re
       smsResult = 'Africa\'s Talking not configured. Add AT_API_KEY and AT_USERNAME env vars.';
     }
   }
-  await audit(req.session.user.email, 'send_notification', `Sent "${subject}" to ${recipients.length} recipients via ${type}`);
+  await audit(req.session.user.email, 'send_notification', `Sent "${subject}" to ${recipients.length} recipients via ${type}`, req.session.user.tenant_id, req);
   res.send(renderPage('Notification Sent', `
     <div class="card" style="max-width:600px;margin:40px auto">
       <div class="alert alert-success">In-app notification sent to ${recipients.length} recipients!</div>
@@ -5901,7 +5902,7 @@ app.get('/org/register', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/register/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { name, email, phone, role } = req.body;
   await pool.query('INSERT INTO members(tenant_id,name,email,phone,role) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, name, email, phone, role]);
-  await audit(req.session.user.email, 'add_member', `Added member: ${name}`);
+  await audit(req.session.user.email, 'add_member', `Added member: ${name}`, req.session.user.tenant_id, req);
   res.redirect('/org/members');
 }));
 
@@ -5924,13 +5925,13 @@ app.get('/org/members/:id/edit', requireAuth, requireNotBanned, ah(async (req, r
 app.post('/org/members/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { name, email, phone, role } = req.body;
   await pool.query('UPDATE members SET name=$1,email=$2,phone=$3,role=$4 WHERE id=$5 AND tenant_id=$6', [name, email, phone, role, req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'update_member', `Updated member: ${name}`);
+  await audit(req.session.user.email, 'update_member', `Updated member: ${name}`, req.session.user.tenant_id, req);
   res.redirect('/org/members');
 }));
 
 app.post('/org/members/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM members WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'delete_member', `Deleted member ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_member', `Deleted member ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/org/members');
 }));
 
@@ -6002,21 +6003,21 @@ app.get('/org/projects/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/projects/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { name, description, budget, status } = req.body;
   await pool.query('INSERT INTO projects(tenant_id,name,description,budget,status) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, name, description, budget, status]);
-  await audit(req.session.user.email, 'create_project', `Created project: ${name}`);
+  await audit(req.session.user.email, 'create_project', `Created project: ${name}`, req.session.user.tenant_id, req);
   res.redirect('/org/projects');
 }));
 
 app.post('/org/projects/:id/spend', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { amount } = req.body;
   await pool.query('UPDATE projects SET spent=spent+$1 WHERE id=$2 AND tenant_id=$3', [amount, req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'update_project_spend', `Added UGX ${amount} spent to project ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'update_project_spend', `Added UGX ${amount} spent to project ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/org/projects');
 }));
 
 app.post('/org/projects/:id/status', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { status } = req.body;
   await pool.query('UPDATE projects SET status=$1 WHERE id=$2 AND tenant_id=$3', [status, req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'update_project_status', `Set project ID ${req.params.id} status to ${status}`);
+  await audit(req.session.user.email, 'update_project_status', `Set project ID ${req.params.id} status to ${status}`, req.session.user.tenant_id, req);
   res.redirect('/org/projects');
 }));
 
@@ -6079,7 +6080,7 @@ app.post('/org/events/save', requireAuth, requireNotBanned, ah(async (req, res) 
   const pattern = recurring ? (recurring_pattern || 'weekly') : null;
   const endDate = recurring ? (recurring_end_date || null) : null;
   await pool.query('INSERT INTO events(tenant_id,name,event_date,venue,description,budget,is_recurring,recurring_pattern,recurring_end_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, name, event_date, venue, description, budget || 0, recurring, pattern, endDate]);
-  await audit(req.session.user.email, 'create_event', `Created event: ${name}${recurring ? ` (${pattern})` : ''}`);
+  await audit(req.session.user.email, 'create_event', `Created event: ${name}${recurring ? ` (${pattern})` : ''}`, req.session.user.tenant_id, req);
   // Generate recurring occurrences
   if (recurring && event_date && endDate && pattern) {
     const startDate = new Date(event_date);
@@ -6094,7 +6095,7 @@ app.post('/org/events/save', requireAuth, requireNotBanned, ah(async (req, res) 
       current.setDate(current.getDate() + days);
       count++;
     }
-    if (count > 0) await audit(req.session.user.email, 'create_recurring_events', `Generated ${count} recurring instances for: ${name}`);
+    if (count > 0) await audit(req.session.user.email, 'create_recurring_events', `Generated ${count} recurring instances for: ${name}`, req.session.user.tenant_id, req);
   }
   res.redirect('/org/events');
 }));
@@ -6149,7 +6150,7 @@ app.get('/org/meetings/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/meetings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { title, meeting_date, content } = req.body;
   await pool.query('INSERT INTO meeting_minutes(tenant_id,title,meeting_date,content) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, title, meeting_date, content]);
-  await audit(req.session.user.email, 'create_meeting', `Created meeting: ${title}`);
+  await audit(req.session.user.email, 'create_meeting', `Created meeting: ${title}`, req.session.user.tenant_id, req);
   res.redirect('/org/meetings');
 }));
 
@@ -6179,7 +6180,7 @@ app.get('/org/meetings/:id', requireAuth, requireNotBanned, ah(async (req, res) 
 
 app.post('/org/meetings/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM meeting_minutes WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'delete_meeting', `Deleted meeting ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_meeting', `Deleted meeting ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/org/meetings');
 }));
 
@@ -6224,13 +6225,13 @@ app.get('/org/notices/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/notices/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { title, content, priority } = req.body;
   await pool.query('INSERT INTO notice_board(tenant_id,title,content,priority) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, title, content, priority]);
-  await audit(req.session.user.email, 'create_notice', `Posted notice: ${title}`);
+  await audit(req.session.user.email, 'create_notice', `Posted notice: ${title}`, req.session.user.tenant_id, req);
   res.redirect('/org/notices');
 }));
 
 app.post('/org/notices/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM notice_board WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'delete_notice', `Deleted notice ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_notice', `Deleted notice ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/org/notices');
 }));
 
@@ -6308,7 +6309,7 @@ app.get('/org/finance', requireAuth, requireNotBanned, ah(async (req, res) => {
 app.post('/org/finance/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { type, amount, description, category } = req.body;
   await pool.query('INSERT INTO org_finance(tenant_id,amount,type,description,category) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, amount, type, description, category || null]);
-  await audit(req.session.user.email, 'record_finance', `Recorded ${type}: UGX ${amount} - ${description}${category ? ' ['+category+']' : ''}`);
+  await audit(req.session.user.email, 'record_finance', `Recorded ${type}: UGX ${amount} - ${description}${category ? ' ['+category+']' : ''}`, req.session.user.tenant_id, req);
   res.redirect('/org/finance');
 }));
 
@@ -6339,7 +6340,7 @@ app.post('/org/attendance/save', requireAuth, requireNotBanned, ah(async (req, r
     const status = present.includes(String(m.id)) ? 'present' : 'absent';
     await pool.query('INSERT INTO attendance(tenant_id,student_id,date,status) VALUES($1,$2,$3,$4) ON CONFLICT (student_id,date) DO UPDATE SET status=$4', [t, m.id, date, status]);
   }
-  await audit(req.session.user.email, 'mark_attendance', `Marked attendance for ${date}`);
+  await audit(req.session.user.email, 'mark_attendance', `Marked attendance for ${date}`, req.session.user.tenant_id, req);
   res.redirect('/org/attendance');
 }));
 
@@ -6723,7 +6724,7 @@ app.get('/church/members/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/church/members/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { name, email, phone, address, role, date_of_birth } = req.body;
   await pool.query('INSERT INTO church_members(tenant_id,name,email,phone,address,role,date_of_birth) VALUES($1,$2,$3,$4,$5,$6,$7)', [req.session.user.tenant_id, name, email, phone, address, role, date_of_birth || null]);
-  await audit(req.session.user.email, 'add_church_member', `Added church member: ${name}`);
+  await audit(req.session.user.email, 'add_church_member', `Added church member: ${name}`, req.session.user.tenant_id, req);
   res.redirect('/church/members');
 }));
 
@@ -6747,7 +6748,7 @@ app.get('/church/members/:id/edit', requireAuth, requireNotBanned, ah(async (req
 app.post('/church/members/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { name, email, phone, address, role } = req.body;
   await pool.query('UPDATE church_members SET name=$1,email=$2,phone=$3,address=$4,role=$5 WHERE id=$6 AND tenant_id=$7', [name, email, phone, address, role, req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'edit_church_member', `Updated church member: ${name}`);
+  await audit(req.session.user.email, 'edit_church_member', `Updated church member: ${name}`, req.session.user.tenant_id, req);
   res.redirect('/church/members');
 }));
 
@@ -6790,7 +6791,7 @@ app.get('/church/donations', requireAuth, requireNotBanned, ah(async (req, res) 
 app.post('/church/donations/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { donor_name, amount, type, method, reference } = req.body;
   await pool.query('INSERT INTO donations(tenant_id,donor_name,amount,type,method,reference) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, donor_name, amount, type, method, reference]);
-  await audit(req.session.user.email, 'add_donation', `Donation UGX ${amount} from ${donor_name}`);
+  await audit(req.session.user.email, 'add_donation', `Donation UGX ${amount} from ${donor_name}`, req.session.user.tenant_id, req);
   res.redirect('/church/donations');
 }));
 
@@ -7245,7 +7246,7 @@ app.post('/business/transfers/save', requireAuth, requireNotBanned, requireTenan
   if (!product) { return res.redirect('/business/transfers/new'); }
   await pool.query('INSERT INTO stock_transfers(tenant_id, product_id, product_name, from_branch, to_branch, quantity, notes, created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
     [t, product_id, product.name, from_branch, to_branch, quantity, notes, req.session.user.email]);
-  await audit(req.session.user.email, 'stock_transfer_create', `Transfer of ${quantity}x ${product.name} from ${from_branch} to ${to_branch}`);
+  await audit(req.session.user.email, 'stock_transfer_create', `Transfer of ${quantity}x ${product.name} from ${from_branch} to ${to_branch}`, req.session.user.tenant_id, req);
   res.redirect('/business/transfers');
 }));
 
@@ -7259,21 +7260,21 @@ app.get('/business/transfers/:id/approve', requireAuth, requireNotBanned, requir
   await pool.query('UPDATE inventory SET quantity = quantity + $1 WHERE tenant_id=$2 AND name=$3', [tr.quantity, t, tr.to_branch]);
   // Update status to completed
   await pool.query('UPDATE stock_transfers SET status=$1, completed_at=NOW() WHERE id=$2 AND tenant_id=$3', ['completed', req.params.id, t]);
-  await audit(req.session.user.email, 'stock_transfer_approve', `Approved transfer #${req.params.id}: ${tr.quantity}x ${tr.product_name} from ${tr.from_branch} to ${tr.to_branch}`);
+  await audit(req.session.user.email, 'stock_transfer_approve', `Approved transfer #${req.params.id}: ${tr.quantity}x ${tr.product_name} from ${tr.from_branch} to ${tr.to_branch}`, req.session.user.tenant_id, req);
   res.redirect('/business/transfers');
 }));
 
 app.get('/business/transfers/:id/reject', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query("UPDATE stock_transfers SET status='rejected' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
-  await audit(req.session.user.email, 'stock_transfer_reject', `Rejected transfer #${req.params.id}`);
+  await audit(req.session.user.email, 'stock_transfer_reject', `Rejected transfer #${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/business/transfers');
 }));
 
 app.get('/business/transfers/:id/delete', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query("DELETE FROM stock_transfers WHERE id=$1 AND tenant_id=$2 AND status='pending'", [req.params.id, t]);
-  await audit(req.session.user.email, 'stock_transfer_delete', `Deleted pending transfer #${req.params.id}`);
+  await audit(req.session.user.email, 'stock_transfer_delete', `Deleted pending transfer #${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/business/transfers');
 }));
 
@@ -7329,7 +7330,7 @@ app.post('/business/invoices/save', requireAuth, requireNotBanned, requireTenant
 
 app.get('/business/invoices/:id/mark-paid', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
   await pool.query('UPDATE invoices SET status=\'paid\' WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'invoice_paid', `Invoice #${req.params.id} marked as paid`);
+  await audit(req.session.user.email, 'invoice_paid', `Invoice #${req.params.id} marked as paid`, req.session.user.tenant_id, req);
   res.redirect('/business/invoices');
 }));
 
@@ -7650,7 +7651,7 @@ app.post('/health/settings/save', requireAuth, requireNotBanned, ah(async (req, 
     return res.status(400).send('Invalid institution type');
   }
   await pool.query('UPDATE tenants SET health_institution_type=$1 WHERE id=$2', [health_institution_type || 'general_hospital', t]);
-  await audit(req.session.user.email, 'update_health_type', health_institution_type);
+  await audit(req.session.user.email, 'update_health_type', health_institution_type, req.session.user.tenant_id, req);
   res.redirect('/portal/health');
 }));
 
@@ -7705,7 +7706,7 @@ app.post('/business/settings/save', requireAuth, requireNotBanned, ah(async (req
   const t = req.session.user.tenant_id;
   const { business_type } = req.body;
   await pool.query('UPDATE tenants SET business_type=$1 WHERE id=$2', [business_type || 'general', t]);
-  await audit(req.session.user.email, 'update_business_type', business_type);
+  await audit(req.session.user.email, 'update_business_type', business_type, req.session.user.tenant_id, req);
   res.redirect('/portal/business');
 }));
 
@@ -7766,7 +7767,7 @@ app.post('/sickbay/save', requireAuth, requireNotBanned, ah(async (req, res) => 
   const { patient_name, visit_type, seen_by, visit_date, complaint, treatment, action, notes } = req.body;
   const complaintText = complaint + (action && action !== 'none' ? ` [Action: ${action}]` : '');
   await pool.query('INSERT INTO sickbay_visits(tenant_id,patient_name,visit_type,seen_by,visit_date,complaint,treatment,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, patient_name, visit_type||'first_aid', seen_by||null, visit_date||'CURRENT_DATE', complaintText, treatment||null, notes||null]);
-  await audit(req.session.user.email, 'sickbay_visit', `${patient_name}: ${visit_type||'first_aid'}`);
+  await audit(req.session.user.email, 'sickbay_visit', `${patient_name}: ${visit_type||'first_aid'}`, req.session.user.tenant_id, req);
   res.redirect('/sickbay');
 }));
 
@@ -7851,7 +7852,7 @@ app.post('/sickbay/units/save', requireAuth, requireNotBanned, ah(async (req, re
   const t = req.session.user.tenant_id;
   const { name, location, capacity, in_charge, phone, operating_hours, description } = req.body;
   await pool.query('INSERT INTO sickbay_units(tenant_id,name,location,capacity,in_charge,phone,operating_hours,description) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, name, location||null, capacity||5, in_charge||null, phone||null, operating_hours||null, description||null]);
-  await audit(req.session.user.email, 'create_sickbay_unit', name);
+  await audit(req.session.user.email, 'create_sickbay_unit', name, req.session.user.tenant_id, req);
   res.redirect('/sickbay/units');
 }));
 
@@ -8458,7 +8459,7 @@ app.get('/settings/password', requireAuth, (req, res) => {
     <div class="card" style="max-width:500px;margin:40px auto"><h3>Change Password</h3>
       <form method="POST" action="/settings/password/save">
         <input name="current_password" type="password" placeholder="Current Password" required>
-        <input name="new_password" type="password" placeholder="New Password (min 4 chars)" minlength="4" required>
+        <input name="new_password" type="password" placeholder="New Password (min 8 chars)" minlength="8" required>
         <input name="confirm_password" type="password" placeholder="Confirm New Password" required>
         <button class="btn btn-red">Change Password</button>
       </form>
@@ -8470,7 +8471,7 @@ app.post('/settings/password/save', requireAuth, ah(async (req, res) => {
   const { current_password, new_password, confirm_password } = req.body;
   // Basic password validation
   const passwordErrors = [];
-  if (!new_password || new_password.length < 4) passwordErrors.push('New password must be at least 4 characters long');
+  if (!new_password || new_password.length < 8) passwordErrors.push('New password must be at least 8 characters long');
   if (new_password !== confirm_password) passwordErrors.push('Passwords do not match');
   if (passwordErrors.length > 0) return res.send(renderPage('Change Password', `<div class="card"><div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>`, req.session.user, req));
   // Try getting both password columns, fall back to just password
@@ -8493,7 +8494,7 @@ app.post('/settings/password/save', requireAuth, ah(async (req, res) => {
       await pool.query('UPDATE users SET password=$1 WHERE id=$2', [hash, req.session.user.id]);
     } else throw e;
   }
-  await audit(req.session.user.email, 'password_change', 'Password changed');
+  await audit(req.session.user.email, 'password_change', 'Password changed', req.session.user.tenant_id, req);
   res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Password changed successfully!</div><a href="/dashboard" class="btn">Back to Dashboard</a></div>', req.session.user, req));
 }));
 
@@ -8534,7 +8535,7 @@ app.post('/settings/profile/save', requireAuth, ah(async (req, res) => {
   const { name, email, phone, address, description } = req.body;
   await pool.query('UPDATE tenants SET name=$1,email=$2,phone=$3,address=$4,description=$5 WHERE id=$6',
     [name, email, phone, address, description, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'profile_update', 'Updated organization profile');
+  await audit(req.session.user.email, 'profile_update', 'Updated organization profile', req.session.user.tenant_id, req);
   res.redirect('/settings/profile');
 }));
 
@@ -8639,7 +8640,7 @@ app.post('/settings/backup/upload', requireAuth, express.raw({ type: 'applicatio
       }
     }
   }
-  await audit(req.session.user.email, 'data_import', `Imported ${imported} records from backup`);
+  await audit(req.session.user.email, 'data_import', `Imported ${imported} records from backup`, req.session.user.tenant_id, req);
   res.send(renderPage('Import Complete', `<div class="card"><div class="alert alert-success">Successfully imported ${imported} records.</div><a href="/settings/backup" class="btn">Back to Backup</a></div>`, req.session.user));
 }));
 
@@ -8666,7 +8667,7 @@ app.get('/settings/branding', requireAuth, ah(async (req, res) => {
 app.post('/settings/branding/save', requireAuth, ah(async (req, res) => {
   const { logo_url, favicon_url, custom_css } = req.body;
   await pool.query('UPDATE tenants SET logo_url=$1,favicon_url=$2,custom_css=$3 WHERE id=$4', [logo_url, favicon_url, sanitizeCSS(custom_css), req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'branding_update', 'Updated organization branding');
+  await audit(req.session.user.email, 'branding_update', 'Updated organization branding', req.session.user.tenant_id, req);
   res.redirect('/settings/branding');
 }));
 
@@ -9159,12 +9160,12 @@ app.post('/dev/execute', requireAuth, requireSuperAdmin, ah(async (req, res) => 
       req.session.user.tenant_id = tenant.id;
       req.session.user.tenant_name = tenant.name;
       req.session.user.tenant_type = tenant.type;
-      await audit(req.session.user.email, 'switch_tenant', `Switched to tenant #${tenant.id} (${tenant.name})`);
+      await audit(req.session.user.email, 'switch_tenant', `Switched to tenant #${tenant.id} (${tenant.name})`, req.session.user.tenant_id, req);
       req.session.flash = { type: 'success', msg: `Now viewing: ${tenant.name} — <a href="/dev/exit-tenant" style="color:#fff;text-decoration:underline">Exit to Dev Dashboard</a>` };
       return res.redirect('/dashboard');
     }
   }
-  await audit(req.session.user.email, 'dev_action', `${action} on tenant #${target_id}`);
+  await audit(req.session.user.email, 'dev_action', `${action} on tenant #${target_id}`, req.session.user.tenant_id, req);
   req.session.flash = { type: 'success', msg: 'Action executed' };
   res.redirect('/dev/master');
 }));
@@ -9173,7 +9174,7 @@ app.post('/dev/inject-revenue', requireAuth, requireSuperAdmin, ah(async (req, r
   const { amount, source } = req.body;
   await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [amount, source]);
   await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [amount]);
-  await audit(req.session.user.email, 'inject_revenue', `UGX ${amount} from ${source}`);
+  await audit(req.session.user.email, 'inject_revenue', `UGX ${amount} from ${source}`, req.session.user.tenant_id, req);
   res.redirect('/dev/master');
 }));
 
@@ -9332,7 +9333,7 @@ app.post('/dev/cleanup/execute', requireAuth, requireSuperAdmin, ah(async (req, 
     } catch(e) { console.error('[Error]', e.message); }
   }
   
-  await audit(devEmail, 'database_cleanup', 'Erased all test data, kept dev account and platform settings');
+  await audit(devEmail, 'database_cleanup', 'Erased all test data, kept dev account and platform settings', null, req);
   console.log('=== DATABASE CLEANUP COMPLETE ===');
   
   req.session.flash = { type: 'success', msg: 'All test data erased! Your dev account and platform settings are intact. The site is ready for real testing data.' };
@@ -9396,7 +9397,7 @@ app.post('/dev/plans/save', requireAuth, requireSuperAdmin, ah(async (req, res) 
   const { name, display_name, description, price, billing_cycle, features, max_users, max_students } = req.body;
   await pool.query('INSERT INTO subscription_plans(name,display_name,description,price,billing_cycle,features,max_users,max_students) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(name) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,price=EXCLUDED.price,features=EXCLUDED.features,max_users=EXCLUDED.max_users,max_students=EXCLUDED.max_students',
     [name, display_name || name, description || '', parseInt(price) || 0, billing_cycle || 'monthly', features || '', parseInt(max_users) || 5, parseInt(max_students) || 100]);
-  await audit(req.session.user.email, 'create_plan', `Plan: ${name} @ UGX ${price}`);
+  await audit(req.session.user.email, 'create_plan', `Plan: ${name} @ UGX ${price}`, req.session.user.tenant_id, req);
   req.session.flash = { type: 'success', msg: 'Plan saved!' };
   res.redirect('/dev/plans');
 }));
@@ -9490,11 +9491,11 @@ app.post('/team/invite', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   if (req.session.user.role !== 'admin' && req.session.user.role !== 'super_admin') return res.status(403).send('Only admins can add members');
   const { email, role, password, permissions } = req.body;
-  const hash = await bcrypt.hash(password, 10);
+  const hash = await bcrypt.hash(password, 12);
   try {
     await pool.query('INSERT INTO users(tenant_id,email,password,role,approved,permissions,is_active) VALUES($1,$2,$3,$4,true,$5,true) ON CONFLICT(email) DO UPDATE SET role=EXCLUDED.role,permissions=EXCLUDED.permissions,is_active=true',
       [t, email, hash, role || 'staff', permissions || '']);
-    await audit(req.session.user.email, 'add_team_member', `${email} as ${role}`);
+    await audit(req.session.user.email, 'add_team_member', `${email} as ${role}`, req.session.user.tenant_id, req);
   } catch(e) { /* user may already exist */ }
   res.redirect('/team');
 }));
@@ -9744,7 +9745,7 @@ app.post('/dev/adverts/create', requireAuth, requireSuperAdmin, ah(async (req, r
   const { title, description, image_url, link_url, position, start_date, end_date } = req.body;
   await pool.query('INSERT INTO daily_adverts(title,description,image_url,link_url,position,start_date,end_date,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
     [title, description, image_url, link_url, position, start_date, end_date || null, req.session.user.email]);
-  await audit(req.session.user.email, 'create_advert', `Created advert: ${title}`);
+  await audit(req.session.user.email, 'create_advert', `Created advert: ${title}`, req.session.user.tenant_id, req);
   res.redirect('/dev/adverts');
 }));
 
@@ -9798,7 +9799,7 @@ app.post('/dev/blog/create', requireAuth, requireSuperAdmin, ah(async (req, res)
   const published = is_published === 'true';
   await pool.query('INSERT INTO blog_posts(slug,title,content,excerpt,image_url,category,author,is_published,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
     [slug, title, content, excerpt, image_url, category, req.session.user.email, published, published ? new Date() : null]);
-  await audit(req.session.user.email, 'create_blog_post', `Blog post: ${title}`);
+  await audit(req.session.user.email, 'create_blog_post', `Blog post: ${title}`, req.session.user.tenant_id, req);
   res.redirect('/dev/blog');
 }));
 
@@ -9894,7 +9895,7 @@ app.post('/dev/withdraw/process', requireAuth, requireSuperAdmin, ah(async (req,
   if (amt > balance) { req.session.flash = { type: 'error', msg: 'Insufficient balance' }; return res.redirect('/dev/withdraw'); }
   await pool.query('UPDATE platform_wallet SET balance=balance-$1 WHERE id=1', [amt]);
   await pool.query('INSERT INTO developer_revenue(amount,source,details) VALUES($1,$2,$3)', [-amt, 'withdrawal', JSON.stringify({ phone, network, status: 'processing', requested_by: req.session.user.email })]);
-  await audit(req.session.user.email, 'withdrawal_request', `UGX ${amt} to ${phone} (${network})`);
+  await audit(req.session.user.email, 'withdrawal_request', `UGX ${amt} to ${phone} (${network})`, req.session.user.tenant_id, req);
   req.session.flash = { type: 'success', msg: `Withdrawal of UGX ${amt.toLocaleString()} requested to ${phone}` };
   res.redirect('/dev/withdraw');
 }));
@@ -10103,7 +10104,7 @@ app.post('/dev/settings/save', requireAuth, requireSuperAdmin, ah(async (req, re
     await pool.query('INSERT INTO platform_settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()', [key, val]);
   }
   await loadPlatformSettings();
-  await audit(req.session.user.email, 'update_platform_settings', 'Updated platform settings');
+  await audit(req.session.user.email, 'update_platform_settings', 'Updated platform settings', req.session.user.tenant_id, req);
   req.session.flash = { type: 'success', msg: 'Settings saved successfully! Changes are live now.' };
   res.redirect('/dev/settings');
 }));
@@ -10153,7 +10154,7 @@ app.get('/dev/posts', requireAuth, requireSuperAdmin, ah(async (req, res) => {
 app.post('/dev/posts/create', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const { title, content, post_type, image_url, link_url, is_pinned } = req.body;
   await pool.query('INSERT INTO dev_posts(title,content,post_type,image_url,link_url,is_pinned) VALUES($1,$2,$3,$4,$5,$6)', [title, content, post_type || 'announcement', image_url || '', link_url || '', is_pinned === 'true']);
-  await audit(req.session.user.email, 'create_dev_post', `Post: ${title}`);
+  await audit(req.session.user.email, 'create_dev_post', `Post: ${title}`, req.session.user.tenant_id, req);
   req.session.flash = { type: 'success', msg: 'Post published!' };
   res.redirect('/dev/posts');
 }));
@@ -10238,7 +10239,7 @@ app.post('/dev/resources/create', requireAuth, requireSuperAdmin, ah(async (req,
   const isFree = !price || parseInt(price) === 0;
   await pool.query('INSERT INTO educational_resources(title,description,category,subject,class_level,file_url,file_type,cover_image,source,author,is_free,price,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
     [title, description || '', category || 'book', subject || '', class_level || '', file_url, file_type || 'pdf', cover_image || '', 'manual', author || '', isFree, parseInt(price) || 0, req.session.user.email]);
-  await audit(req.session.user.email, 'add_resource', `${category}: ${title}`);
+  await audit(req.session.user.email, 'add_resource', `${category}: ${title}`, req.session.user.tenant_id, req);
   req.session.flash = { type: 'success', msg: 'Resource added!' };
   res.redirect('/dev/resources');
 }));
@@ -10261,7 +10262,7 @@ app.post('/dev/resources/scrape', requireAuth, requireSuperAdmin, ah(async (req,
   } catch (e) {
     console.warn('Scrape error:', e.message);
   }
-  await audit(req.session.user.email, 'scrape_resources', `Imported ${imported} resources for "${query}"`);
+  await audit(req.session.user.email, 'scrape_resources', `Imported ${imported} resources for "${query}"`, req.session.user.tenant_id, req);
   req.session.flash = { type: imported > 0 ? 'success' : 'info', msg: imported > 0 ? `Imported ${imported} resource(s)!` : 'No new resources found. Try a different search.' };
   res.redirect('/dev/resources');
 }));
@@ -10449,7 +10450,7 @@ app.get('/billing/subscribe/:plan', requireAuth, ah(async (req, res) => {
   const expires = new Date(Date.now() + SUBSCRIPTION_DURATION);
   if (plan === 'free') {
     try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [t, plan, amount, 'active', expires]); } catch(e) { console.error('[Error]', e.message); }
-    await audit(req.session.user.email, 'subscription_change', `Changed to ${plan} plan`);
+    await audit(req.session.user.email, 'subscription_change', `Changed to ${plan} plan`, req.session.user.tenant_id, req);
     return res.redirect('/billing');
   }
   // v12: Use inline checkout page (Flutterwave inline JS + manual fallback)
@@ -10461,7 +10462,7 @@ app.get('/billing/subscribe/:plan', requireAuth, ah(async (req, res) => {
     await pool.query('UPDATE subscriptions SET auto_verified=true WHERE tenant_id=$1 AND status=$2', [t, 'active']);
   }
   if (amount > 0) await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,plan) VALUES($1,$2,$3,$4,$5,$6)', [t, amount, 'manual', 'pending', `${plan} plan subscription`, plan]);
-  await audit(req.session.user.email, 'subscription_change', `Changed to ${plan} plan (manual)`);
+  await audit(req.session.user.email, 'subscription_change', `Changed to ${plan} plan (manual)`, req.session.user.tenant_id, req);
   res.redirect('/billing');
 }));
 
@@ -10481,7 +10482,7 @@ app.get('/billing/callback', requireAuth, ah(async (req, res) => {
         // Auto-verify tenant after subscription payment
         await client.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
         await client.query('UPDATE subscriptions SET auto_verified=true WHERE tenant_id=$1 AND status=$2', [payment.tenant_id, 'active']);
-        await audit(req.session.user.email, 'payment_received', `Flutterwave payment: ${tx_ref} for ${plan}`);
+        await audit(req.session.user.email, 'payment_received', `Flutterwave payment: ${tx_ref} for ${plan}`, req.session.user.tenant_id, req);
         await fireWebhook(payment.tenant_id, 'payment', { ref: tx_ref, amount: payment.amount, plan });
         await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
       }
@@ -10587,7 +10588,7 @@ app.get('/pay/pesapal/callback', requireAuth, ah(async (req, res) => {
           await client.query('UPDATE momo_payments SET status=$1 WHERE reference=$2 AND type=$3', ['completed', ref, 'pesapal']);
           // Track developer revenue (90% to developer, 10% platform)
           await client.query('INSERT INTO developer_revenue(tenant_id,amount,source,description) VALUES($1,$2,$3,$4)', [payment.tenant_id, Math.floor(payment.amount * 0.9), 'pesapal', `PesaPal subscription: ${plan}`]);
-          await audit(req.session.user.email, 'pesapal_payment', `PesaPal payment completed: ${ref} for ${plan}`);
+          await audit(req.session.user.email, 'pesapal_payment', `PesaPal payment completed: ${ref} for ${plan}`, req.session.user.tenant_id, req);
           await fireWebhook(payment.tenant_id, 'payment', { ref, amount: payment.amount, plan, method: 'pesapal' });
           await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
         }
@@ -10751,7 +10752,7 @@ app.post('/api-keys/save', requireAuth, ah(async (req, res) => {
   const rawKey = 'ssew_' + crypto.randomBytes(24).toString('hex');
   const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
   await pool.query('INSERT INTO api_keys(tenant_id,key_hash,name,scopes) VALUES($1,$2,$3,$4)', [t, keyHash, name, scopeArr]);
-  await audit(req.session.user.email, 'api_key_created', `Created API key: ${name}`);
+  await audit(req.session.user.email, 'api_key_created', `Created API key: ${name}`, req.session.user.tenant_id, req);
   res.send(renderPage('API Key Created', `<div class="card" style="max-width:600px;margin:40px auto"><div class="alert alert-success">API Key created successfully!</div><div class="alert alert-info" style="word-break:break-all"><strong>Your API Key (save this, it won't be shown again):</strong><br>${esc(rawKey)}</div><a href="/api-keys" class="btn">Back to API Keys</a></div>`, req.session.user));
 }));
 
@@ -10903,7 +10904,7 @@ app.post('/church/birthdays/:id/sms', requireAuth, requireNotBanned, ah(async (r
       sent = true;
     } catch (e) { console.warn('SMS failed:', e.message); }
   }
-  await audit(req.session.user.email, 'birthday_sms', `Sent birthday SMS to ${member.name}`);
+  await audit(req.session.user.email, 'birthday_sms', `Sent birthday SMS to ${member.name}`, req.session.user.tenant_id, req);
   res.send(renderPage('SMS Sent', `<div class="card" style="max-width:600px;margin:40px auto"><div class="alert ${sent?'alert-success':'alert-info'}">${sent?'SMS sent successfully!':'SMS queued. Configure Africa\'s Talking in env for live delivery.'}</div><a href="/church/birthdays" class="btn">Back to Birthdays</a></div>`, req.session.user));
 }));
 
@@ -10964,7 +10965,7 @@ app.post('/business/purchase-orders/save', requireAuth, requireNotBanned, ah(asy
   const itemsList = items.split('\\n').filter(Boolean).map(line => { const parts = line.split(','); return { name: parts[0]?.trim(), qty: parseInt(parts[1])||1, price: parseInt(parts[2])||0 }; });
   const total = itemsList.reduce((s,i)=>s+i.qty*i.price,0);
   await pool.query('INSERT INTO purchase_orders(tenant_id,po_no,supplier,items,total,status,notes) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, poNo, supplier, JSON.stringify(itemsList), total, 'pending', notes]);
-  await audit(req.session.user.email, 'po_created', `PO ${poNo} for ${supplier}`);
+  await audit(req.session.user.email, 'po_created', `PO ${poNo} for ${supplier}`, req.session.user.tenant_id, req);
   res.redirect('/business/purchase-orders');
 }));
 
@@ -11015,7 +11016,7 @@ app.post('/business/tax/file', requireAuth, requireNotBanned, ah(async (req, res
   const t = req.session.user.tenant_id;
   const { period, taxable_amount, tax_amount } = req.body;
   await pool.query('INSERT INTO tax_records(tenant_id,period,taxable_amount,tax_amount,tax_type,filed) VALUES($1,$2,$3,$4,$5,true)', [t, period, taxable_amount || 0, tax_amount || 0, 'VAT']);
-  await audit(req.session.user.email, 'tax_filed', `VAT return for ${period}`);
+  await audit(req.session.user.email, 'tax_filed', `VAT return for ${period}`, req.session.user.tenant_id, req);
   res.redirect('/business/tax');
 }));
 
@@ -11469,7 +11470,7 @@ app.post('/settings/theme/save', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { primary_color, secondary_color, accent_color, font_family, custom_css, language } = req.body;
   await pool.query('UPDATE tenants SET primary_color=$1,secondary_color=$2,accent_color=$3,font_family=$4,custom_css=$5,language=$6 WHERE id=$7', [primary_color, secondary_color, accent_color, font_family, sanitizeCSS(custom_css), language, t]);
-  await audit(req.session.user.email, 'theme_updated', 'Theme settings updated');
+  await audit(req.session.user.email, 'theme_updated', 'Theme settings updated', req.session.user.tenant_id, req);
   res.redirect('/settings/theme');
 }));
 
@@ -11558,7 +11559,7 @@ app.get('/email/send', requireAuth, requireNotBanned, (req, res) => {
 app.post('/email/send', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { to, subject, body } = req.body;
   const sent = await sendEmail(to, subject, body);
-  await audit(req.session.user.email, 'email_sent', `To: ${to}, Subject: ${subject}`);
+  await audit(req.session.user.email, 'email_sent', `To: ${to}, Subject: ${subject}`, req.session.user.tenant_id, req);
   res.send(renderPage('Email', `<div class="card" style="max-width:600px;margin:40px auto"><div class="alert ${sent?'alert-success':'alert-info'}">${sent?'Email sent successfully!':'Email queued. Configure GMAIL_USER and GMAIL_PASS in env for delivery.'}</div><a href="/email/send" class="btn">Send Another</a></div>`, req.session.user));
 }));
 
@@ -11583,7 +11584,7 @@ app.post('/sms/send', requireAuth, requireNotBanned, ah(async (req, res) => {
   const result = await sendSMS(phone, message);
   const sent = result?.sent;
   const skipped = result?.skipped;
-  await audit(req.session.user.email, 'sms_sent', `To: ${phone}${skipped ? ' (opt-out skipped)' : ''}`);
+  await audit(req.session.user.email, 'sms_sent', `To: ${phone}${skipped ? ' (opt-out skipped)' : ''}`, req.session.user.tenant_id, req);
   res.send(renderPage('SMS', `<div class="card" style="max-width:600px;margin:40px auto"><div class="alert ${sent?'alert-success':skipped?'alert-info':'alert-error'}">${sent?'SMS sent successfully!':skipped?'SMS skipped — recipient has opted out.':'SMS failed. Configure Africa\'s Talking env vars for delivery.'}</div><a href="/sms/send" class="btn">Send Another</a></div>`, req.session.user));
 }));
 
@@ -12123,7 +12124,7 @@ app.post('/school/fee-balance-sms/send', requireAuth, requireNotBanned, ah(async
     if (ok?.sent) await logSMS(t, b.guardian_phone, msg, 'fee_balance');
     if (ok?.sent) sent++;
   }
-  await audit(req.session.user.email, 'bulk_fee_sms', `Sent fee balance SMS to ${sent}/${balances.length} parents`);
+  await audit(req.session.user.email, 'bulk_fee_sms', `Sent fee balance SMS to ${sent}/${balances.length} parents`, req.session.user.tenant_id, req);
   res.send(renderPage('SMS Sent', `<div class="card"><div class="alert alert-success">Fee balance SMS sent to ${sent}/${balances.length} parents!</div><a href="/school/fee-balance-sms" class="btn">Back</a></div>`, req.session.user));
 }));
 
@@ -12205,7 +12206,7 @@ app.post('/email/bulk/send', requireAuth, requireNotBanned, ah(async (req, res) 
   else if (target.startsWith('class:')) { const cls = target.split(':')[1]; emails = (await pool.query('SELECT DISTINCT parent_email FROM students WHERE tenant_id=$1 AND class=$2 AND parent_email IS NOT NULL', [t, cls])).rows.map(r=>r.parent_email); }
   let sent = 0;
   for (const email of emails) { const ok = await sendEmail(email, subject, body); await queueEmail(t, email, subject, body); if (ok) sent++; }
-  await audit(req.session.user.email, 'bulk_email', `Sent to ${sent}/${emails.length} recipients: ${subject}`);
+  await audit(req.session.user.email, 'bulk_email', `Sent to ${sent}/${emails.length} recipients: ${subject}`, req.session.user.tenant_id, req);
   res.send(renderPage('Bulk Email', `<div class="card"><div class="alert alert-success">Email sent to ${sent}/${emails.length} recipients!</div><a href="/email/bulk" class="btn">Send Another</a></div>`, req.session.user));
 }));
 
@@ -13156,7 +13157,7 @@ app.post('/school/fees/reminders/save', requireAuth, requireNotBanned, ah(async 
     `INSERT INTO fee_reminder_settings(tenant_id, auto_notify, frequency, days_before, enabled_channels, updated_at) VALUES($1, $2, $3, $4, $5, NOW()) ON CONFLICT (tenant_id) DO UPDATE SET auto_notify = $2, frequency = $3, days_before = $4, enabled_channels = $5, updated_at = NOW()`,
     [t, autoNotify, frequency, daysBefore, channels]
   );
-  await audit(req.session.user.email, 'fee_reminder_settings', `Auto fee reminders ${autoNotify ? 'enabled' : 'disabled'}, frequency: ${frequency}`);
+  await audit(req.session.user.email, 'fee_reminder_settings', `Auto fee reminders ${autoNotify ? 'enabled' : 'disabled'}, frequency: ${frequency}`, req.session.user.tenant_id, req);
   res.send(renderPage('Fee Reminders Saved', `<div class="card"><div class="alert alert-success"><h2>Settings Saved</h2><p>Automated fee reminders are now <strong>${autoNotify ? 'ENABLED' : 'DISABLED'}</strong>.</p><ul style="margin-top:10px"><li>Frequency: ${esc(frequency)}</li><li>Days before due: ${daysBefore}</li><li>Channels: ${esc(channels.join(', '))}</li></ul></div><a href="/school/fees/reminders" class="btn">Back to Settings</a> <a href="/school/fees" class="btn btn-sm">Fees</a></div>`, req.session.user));
 }));
 
@@ -13183,7 +13184,7 @@ try {
     const title = req.body.title || req.file.originalname;
     const category = req.body.category || 'general';
     await pool.query('INSERT INTO documents(tenant_id,title,file_url,file_type,category,uploaded_by) VALUES($1,$2,$3,$4,$5,$6)', [t, title, fileUrl, req.file.mimetype, category, req.session.user.email]);
-    await audit(req.session.user.email, 'file_upload', `Uploaded: ${title}`);
+    await audit(req.session.user.email, 'file_upload', `Uploaded: ${title}`, req.session.user.tenant_id, req);
     res.redirect('/documents');
   }));
   app.use('/uploads', express.static(uploadDir));
@@ -13228,7 +13229,7 @@ app.post('/sms/bulk/send', requireAuth, requireNotBanned, ah(async (req, res) =>
   }
   let sent = 0, skipped = 0;
   for (const phone of phones) { const ok = await sendSMS(phone, message); if (ok?.sent) sent++; else if (ok?.skipped) skipped++; }
-  await audit(req.session.user.email, 'bulk_sms', `Sent ${sent}/${phones.size} SMS to ${selectedGroups.join(', ')} (${skipped} opt-outs)`);
+  await audit(req.session.user.email, 'bulk_sms', `Sent ${sent}/${phones.size} SMS to ${selectedGroups.join(', ')} (${skipped} opt-outs)`, req.session.user.tenant_id, req);
   res.send(renderPage('Bulk SMS', `<div class="card"><div class="alert alert-success"><h2>SMS Sent</h2><p>${sent} of ${phones.size} messages delivered.${skipped ? ` ${skipped} skipped (opt-out).` : ''}</p></div><a href="/sms/bulk" class="btn">Send More</a></div>`, req.session.user));
 }));
 
@@ -13410,7 +13411,7 @@ app.post('/business/journal/save', requireAuth, requireNotBanned, ah(async (req,
       await pool.query('UPDATE chart_of_accounts SET balance=balance+$1 WHERE id=$2', [balChange, accountId]);
     }
   }
-  await audit(req.session.user.email, 'journal_entry', `Created journal entry: ${description}`);
+  await audit(req.session.user.email, 'journal_entry', `Created journal entry: ${description}`, req.session.user.tenant_id, req);
   res.redirect('/business/journal');
 }));
 
@@ -13451,21 +13452,21 @@ app.post('/org/meetings/:id/agenda/save', requireAuth, requireNotBanned, ah(asyn
   const t = req.session.user.tenant_id;
   const { item_text, order_no } = req.body;
   await pool.query('INSERT INTO meeting_agendas(tenant_id,meeting_id,item_text,order_no) VALUES($1,$2,$3,$4)', [t, req.params.id, item_text, order_no || 1]);
-  await audit(req.session.user.email, 'create_agenda', `Added agenda item to meeting ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'create_agenda', `Added agenda item to meeting ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect(`/org/meetings/${req.params.id}/agenda`);
 }));
 
 app.post('/org/meetings/agenda/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('UPDATE meeting_agendas SET completed=NOT completed WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-  await audit(req.session.user.email, 'toggle_agenda', `Toggled agenda item ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'toggle_agenda', `Toggled agenda item ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('back');
 }));
 
 app.post('/org/meetings/agenda/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM meeting_agendas WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-  await audit(req.session.user.email, 'delete_agenda', `Deleted agenda item ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_agenda', `Deleted agenda item ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('back');
 }));
 
@@ -14768,7 +14769,7 @@ app.post('/setup/step2/save', requireAuth, requireNotBanned, ah(async (req, res)
     const existing = (await pool.query('SELECT id FROM staff WHERE email=$1 AND tenant_id=$2', [email, t])).rows[0];
     if (existing) continue;
     const tempPass = Math.random().toString(36).slice(-10);
-    const hash = await bcrypt.hash(tempPass, 10);
+    const hash = await bcrypt.hash(tempPass, 12);
     await pool.query('INSERT INTO staff(tenant_id,email,password,password_hash,name,role,approved) VALUES($1,$2,$3,$3,$4,$5,true)', [t, email, hash, name, role]);
     // Send invite email
     const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
@@ -15186,7 +15187,7 @@ app.get('/dev/features/:id/toggle', requireAuth, requireSuperAdmin, ah(async (re
   if (!feature) return res.status(404).send('Feature not found');
   const newActive = !feature.is_active;
   await pool.query('UPDATE feature_flags SET is_active=$1, activated_by=$2, activated_at=NOW() WHERE id=$3', [newActive, req.session.user.email, req.params.id]);
-  await audit(req.session.user.email, `Feature ${newActive ? 'activated' : 'deactivated'}`, `${feature.name} (${feature.feature_key})`);
+  await audit(req.session.user.email, `Feature ${newActive ? 'activated' : 'deactivated'}`, `${feature.name} (${feature.feature_key})`, req.session.user.tenant_id, req);
   res.redirect('/dev/features');
 }));
 
@@ -15237,7 +15238,7 @@ app.post('/dev/subscription-access/:id', requireAuth, requireSuperAdmin, ah(asyn
   const { min_plan } = req.body;
   if (!['free', 'basic', 'pro', 'enterprise'].includes(min_plan)) return res.status(400).send('Invalid plan');
   await pool.query('UPDATE feature_flags SET min_plan=$1 WHERE id=$2', [min_plan, req.params.id]);
-  await audit(req.session.user.email, 'feature_plan_update', 'Set feature #' + req.params.id + ' min_plan to ' + min_plan);
+  await audit(req.session.user.email, 'feature_plan_update', 'Set feature #' + req.params.id + ' min_plan to ' + min_plan, req.session.user.tenant_id, req);
   res.redirect('/dev/subscription-access');
 }));
 
@@ -15252,7 +15253,7 @@ app.get('/dev/subscription-access/bulk', requireAuth, requireSuperAdmin, ah(asyn
   const plan = req.query.plan;
   if (!plan || !['free', 'basic', 'pro', 'enterprise'].includes(plan)) return res.redirect('/dev/subscription-access');
   await pool.query('UPDATE feature_flags SET min_plan=$1 WHERE is_active=true', [plan]);
-  await audit(req.session.user.email, 'bulk_plan_update', 'Set all active features min_plan to ' + plan);
+  await audit(req.session.user.email, 'bulk_plan_update', 'Set all active features min_plan to ' + plan, req.session.user.tenant_id, req);
   res.redirect('/dev/subscription-access');
 }));
 
@@ -15505,7 +15506,7 @@ app.post('/pages/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { title, slug, content, header_html, footer_html, stamp_url, stamp_position, badge_text, badge_color, signature_name, signature_image_url, signature_position, is_published } = req.body;
   await pool.query('INSERT INTO custom_pages(tenant_id,title,slug,content,header_html,footer_html,stamp_url,stamp_position,badge_text,badge_color,signature_name,signature_image_url,signature_position,is_published,created_by,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)', [t, title, slug, content||'', sanitizeHTML(header_html||''), sanitizeHTML(footer_html||''), stamp_url||null, stamp_position||'bottom-right', badge_text||null, badge_color||'#4f46e5', signature_name||null, signature_image_url||null, signature_position||'bottom-left', is_published==='on', req.session.user.email, req.session.user.email]);
-  await audit(req.session.user.email, 'page_created', title);
+  await audit(req.session.user.email, 'page_created', title, req.session.user.tenant_id, req);
   res.redirect('/pages');
 }));
 
@@ -16682,14 +16683,14 @@ app.get('/auth/oauth/google/callback', ah(async (req, res) => {
         const tenant = (await pool.query('SELECT * FROM tenants ORDER BY id LIMIT 1')).rows[0];
         if (tenant) {
           const pwd = crypto.randomBytes(16).toString('hex');
-          const hash = await bcrypt.hash(pwd, 10);
+          const hash = await bcrypt.hash(pwd, 12);
           await pool.query('INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$4,$5,$6)', [tenant.id, email, pwd, hash, 'user', true]);
           user = (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
         }
       }
       if (user) {
         req.session.user = { id: user.id, email: user.email, role: user.role, tenant_id: user.tenant_id, dark_mode: user.dark_mode, banned: user.banned };
-        await audit(email, 'oauth_login', 'Google');
+        await audit(email, 'oauth_login', 'Google', user?.tenant_id, req);
         return res.redirect('/dashboard');
       }
     }
@@ -16760,7 +16761,7 @@ app.get('/school/transport/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/school/transport/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO transport_routes(tenant_id,route_name,driver_name,driver_phone,vehicle_plate,capacity,description) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.route_name, req.body.driver_name, req.body.driver_phone, req.body.vehicle_plate, req.body.capacity||30, req.body.description]);
-  await audit(req.session.user.email, 'Transport route created', req.body.route_name);
+  await audit(req.session.user.email, 'Transport route created', req.body.route_name, req.session.user.tenant_id, req);
   res.redirect('/school/transport');
 }));
 
@@ -16833,7 +16834,7 @@ app.get('/school/discipline/new', requireAuth, requireNotBanned, ah(async (req, 
 app.post('/school/discipline/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO discipline_incidents(tenant_id,student_id,incident_date,type,description,action_taken,reported_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.incident_date||'CURRENT_DATE', req.body.type, req.body.description, req.body.action_taken, req.body.reported_by]);
-  await audit(req.session.user.email, 'Discipline incident reported', `Student #${req.body.student_id}: ${req.body.type}`);
+  await audit(req.session.user.email, 'Discipline incident reported', `Student #${req.body.student_id}: ${req.body.type}`, req.session.user.tenant_id, req);
   res.redirect('/school/discipline');
 }));
 
@@ -17084,7 +17085,7 @@ app.post('/school/sickbay/save', requireAuth, requireNotBanned, ah(async (req, r
   const t = req.session.user.tenant_id;
   const complaint = req.body.complaint + (req.body.action !== 'none' ? ` [Action: ${req.body.action}]` : '');
   await pool.query('INSERT INTO health_visits(tenant_id,student_id,visit_date,complaint,diagnosis,treatment,seen_by) VALUES($1,$2,CURRENT_DATE,$3,$4,$5,$6)', [t, req.body.student_id, complaint, req.body.visit_type, req.body.treatment, req.body.seen_by]);
-  await audit(req.session.user.email, 'sick_bay_visit', `Sick bay visit for student #${req.body.student_id}: ${req.body.visit_type}`);
+  await audit(req.session.user.email, 'sick_bay_visit', `Sick bay visit for student #${req.body.student_id}: ${req.body.visit_type}`, req.session.user.tenant_id, req);
   res.redirect('/school/sickbay');
 }));
 
@@ -17579,7 +17580,7 @@ app.post('/business/payroll/setup/save', requireAuth, requireNotBanned, requireF
     const val = parseInt(req.body['salary_' + s.id]) || 0;
     await pool.query('UPDATE staff SET salary=$1 WHERE id=$2 AND tenant_id=$3', [val, s.id, t]);
   }
-  await audit(req.session.user.email, 'staff_salaries_updated', { updated: staffList.length });
+  await audit(req.session.user.email, 'staff_salaries_updated', { updated: staffList.length }, req.session.user.tenant_id, req);
   res.redirect('/business/payroll/setup');
 }));
 
@@ -18037,7 +18038,7 @@ app.get('/org/resolutions/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/resolutions/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO board_resolutions(tenant_id,title,resolution_text,proposed_by,seconded_by,meeting_date) VALUES($1,$2,$3,$4,$5,$6)', [t, req.body.title, req.body.resolution_text, req.body.proposed_by, req.body.seconded_by, req.body.meeting_date]);
-  await audit(req.session.user.email, 'create_resolution', `Created resolution: ${req.body.title}`);
+  await audit(req.session.user.email, 'create_resolution', `Created resolution: ${req.body.title}`, req.session.user.tenant_id, req);
   res.redirect('/org/resolutions');
 }));
 
@@ -18091,14 +18092,14 @@ app.post('/org/resolutions/:id/vote/:direction', requireAuth, requireNotBanned, 
     }
     await client.query('COMMIT');
   } catch(e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
-  await audit(voterEmail, 'resolution_vote', `Voted ${req.params.direction} on resolution ID: ${req.params.id}`);
+  await audit(voterEmail, 'resolution_vote', `Voted ${req.params.direction} on resolution ID: ${req.params.id}`, t, req);
   res.redirect(`/org/resolutions/${req.params.id}/vote`);
 }));
 
 app.post('/org/resolutions/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM board_resolutions WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-  await audit(req.session.user.email, 'delete_resolution', `Deleted resolution ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_resolution', `Deleted resolution ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/org/resolutions');
 }));
 
@@ -18136,7 +18137,7 @@ app.get('/org/assets/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/assets/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO assets(tenant_id,name,category,purchase_date,purchase_value,current_value,depreciation_rate,location,custodian,condition,serial_number,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [t, req.body.name, req.body.category, req.body.purchase_date||null, req.body.purchase_value||0, req.body.current_value||0, req.body.depreciation_rate||0, req.body.location, req.body.custodian, req.body.condition||'good', req.body.serial_number, req.body.notes]);
-  await audit(req.session.user.email, 'create_asset', `Added asset: ${req.body.name}`);
+  await audit(req.session.user.email, 'create_asset', `Added asset: ${req.body.name}`, req.session.user.tenant_id, req);
   res.redirect('/org/assets');
 }));
 
@@ -18146,14 +18147,14 @@ app.post('/org/assets/:id/depreciate', requireAuth, requireNotBanned, ah(async (
   if (!asset) return res.status(404).send('Not found');
   const newVal = Math.max(0, Math.round(asset.current_value * (1 - (asset.depreciation_rate||10)/100)));
   await pool.query('UPDATE assets SET current_value=$1 WHERE id=$2 AND tenant_id=$3', [newVal, req.params.id, t]);
-  await audit(req.session.user.email, 'depreciate_asset', `Depreciated asset: ${asset.name} to UGX ${newVal}`);
+  await audit(req.session.user.email, 'depreciate_asset', `Depreciated asset: ${asset.name} to UGX ${newVal}`, req.session.user.tenant_id, req);
   res.redirect('/org/assets');
 }));
 
 app.post('/org/assets/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM assets WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-  await audit(req.session.user.email, 'delete_asset', `Deleted asset ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_asset', `Deleted asset ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/org/assets');
 }));
 
@@ -18210,7 +18211,7 @@ app.get('/org/partners/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/partners/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO partners(tenant_id,name,type,email,phone,organization,engagement_score,last_contact,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, req.body.name, req.body.type, req.body.email, req.body.phone, req.body.organization, req.body.engagement_score||0, req.body.last_contact||null, req.body.notes]);
-  await audit(req.session.user.email, 'create_partner', `Added partner: ${req.body.name} (${req.body.type})`);
+  await audit(req.session.user.email, 'create_partner', `Added partner: ${req.body.name} (${req.body.type})`, req.session.user.tenant_id, req);
   res.redirect('/org/partners');
 }));
 
@@ -18234,14 +18235,14 @@ app.post('/org/partners/:id/update', requireAuth, requireNotBanned, ah(async (re
   const t = req.session.user.tenant_id;
   const { name, email, phone, type, organization, engagement_score, last_contact, notes } = req.body;
   await pool.query('UPDATE partners SET name=$1,email=$2,phone=$3,type=$4,organization=$5,engagement_score=$6,last_contact=$7,notes=$8 WHERE id=$9 AND tenant_id=$10', [name, email, phone, type, organization, engagement_score||0, last_contact||null, notes, req.params.id, t]);
-  await audit(req.session.user.email, 'update_partner', `Updated partner: ${name}`);
+  await audit(req.session.user.email, 'update_partner', `Updated partner: ${name}`, req.session.user.tenant_id, req);
   res.redirect('/org/partners');
 }));
 
 app.post('/org/partners/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM partners WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-  await audit(req.session.user.email, 'delete_partner', `Deleted partner ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_partner', `Deleted partner ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/org/partners');
 }));
 
@@ -18280,7 +18281,7 @@ app.get('/org/ticketing/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/ticketing/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO ticketed_events(tenant_id,title,description,event_date,venue,capacity,price,qr_enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, req.body.title, req.body.description, req.body.event_date, req.body.venue, req.body.capacity||100, req.body.price||0, req.body.qr_enabled==='on']);
-  await audit(req.session.user.email, 'create_ticketed_event', `Created ticketed event: ${req.body.title}`);
+  await audit(req.session.user.email, 'create_ticketed_event', `Created ticketed event: ${req.body.title}`, req.session.user.tenant_id, req);
   res.redirect('/org/ticketing');
 }));
 
@@ -18312,7 +18313,7 @@ app.post('/org/ticketing/:id/register/save', requireAuth, requireNotBanned, ah(a
     await client.query('UPDATE ticketed_events SET tickets_sold=tickets_sold+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
     await client.query('COMMIT');
   } catch(e) { await client.query('ROLLBACK'); } finally { client.release(); }
-  await audit(req.session.user.email, 'ticket_register', `Registered ${req.body.attendee_name} for event ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'ticket_register', `Registered ${req.body.attendee_name} for event ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect(`/org/ticketing/${req.params.id}/tickets`);
 }));
 
@@ -18330,7 +18331,7 @@ app.get('/org/ticketing/:id/tickets', requireAuth, requireNotBanned, ah(async (r
 app.post('/org/ticketing/ticket/:id/checkin', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('UPDATE event_tickets SET checked_in=true, checked_in_at=NOW() WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-  await audit(req.session.user.email, 'ticket_checkin', `Checked in ticket ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'ticket_checkin', `Checked in ticket ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('back');
 }));
 
@@ -18338,7 +18339,7 @@ app.post('/org/ticketing/:id/delete', requireAuth, requireNotBanned, ah(async (r
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM event_tickets WHERE event_id=$1 AND tenant_id=$2', [req.params.id, t]);
   await pool.query('DELETE FROM ticketed_events WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-  await audit(req.session.user.email, 'delete_ticketed_event', `Deleted ticketed event ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_ticketed_event', `Deleted ticketed event ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/org/ticketing');
 }));
 
@@ -18384,7 +18385,7 @@ app.post('/org/members/import/save', requireAuth, requireNotBanned, ah(async (re
       imported++;
     } catch(e) { skipped++; }
   }
-  await audit(req.session.user.email, 'import_members', `Imported ${imported} members (${skipped} skipped)`);
+  await audit(req.session.user.email, 'import_members', `Imported ${imported} members (${skipped} skipped)`, req.session.user.tenant_id, req);
   res.send(renderPage('Import Results', `<div class="card" style="max-width:500px;margin:0 auto;text-align:center"><h2>Import Complete</h2>
     <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#059669">${imported}</div><div>Imported</div></div><div class="stat-card"><div class="stat-num" style="color:#f59e0b">${skipped}</div><div>Skipped</div></div></div>
     <a href="/org/members" class="btn" style="margin-top:15px">View Members</a></div>
@@ -18421,7 +18422,7 @@ app.post('/org/committees/save', requireAuth, requireNotBanned, ah(async (req, r
   const t = req.session.user.tenant_id;
   const { name, description, chairperson } = req.body;
   await pool.query('INSERT INTO committees(tenant_id,name,description,chairperson) VALUES($1,$2,$3,$4)', [t, name, description, chairperson]);
-  await audit(req.session.user.email, 'create_committee', `Created committee: ${name}`);
+  await audit(req.session.user.email, 'create_committee', `Created committee: ${name}`, req.session.user.tenant_id, req);
   res.redirect('/org/committees');
 }));
 
@@ -18447,14 +18448,14 @@ app.post('/org/committees/:id/add', requireAuth, requireNotBanned, ah(async (req
   const t = req.session.user.tenant_id;
   const { member_id, role } = req.body;
   await pool.query('INSERT INTO committee_members(tenant_id,committee_id,member_id,role) VALUES($1,$2,$3,$4) ON CONFLICT (committee_id,member_id) DO NOTHING', [t, req.params.id, member_id, role || 'member']);
-  await audit(req.session.user.email, 'add_committee_member', `Added member ${member_id} to committee ${req.params.id}`);
+  await audit(req.session.user.email, 'add_committee_member', `Added member ${member_id} to committee ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect(`/org/committees/${req.params.id}`);
 }));
 
 app.post('/org/committees/:id/remove/:memberId', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM committee_members WHERE committee_id=$1 AND member_id=$2 AND tenant_id=$3', [req.params.id, req.params.memberId, t]);
-  await audit(req.session.user.email, 'remove_committee_member', `Removed member ${req.params.memberId} from committee ${req.params.id}`);
+  await audit(req.session.user.email, 'remove_committee_member', `Removed member ${req.params.memberId} from committee ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect(`/org/committees/${req.params.id}`);
 }));
 
@@ -18462,7 +18463,7 @@ app.post('/org/committees/:id/delete', requireAuth, requireNotBanned, ah(async (
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM committee_members WHERE committee_id=$1 AND tenant_id=$2', [req.params.id, t]);
   await pool.query('DELETE FROM committees WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-  await audit(req.session.user.email, 'delete_committee', `Deleted committee ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_committee', `Deleted committee ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/org/committees');
 }));
 
@@ -18512,14 +18513,14 @@ app.post('/org/finance/categories/save', requireAuth, requireNotBanned, ah(async
   const t = req.session.user.tenant_id;
   const { name, type, budget_amount } = req.body;
   await pool.query('INSERT INTO finance_categories(tenant_id,name,type,budget_amount) VALUES($1,$2,$3,$4)', [t, name, type, budget_amount || 0]);
-  await audit(req.session.user.email, 'create_finance_category', `Added category: ${name} (${type})`);
+  await audit(req.session.user.email, 'create_finance_category', `Added category: ${name} (${type})`, req.session.user.tenant_id, req);
   res.redirect('/org/finance/categories');
 }));
 
 app.post('/org/finance/categories/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM finance_categories WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-  await audit(req.session.user.email, 'delete_finance_category', `Deleted category ID: ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_finance_category', `Deleted category ID: ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/org/finance/categories');
 }));
 
@@ -18566,7 +18567,7 @@ app.post('/org/events/rsvp/:id/save', requireAuth, requireNotBanned, ah(async (r
   const rsvpName = name || (member_id ? (await pool.query('SELECT name FROM members WHERE id=$1 AND tenant_id=$2', [member_id, t])).rows[0]?.name : null);
   if (!rsvpName) return res.status(400).send('Name or member required');
   await pool.query('INSERT INTO event_rsvps(tenant_id,event_id,member_id,name,response) VALUES($1,$2,$3,$4,$5)', [t, req.params.id, member_id || null, rsvpName, response || 'yes']);
-  await audit(req.session.user.email, 'event_rsvp', `RSVP ${response} for ${rsvpName} on event ${req.params.id}`);
+  await audit(req.session.user.email, 'event_rsvp', `RSVP ${response} for ${rsvpName} on event ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect(`/org/events/rsvp/${req.params.id}`);
 }));
 
@@ -18648,7 +18649,7 @@ app.post('/org/tasks/save', requireAuth, requireNotBanned, ah(async (req, res) =
   const t = req.session.user.tenant_id;
   const { title, description, assigned_to, priority, status, due_date } = req.body;
   await pool.query('INSERT INTO org_tasks(tenant_id,title,description,assigned_to,assigned_by,priority,status,due_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, title, description || null, assigned_to || null, req.session.user.email, priority || 'medium', status || 'pending', due_date || null]);
-  await audit(req.session.user.email, 'create_task', `Created task: ${title}`);
+  await audit(req.session.user.email, 'create_task', `Created task: ${title}`, req.session.user.tenant_id, req);
   // Notify the assignee if assigned
   if (assigned_to) {
     const assignee = (await pool.query('SELECT email FROM members WHERE id=$1 AND tenant_id=$2', [assigned_to, t])).rows[0];
@@ -18724,7 +18725,7 @@ app.post('/org/tasks/:id/status', requireAuth, requireNotBanned, ah(async (req, 
   } else {
     await pool.query('UPDATE org_tasks SET status=$1, completed_at=NULL WHERE id=$2 AND tenant_id=$3', [status, req.params.id, t]);
   }
-  await audit(req.session.user.email, 'update_task_status', `Task ${req.params.id} status -> ${status}`);
+  await audit(req.session.user.email, 'update_task_status', `Task ${req.params.id} status -> ${status}`, req.session.user.tenant_id, req);
   // Mark overdue tasks
   if (status === 'completed') {
     await pool.query("UPDATE org_tasks SET status='completed' WHERE id=$1 AND tenant_id=$2 AND due_date < CURRENT_DATE AND status='overdue'", [req.params.id, t]);
@@ -18745,7 +18746,7 @@ app.post('/org/tasks/:id/update', requireAuth, requireNotBanned, ah(async (req, 
       await pool.query('INSERT INTO org_notifications(tenant_id,user_email,title,message,link) VALUES($1,$2,$3,$4,$5)', [t, assignee.email, 'Task Reassigned', `You have been reassigned to a task. Check your tasks.`, `/org/tasks/${req.params.id}`]);
     }
   }
-  await audit(req.session.user.email, 'update_task', `Updated task ${req.params.id}`);
+  await audit(req.session.user.email, 'update_task', `Updated task ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect(`/org/tasks/${req.params.id}`);
 }));
 
@@ -18754,7 +18755,7 @@ app.post('/org/tasks/:id/comment', requireAuth, requireNotBanned, ah(async (req,
   const { comment } = req.body;
   if (!comment || !comment.trim()) return res.redirect(`/org/tasks/${req.params.id}`);
   await pool.query('INSERT INTO org_task_comments(tenant_id,task_id,comment,commented_by) VALUES($1,$2,$3,$4)', [t, req.params.id, comment, req.session.user.email]);
-  await audit(req.session.user.email, 'task_comment', `Commented on task ${req.params.id}`);
+  await audit(req.session.user.email, 'task_comment', `Commented on task ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect(`/org/tasks/${req.params.id}`);
 }));
 
@@ -18762,7 +18763,7 @@ app.post('/org/tasks/:id/delete', requireAuth, requireNotBanned, ah(async (req, 
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM org_task_comments WHERE task_id=$1 AND tenant_id=$2', [req.params.id, t]);
   await pool.query('DELETE FROM org_tasks WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-  await audit(req.session.user.email, 'delete_task', `Deleted task ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_task', `Deleted task ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/org/tasks');
 }));
 
@@ -18858,7 +18859,7 @@ app.post('/org/committees/:id/update', requireAuth, requireNotBanned, ah(async (
   const t = req.session.user.tenant_id;
   const { name, description, chairperson, meeting_day, meeting_time } = req.body;
   await pool.query('UPDATE committees SET name=$1,description=$2,chairperson=$3,meeting_day=$4,meeting_time=$5 WHERE id=$6 AND tenant_id=$7', [name, description || null, chairperson || null, meeting_day || null, meeting_time || null, req.params.id, t]);
-  await audit(req.session.user.email, 'update_committee', `Updated committee: ${name}`);
+  await audit(req.session.user.email, 'update_committee', `Updated committee: ${name}`, req.session.user.tenant_id, req);
   res.redirect(`/org/committees/${req.params.id}`);
 }));
 
@@ -18996,7 +18997,7 @@ app.post('/org/settings/save', requireAuth, requireNotBanned, ah(async (req, res
   const { name, email, phone, address, description, logo_url } = req.body;
   if (!name || !name.trim()) return res.status(400).send('Organization name is required');
   await pool.query('UPDATE tenants SET name=$1,email=$2,phone=$3,address=$4,description=$5,logo_url=$6 WHERE id=$7', [name.trim(), email||null, phone||null, address||null, description||null, logo_url||null, t]);
-  await audit(req.session.user.email, 'update_org_settings', `Updated organization profile`);
+  await audit(req.session.user.email, 'update_org_settings', `Updated organization profile`, req.session.user.tenant_id, req);
   res.redirect('/org/settings');
 }));
 
@@ -19007,7 +19008,7 @@ app.post('/org/settings/features', requireAuth, requireNotBanned, ah(async (req,
     const enabled = !!req.body['feature_' + f.feature_name];
     await pool.query('UPDATE feature_flags SET is_enabled=$1 WHERE tenant_id=$2 AND feature_name=$3', [enabled, t, f.feature_name]);
   }
-  await audit(req.session.user.email, 'update_feature_flags', `Updated feature flags`);
+  await audit(req.session.user.email, 'update_feature_flags', `Updated feature flags`, req.session.user.tenant_id, req);
   res.redirect('/org/settings');
 }));
 
@@ -19173,7 +19174,7 @@ app.post('/org/members/bulk/action', requireAuth, requireNotBanned, ah(async (re
   } else {
     return res.status(400).send('Invalid action');
   }
-  await audit(req.session.user.email, 'bulk_action', `${bulk_action}: ${resultMsg}`);
+  await audit(req.session.user.email, 'bulk_action', `${bulk_action}: ${resultMsg}`, req.session.user.tenant_id, req);
   res.send(renderPage('Bulk Action Complete', `
     <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
       <div class="alert alert-success">${resultMsg}</div>
@@ -19365,7 +19366,7 @@ app.post('/org/attachments/upload', requireAuth, requireNotBanned, ah(async (req
   if (!VALID_ENTITIES.includes(entity_type)) return res.status(400).send('Invalid entity type');
   if (!file_url || !file_name) return res.status(400).send('File URL and name required');
   await pool.query('INSERT INTO org_attachments(tenant_id,entity_type,entity_id,file_name,file_url,file_type,uploaded_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, entity_type, entity_id, file_name, file_url, file_type||null, req.session.user.email]);
-  await audit(req.session.user.email, 'upload_attachment', `Attached ${file_name} to ${entity_type} ${entity_id}`);
+  await audit(req.session.user.email, 'upload_attachment', `Attached ${file_name} to ${entity_type} ${entity_id}`, req.session.user.tenant_id, req);
   res.redirect('back');
 }));
 
@@ -19374,7 +19375,7 @@ app.get('/org/attachments/:id/delete', requireAuth, requireNotBanned, ah(async (
   const att = (await pool.query('SELECT * FROM org_attachments WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!att) return res.status(404).send('Attachment not found');
   await pool.query('DELETE FROM org_attachments WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-  await audit(req.session.user.email, 'delete_attachment', `Deleted attachment ${att.file_name}`);
+  await audit(req.session.user.email, 'delete_attachment', `Deleted attachment ${att.file_name}`, req.session.user.tenant_id, req);
   res.redirect('back');
 }));
 
@@ -19395,7 +19396,7 @@ app.post('/org/meetings/:id/action-items/save', requireAuth, requireNotBanned, a
   const { description, assigned_to, due_date } = req.body;
   if (!description) return res.status(400).send('Description required');
   await pool.query('INSERT INTO meeting_action_items(tenant_id,meeting_id,description,assigned_to,due_date) VALUES($1,$2,$3,$4,$5)', [t, req.params.id, description, assigned_to||null, due_date||null]);
-  await audit(req.session.user.email, 'create_action_item', `Created action item for meeting ${req.params.id}`);
+  await audit(req.session.user.email, 'create_action_item', `Created action item for meeting ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect(`/org/meetings/${req.params.id}`);
 }));
 
@@ -19409,14 +19410,14 @@ app.post('/org/meetings/action-items/:id/status', requireAuth, requireNotBanned,
   } else {
     await pool.query('UPDATE meeting_action_items SET status=$1, completed_at=NULL WHERE id=$2 AND tenant_id=$3', [status, req.params.id, t]);
   }
-  await audit(req.session.user.email, 'update_action_item', `Action item ${req.params.id} -> ${status}`);
+  await audit(req.session.user.email, 'update_action_item', `Action item ${req.params.id} -> ${status}`, req.session.user.tenant_id, req);
   res.redirect('back');
 }));
 
 app.post('/org/meetings/action-items/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM meeting_action_items WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-  await audit(req.session.user.email, 'delete_action_item', `Deleted action item ${req.params.id}`);
+  await audit(req.session.user.email, 'delete_action_item', `Deleted action item ${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('back');
 }));
 
@@ -19641,7 +19642,7 @@ app.post('/org/roles/:memberId/update', requireAuth, requireNotBanned, ah(async 
     can_manage_members === 'on' || can_manage_members === 'true', can_manage_events === 'on' || can_manage_events === 'true',
     req.params.memberId, t
   ]);
-  await audit(req.session.user.email, 'update_member_roles', `Updated permissions for ${member.name}`);
+  await audit(req.session.user.email, 'update_member_roles', `Updated permissions for ${member.name}`, req.session.user.tenant_id, req);
   res.redirect('/org/roles');
 }));
 
@@ -19718,7 +19719,7 @@ app.post('/org/notifications/send-reminder', requireAuth, requireNotBanned, ah(a
   const { email, title, message, link } = req.body;
   if (!email || !title) return res.status(400).send('Email and title required');
   await pool.query('INSERT INTO org_notifications(tenant_id,user_email,title,message,link) VALUES($1,$2,$3,$4,$5)', [t, email, title, message||'', link||'']);
-  await audit(req.session.user.email, 'send_reminder', `Sent reminder to ${email}: ${title}`);
+  await audit(req.session.user.email, 'send_reminder', `Sent reminder to ${email}: ${title}`, req.session.user.tenant_id, req);
   res.redirect('/org/reminders');
 }));
 
@@ -19871,7 +19872,7 @@ app.get('/org/reports/members/pdf', requireAuth, requireNotBanned, ah(async (req
     y += 16;
   }
   doc.end();
-  await audit(req.session.user.email, 'export_pdf', 'Generated members PDF report');
+  await audit(req.session.user.email, 'export_pdf', 'Generated members PDF report', req.session.user.tenant_id, req);
 }));
 
 app.get('/org/reports/finance/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -19911,7 +19912,7 @@ app.get('/org/reports/finance/pdf', requireAuth, requireNotBanned, ah(async (req
     y += 14;
   }
   doc.end();
-  await audit(req.session.user.email, 'export_pdf', 'Generated finance PDF report');
+  await audit(req.session.user.email, 'export_pdf', 'Generated finance PDF report', req.session.user.tenant_id, req);
 }));
 
 app.get('/org/reports/tasks/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -19949,7 +19950,7 @@ app.get('/org/reports/tasks/pdf', requireAuth, requireNotBanned, ah(async (req, 
     y += 14;
   }
   doc.end();
-  await audit(req.session.user.email, 'export_pdf', 'Generated tasks PDF report');
+  await audit(req.session.user.email, 'export_pdf', 'Generated tasks PDF report', req.session.user.tenant_id, req);
 }));
 
 app.get('/org/reports/events/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -19982,7 +19983,7 @@ app.get('/org/reports/events/pdf', requireAuth, requireNotBanned, ah(async (req,
     y += 14;
   }
   doc.end();
-  await audit(req.session.user.email, 'export_pdf', 'Generated events PDF report');
+  await audit(req.session.user.email, 'export_pdf', 'Generated events PDF report', req.session.user.tenant_id, req);
 }));
 
 app.get('/org/reports/attendance/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -20016,7 +20017,7 @@ app.get('/org/reports/attendance/pdf', requireAuth, requireNotBanned, ah(async (
     y += 14;
   }
   doc.end();
-  await audit(req.session.user.email, 'export_pdf', 'Generated attendance PDF report');
+  await audit(req.session.user.email, 'export_pdf', 'Generated attendance PDF report', req.session.user.tenant_id, req);
 }));
 
 app.get('/org/reports/churn/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -20078,7 +20079,7 @@ app.get('/org/reports/churn/pdf', requireAuth, requireNotBanned, ah(async (req, 
     y += 14;
   }
   doc.end();
-  await audit(req.session.user.email, 'export_pdf', 'Generated churn risk PDF report');
+  await audit(req.session.user.email, 'export_pdf', 'Generated churn risk PDF report', req.session.user.tenant_id, req);
 }));
 
 // === V6: MEETING MINUTES ===
@@ -20133,7 +20134,7 @@ app.post('/org/minutes/save', requireAuth, requireNotBanned, ah(async (req, res)
   const member = (await pool.query('SELECT id FROM members WHERE tenant_id=$1 AND email=$2', [t, req.session.user.email])).rows[0];
   await pool.query('INSERT INTO org_meeting_minutes(tenant_id,title,meeting_date,meeting_type,venue,agenda,content,decisions,action_items,attendee_count,recorded_by,next_meeting_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
     [t, title, meeting_date, meeting_type||'General', venue||'', agenda||'', content, decisions||'', action_items||'', attendees.length, member?.id||null, next_meeting_date||null]);
-  await audit(req.session.user.email, 'create_minutes', 'Recorded meeting minutes: ' + title);
+  await audit(req.session.user.email, 'create_minutes', 'Recorded meeting minutes: ' + title, req.session.user.tenant_id, req);
   res.redirect('/org/minutes');
 }));
 
@@ -20188,7 +20189,7 @@ app.post('/org/minutes/:id/update', requireAuth, requireNotBanned, ah(async (req
   const { title, meeting_date, meeting_type, venue, agenda, content, decisions, action_items, next_meeting_date } = req.body;
   await pool.query('UPDATE org_meeting_minutes SET title=$1,meeting_date=$2,meeting_type=$3,venue=$4,agenda=$5,content=$6,decisions=$7,action_items=$8,next_meeting_date=$9 WHERE tenant_id=$10 AND id=$11',
     [title, meeting_date, meeting_type||'General', venue||'', agenda||'', content, decisions||'', action_items||'', next_meeting_date||null, t, req.params.id]);
-  await audit(req.session.user.email, 'update_minutes', 'Updated minutes: ' + title);
+  await audit(req.session.user.email, 'update_minutes', 'Updated minutes: ' + title, req.session.user.tenant_id, req);
   res.redirect('/org/minutes/' + req.params.id);
 }));
 
@@ -20243,7 +20244,7 @@ app.post('/org/surveys/save', requireAuth, requireNotBanned, ah(async (req, res)
   const questionsArr = questions.split('\n').map(q => q.trim()).filter(Boolean);
   await pool.query('INSERT INTO org_surveys(tenant_id,title,description,survey_type,is_anonymous,questions,is_active,closes_at,max_responses) VALUES($1,$2,$3,$4,$5,$6,true,$7,$8)',
     [t, title, description||'', survey_type||'survey', is_anonymous==='true', JSON.stringify(questionsArr), closes_at||null, max_responses?parseInt(max_responses):null]);
-  await audit(req.session.user.email, 'create_survey', 'Created survey: ' + title);
+  await audit(req.session.user.email, 'create_survey', 'Created survey: ' + title, req.session.user.tenant_id, req);
   res.redirect('/org/surveys');
 }));
 
@@ -20291,14 +20292,14 @@ app.post('/org/surveys/:id/respond', requireAuth, requireNotBanned, ah(async (re
   const existing = (await pool.query('SELECT id FROM org_survey_responses WHERE survey_id=$1 AND respondent_email=$2', [survey.id, req.session.user.email])).rows[0];
   if (existing && !survey.is_anonymous) return res.status(400).send('You have already responded to this survey');
   await pool.query('INSERT INTO org_survey_responses(survey_id,respondent_email,answers) VALUES($1,$2,$3)', [survey.id, req.session.user.email, JSON.stringify(answers)]);
-  await audit(req.session.user.email, 'survey_response', 'Responded to survey: ' + survey.title);
+  await audit(req.session.user.email, 'survey_response', 'Responded to survey: ' + survey.title, req.session.user.tenant_id, req);
   res.redirect('/org/surveys/' + survey.id);
 }));
 
 app.get('/org/surveys/:id/close', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('UPDATE org_surveys SET is_active=false WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
-  await audit(req.session.user.email, 'close_survey', 'Closed survey ID: ' + req.params.id);
+  await audit(req.session.user.email, 'close_survey', 'Closed survey ID: ' + req.params.id, req.session.user.tenant_id, req);
   res.redirect('/org/surveys');
 }));
 
@@ -20365,7 +20366,7 @@ app.post('/org/discussions/save', requireAuth, requireNotBanned, ah(async (req, 
   const t = req.session.user.tenant_id;
   const { title, category, content } = req.body;
   await pool.query('INSERT INTO org_discussions(tenant_id,title,category,content,author_email) VALUES($1,$2,$3,$4,$5)', [t, title, category||'General', content, req.session.user.email]);
-  await audit(req.session.user.email, 'create_discussion', 'Started discussion: ' + title);
+  await audit(req.session.user.email, 'create_discussion', 'Started discussion: ' + title, req.session.user.tenant_id, req);
   res.redirect('/org/discussions');
 }));
 
@@ -20413,7 +20414,7 @@ app.get('/org/discussions/:id/delete', requireAuth, requireNotBanned, ah(async (
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM org_discussion_replies WHERE discussion_id=$1', [req.params.id]);
   await pool.query('DELETE FROM org_discussions WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
-  await audit(req.session.user.email, 'delete_discussion', 'Deleted discussion ID: ' + req.params.id);
+  await audit(req.session.user.email, 'delete_discussion', 'Deleted discussion ID: ' + req.params.id, req.session.user.tenant_id, req);
   res.redirect('/org/discussions');
 }));
 
@@ -20460,7 +20461,7 @@ app.get('/org/tasks/:id', requireAuth, requireNotBanned, ah(async (req, res) => 
   const newStatus = req.query.status;
   if (newStatus && ['todo','in_progress','review','completed'].includes(newStatus)) {
     await pool.query('UPDATE org_tasks SET status=$1 WHERE tenant_id=$2 AND id=$3', [newStatus, t, req.params.id]);
-    await audit(req.session.user.email, 'update_task_status', 'Task #' + req.params.id + ' -> ' + newStatus);
+    await audit(req.session.user.email, 'update_task_status', 'Task #' + req.params.id + ' -> ' + newStatus, req.session.user.tenant_id, req);
   }
   res.redirect('/org/tasks/board');
 }));
@@ -20533,7 +20534,7 @@ app.post('/org/templates/save', requireAuth, requireNotBanned, ah(async (req, re
   const t = req.session.user.tenant_id;
   const { name, template_type, subject, body } = req.body;
   await pool.query('INSERT INTO org_email_templates(tenant_id,name,template_type,subject,body) VALUES($1,$2,$3,$4,$5)', [t, name, template_type||'custom', subject||'', body]);
-  await audit(req.session.user.email, 'create_template', 'Created email template: ' + name);
+  await audit(req.session.user.email, 'create_template', 'Created email template: ' + name, req.session.user.tenant_id, req);
   res.redirect('/org/templates');
 }));
 
@@ -20564,7 +20565,7 @@ app.post('/org/templates/:id/update', requireAuth, requireNotBanned, ah(async (r
 app.get('/org/templates/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM org_email_templates WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
-  await audit(req.session.user.email, 'delete_template', 'Deleted email template ID: ' + req.params.id);
+  await audit(req.session.user.email, 'delete_template', 'Deleted email template ID: ' + req.params.id, req.session.user.tenant_id, req);
   res.redirect('/org/templates');
 }));
 
@@ -20619,7 +20620,7 @@ app.post('/org/broadcast/send', requireAuth, requireNotBanned, ah(async (req, re
     }
   }
   await pool.query('INSERT INTO org_broadcasts(tenant_id,subject,message,channel,priority,target,recipient_count) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, subject, message, channel||'notification', priority||'normal', target||'all', notified]);
-  await audit(req.session.user.email, 'broadcast', 'Sent broadcast "' + subject + '" to ' + notified + ' recipients');
+  await audit(req.session.user.email, 'broadcast', 'Sent broadcast "' + subject + '" to ' + notified + ' recipients', req.session.user.tenant_id, req);
   res.redirect('/org/broadcast');
 }));
 
@@ -20692,7 +20693,7 @@ app.post('/org/backup/create', requireAuth, requireNotBanned, ah(async (req, res
   const jsonStr = JSON.stringify(backup, null, 2);
   const fileSize = Buffer.byteLength(jsonStr);
   await pool.query('INSERT INTO org_data_backups(tenant_id,description,record_count,file_size) VALUES($1,$2,$3,$4)', [t, description, totalRecords, fileSize]);
-  await audit(req.session.user.email, 'create_backup', 'Created backup with ' + totalRecords + ' records');
+  await audit(req.session.user.email, 'create_backup', 'Created backup with ' + totalRecords + ' records', req.session.user.tenant_id, req);
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Content-Disposition', 'attachment; filename="org_backup_${t}_${Date.now()}.json"');
   res.send(jsonStr);
@@ -21457,7 +21458,7 @@ app.post('/bulk/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const allowed = ['students','church_members','inventory'];
   if (!allowed.includes(entity)) return res.status(400).send('Invalid entity');
   const result = await pool.query(`DELETE FROM ${entity} WHERE tenant_id=$1${req.body.filter==='inactive'?' AND active=false':''}`, [t]);
-  await audit(req.session.user.email, 'Bulk delete', `${entity}: ${result.rowCount} records`);
+  await audit(req.session.user.email, 'Bulk delete', `${entity}: ${result.rowCount} records`, req.session.user.tenant_id, req);
   res.redirect('/bulk');
 }));
 
@@ -21759,7 +21760,7 @@ app.post('/clinic/staff/save', requireAuth, requireNotBanned, requireFeature('cl
   const t = req.session.user.tenant_id;
   const { name, role, specialization, license_no, email, phone, department } = req.body;
   await pool.query('INSERT INTO clinic_staff(tenant_id,name,role,specialization,license_no,email,phone,department) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, name, role||'doctor', specialization||null, license_no||null, email||null, phone||null, department||null]);
-  await audit(req.session.user.email, 'Add clinic staff', name);
+  await audit(req.session.user.email, 'Add clinic staff', name, req.session.user.tenant_id, req);
   res.redirect('/clinic/staff?role='+(role||'doctor'));
 }));
 
@@ -21951,7 +21952,7 @@ app.post('/clinic/prescription/save', requireAuth, requireNotBanned, requireFeat
         }
         i++;
       }
-      await audit(req.session.user.email, 'Prescription with interaction warning', `Rx #${rxId} for ${patient_name}: ${interactions.length} interaction(s)`);
+      await audit(req.session.user.email, 'Prescription with interaction warning', `Rx #${rxId} for ${patient_name}: ${interactions.length} interaction(s)`, req.session.user.tenant_id, req);
       res.redirect('/clinic/prescriptions');
       return;
     }
@@ -21974,7 +21975,7 @@ app.post('/clinic/prescription/save', requireAuth, requireNotBanned, requireFeat
         }
         i++;
       }
-      await audit(req.session.user.email, 'Prescription allergy warning', `Rx #${rxId}: ${matchedAllergies.join(', ')}`);
+      await audit(req.session.user.email, 'Prescription allergy warning', `Rx #${rxId}: ${matchedAllergies.join(', ')}`, req.session.user.tenant_id, req);
       res.redirect('/clinic/prescriptions');
       return;
     }
@@ -21990,7 +21991,7 @@ app.post('/clinic/prescription/save', requireAuth, requireNotBanned, requireFeat
     }
     i++;
   }
-  await audit(req.session.user.email, 'Prescription created', `Rx #${rxId} for ${patient_name}`);
+  await audit(req.session.user.email, 'Prescription created', `Rx #${rxId} for ${patient_name}`, req.session.user.tenant_id, req);
   res.redirect('/clinic/prescriptions');
 }));
 
@@ -22075,7 +22076,7 @@ app.post('/clinic/prescriptions/:id/dispense/save', requireAuth, requireNotBanne
     await pool.query('INSERT INTO pharmacy_dispensing(tenant_id,prescription_id,item_id,pharmacist_id,patient_name,medicine_name,dosage,quantity_dispensed,batch_number,expiry_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, req.params.id, item.id, pharmacist_id, (await pool.query('SELECT patient_name FROM prescriptions WHERE id=$1',[req.params.id])).rows[0]?.patient_name||'', item.medicine_name, item.dosage, qty, batch, expiry, notes||null]);
   }
   await pool.query("UPDATE prescriptions SET status='dispensed' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
-  await audit(req.session.user.email, 'Prescription dispensed', `Rx #${req.params.id}`);
+  await audit(req.session.user.email, 'Prescription dispensed', `Rx #${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/clinic/prescriptions');
 }));
 
@@ -22165,7 +22166,7 @@ app.post('/clinic/lab/:id/result/save', requireAuth, requireNotBanned, requireFe
   await pool.query('INSERT INTO lab_results(tenant_id,lab_request_id,lab_technician_id,result_value,result_numeric,unit,reference_range,interpretation,is_abnormal,verified_by,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, req.params.id, lab_technician_id, result_value, result_numeric||null, unit||null, reference_range||null, interpretation||null, is_abnormal?true:false, verified_by||null, notes||null]);
   if (verified_by) await pool.query('UPDATE lab_results SET verified_at=NOW() WHERE lab_request_id=$1 AND verified_by IS NOT NULL', [req.params.id]);
   await pool.query("UPDATE lab_requests SET status='completed' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
-  await audit(req.session.user.email, 'Lab result recorded', `Test #${req.params.id}`);
+  await audit(req.session.user.email, 'Lab result recorded', `Test #${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/clinic/lab?status=completed');
 }));
 
@@ -22340,7 +22341,7 @@ app.post('/clinic/referrals/save', requireAuth, requireNotBanned, requireFeature
   const t = req.session.user.tenant_id;
   const { patient_name, patient_id, patient_type, referring_doctor, receiving_facility, receiving_facility_contact, referral_category, urgency, reason, clinical_notes, diagnosis, notes } = req.body;
   await pool.query('INSERT INTO referrals(tenant_id,patient_name,patient_id,patient_type,referring_doctor,receiving_facility,receiving_facility_contact,referral_category,urgency,reason,clinical_notes,diagnosis,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)', [t, patient_name, patient_id||null, patient_type||'student', referring_doctor||null, receiving_facility, receiving_facility_contact||null, referral_category||'specialist', urgency||'routine', reason, clinical_notes||null, diagnosis||null, notes||null]);
-  await audit(req.session.user.email, 'Referral created', `Patient: ${patient_name} to ${receiving_facility}`);
+  await audit(req.session.user.email, 'Referral created', `Patient: ${patient_name} to ${receiving_facility}`, req.session.user.tenant_id, req);
   req.flash && req.flash('success', 'Referral submitted successfully');
   res.redirect('/clinic/referrals');
 }));
@@ -22386,7 +22387,7 @@ app.post('/clinic/referrals/:id/accept', requireAuth, requireNotBanned, requireF
   const ref = (await pool.query('SELECT * FROM referrals WHERE tenant_id=$1 AND id=$2 AND status=$3', [t, req.params.id, 'pending'])).rows[0];
   if (!ref) return res.redirect('/clinic/referrals');
   await pool.query("UPDATE referrals SET status='accepted', accepted_by=$1, accepted_at=NOW() WHERE tenant_id=$2 AND id=$3", [req.session.user.name || req.session.user.email, t, req.params.id]);
-  await audit(req.session.user.email, 'Referral accepted', `Referral #${req.params.id}`);
+  await audit(req.session.user.email, 'Referral accepted', `Referral #${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/clinic/referrals/' + req.params.id);
 }));
 
@@ -22396,7 +22397,7 @@ app.post('/clinic/referrals/:id/complete', requireAuth, requireNotBanned, requir
   const ref = (await pool.query('SELECT * FROM referrals WHERE tenant_id=$1 AND id=$2 AND status=$3', [t, req.params.id, 'accepted'])).rows[0];
   if (!ref) return res.redirect('/clinic/referrals');
   await pool.query("UPDATE referrals SET status='completed', completed_at=NOW() WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
-  await audit(req.session.user.email, 'Referral completed', `Referral #${req.params.id}`);
+  await audit(req.session.user.email, 'Referral completed', `Referral #${req.params.id}`, req.session.user.tenant_id, req);
   res.redirect('/clinic/referrals/' + req.params.id);
 }));
 
@@ -22534,7 +22535,7 @@ app.post('/clinic/insurance/claim/save', requireAuth, requireNotBanned, requireF
   const { claim_number, patient_name, provider_id, service_type, diagnosis, total_amount, coverage_pct, patient_amount, notes } = req.body;
   const coveredAmount = Math.round((total_amount||0) * ((coverage_pct||80)/100));
   await pool.query('INSERT INTO insurance_claims(tenant_id,patient_name,provider_id,claim_number,service_type,diagnosis,total_amount,covered_amount,patient_amount,status,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, patient_name||null, provider_id||null, claim_number, service_type, diagnosis||null, total_amount||0, coveredAmount, patient_amount||0, 'submitted', req.session.user.email]);
-  await audit(req.session.user.email, 'Insurance claim submitted', `Claim: ${claim_number}, Amount: ${total_amount}`);
+  await audit(req.session.user.email, 'Insurance claim submitted', `Claim: ${claim_number}, Amount: ${total_amount}`, req.session.user.tenant_id, req);
   res.redirect('/clinic/insurance/claims');
 }));
 
@@ -22579,7 +22580,7 @@ app.post('/clinic/insurance/:id/verify', requireAuth, requireNotBanned, requireF
   const claim = (await pool.query('SELECT * FROM insurance_claims WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
   if (!claim) return res.redirect('/clinic/insurance/claims');
   await pool.query("UPDATE insurance_claims SET status='processing', processed_at=NOW() WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
-  await audit(req.session.user.email, 'Insurance claim verified', `Claim #${claim.claim_number||claim.id}`);
+  await audit(req.session.user.email, 'Insurance claim verified', `Claim #${claim.claim_number||claim.id}`, req.session.user.tenant_id, req);
   res.redirect('/clinic/insurance/' + req.params.id);
 }));
 
@@ -22594,7 +22595,7 @@ app.post('/clinic/insurance/:id/claim', requireAuth, requireNotBanned, requireFe
   else if (status === 'paid') { updates.push("status='paid'"); }
   params.push(t, req.params.id);
   await pool.query(`UPDATE insurance_claims SET ${updates.join(',')} WHERE tenant_id=$${params.length-1} AND id=$${params.length}`, params);
-  await audit(req.session.user.email, 'Insurance claim updated', `Claim #${req.params.id} → ${status}`);
+  await audit(req.session.user.email, 'Insurance claim updated', `Claim #${req.params.id} → ${status}`, req.session.user.tenant_id, req);
   res.redirect('/clinic/insurance/claims');
 }));
 
@@ -22680,7 +22681,7 @@ app.post('/clinic/telehealth/schedule/save', requireAuth, requireNotBanned, requ
   const meetingLink = `/telehealth/join/${meetingId}`;
   const doctorId = (await pool.query("SELECT id FROM clinic_staff WHERE tenant_id=$1 AND name=$2 AND role='doctor'", [t, doctor_name])).rows[0]?.id || null;
   await pool.query('INSERT INTO telehealth_consultations(tenant_id,patient_name,patient_id,patient_phone,doctor_id,doctor_name,scheduled_date,scheduled_time,duration_minutes,meeting_link,meeting_id,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [t, patient_name, patient_id||null, patient_phone||null, doctorId, doctor_name, scheduled_date, scheduled_time, duration_minutes||30, meetingLink, meetingId, notes||null]);
-  await audit(req.session.user.email, 'Telehealth scheduled', `Patient: ${patient_name}, Doctor: ${doctor_name}, ${scheduled_date} ${scheduled_time}`);
+  await audit(req.session.user.email, 'Telehealth scheduled', `Patient: ${patient_name}, Doctor: ${doctor_name}, ${scheduled_date} ${scheduled_time}`, req.session.user.tenant_id, req);
   res.redirect('/clinic/telehealth');
 }));
 
@@ -22747,7 +22748,7 @@ app.post('/clinic/telehealth/:id/start', requireAuth, requireNotBanned, requireF
   const session = (await pool.query('SELECT * FROM telehealth_consultations WHERE tenant_id=$1 AND id=$2 AND status=$3', [t, req.params.id, 'scheduled'])).rows[0];
   if (!session) return res.redirect('/clinic/telehealth');
   await pool.query("UPDATE telehealth_consultations SET status='in_progress', started_at=NOW() WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
-  await audit(req.session.user.email, 'Telehealth started', `Session #${req.params.id} with ${session.patient_name}`);
+  await audit(req.session.user.email, 'Telehealth started', `Session #${req.params.id} with ${session.patient_name}`, req.session.user.tenant_id, req);
   res.redirect('/clinic/telehealth/' + req.params.id);
 }));
 
@@ -22758,7 +22759,7 @@ app.post('/clinic/telehealth/:id/complete', requireAuth, requireNotBanned, requi
   if (!session) return res.redirect('/clinic/telehealth');
   const { subjective, objective, assessment, plan, notes } = req.body;
   await pool.query("UPDATE telehealth_consultations SET status='completed', ended_at=NOW(), subjective=$1, objective=$2, assessment=$3, plan=$4, notes=$5 WHERE tenant_id=$6 AND id=$7", [subjective||null, objective||null, assessment||null, plan||null, notes||session.notes||null, t, req.params.id]);
-  await audit(req.session.user.email, 'Telehealth completed', `Session #${req.params.id} with ${session.patient_name}`);
+  await audit(req.session.user.email, 'Telehealth completed', `Session #${req.params.id} with ${session.patient_name}`, req.session.user.tenant_id, req);
   res.redirect('/clinic/telehealth/' + req.params.id);
 }));
 
@@ -23114,7 +23115,7 @@ app.post('/clinic/reminders/save', requireAuth, requireNotBanned, requireFeature
      ON CONFLICT(tenant_id) DO UPDATE SET enabled=$2,hours_before=$3,sms_enabled=$4,whatsapp_enabled=$5,sms_template=$6,whatsapp_template=$7`,
     [t, enabled === 'on', parseInt(hours_before) || 24, sms_enabled === 'on', whatsapp_enabled === 'on', sms_template || '', whatsapp_template || '']
   );
-  await audit(req.session.user.email, 'reminder_settings_updated', { tenant_id: t });
+  await audit(req.session.user.email, 'reminder_settings_updated', { tenant_id: t }, req.session.user.tenant_id, req);
   req.flash('success', 'Reminder settings saved');
   res.redirect('/clinic/reminders');
 }));
@@ -23143,7 +23144,7 @@ app.post('/clinic/appointments/:id/remind', requireAuth, requireNotBanned, requi
     );
   }
   await pool.query('UPDATE clinic_appointments SET reminder_sent=true WHERE id=$1', [appt.id]);
-  await audit(req.session.user.email, 'appointment_reminder_sent', { appointment_id: appt.id, patient: appt.patient_name });
+  await audit(req.session.user.email, 'appointment_reminder_sent', { appointment_id: appt.id, patient: appt.patient_name }, req.session.user.tenant_id, req);
   req.flash('success', `Reminder sent to ${appt.patient_name} (${appt.phone})`);
   res.redirect('/clinic/appointments');
 }));
@@ -23181,7 +23182,7 @@ app.post('/clinic/reminders/send-all', requireAuth, requireNotBanned, requireFea
     await pool.query('UPDATE clinic_appointments SET reminder_sent=true WHERE id=$1', [appt.id]);
     sent++;
   }
-  await audit(req.session.user.email, 'bulk_reminders_sent', { count: sent, date: tomorrowStr });
+  await audit(req.session.user.email, 'bulk_reminders_sent', { count: sent, date: tomorrowStr }, req.session.user.tenant_id, req);
   req.flash('success', `${sent} reminder(s) sent for tomorrow's appointments`);
   res.redirect('/clinic/reminders');
 }));
@@ -23219,7 +23220,7 @@ app.get('/clinic/reminders/send-all', requireAuth, requireNotBanned, requireFeat
     await pool.query('UPDATE clinic_appointments SET reminder_sent=true WHERE id=$1', [appt.id]);
     sent++;
   }
-  await audit(req.session.user.email, 'bulk_reminders_sent', { count: sent, date: tomorrowStr });
+  await audit(req.session.user.email, 'bulk_reminders_sent', { count: sent, date: tomorrowStr }, req.session.user.tenant_id, req);
   req.flash('success', `${sent} reminder(s) sent for tomorrow's appointments`);
   res.redirect('/clinic/reminders');
 }));
@@ -23293,7 +23294,7 @@ app.post('/clinic/payment-settings/save', requireAuth, requireNotBanned, require
      ON CONFLICT(tenant_id) DO UPDATE SET flutterwave_public_key=$2,flutterwave_secret_key=$3,mobile_money_enabled=$4,card_enabled=$5,bank_enabled=$6,auto_send_receipt=$7,receipt_template=$8`,
     [t, flutterwave_public_key || null, flutterwave_secret_key || null, mobile_money_enabled === 'on', card_enabled === 'on', bank_enabled === 'on', auto_send_receipt === 'on', receipt_template || '']
   );
-  await audit(req.session.user.email, 'payment_settings_updated', { tenant_id: t });
+  await audit(req.session.user.email, 'payment_settings_updated', { tenant_id: t }, req.session.user.tenant_id, req);
   req.flash('success', 'Payment settings saved');
   res.redirect('/clinic/payment-settings');
 }));
@@ -23416,7 +23417,7 @@ app.post('/clinic/pay/:invoice_id/initiate', requireAuth, requireNotBanned, requ
     [t, invoice.id, patient_name || invoice.patient_name, phone, amountNum, 'UGX', payment_method || 'mobile_money', 'flutterwave', providerRef, 'pending']
   );
 
-  await audit(req.session.user.email, 'payment_initiated', { invoice_id: invoice.id, amount: amountNum, method: payment_method, ref: providerRef });
+  await audit(req.session.user.email, 'payment_initiated', { invoice_id: invoice.id, amount: amountNum, method: payment_method, ref: providerRef }, req.session.user.tenant_id, req);
 
   // Attempt Flutterwave integration (real API call if keys configured)
   const settings = (await pool.query('SELECT * FROM payment_settings WHERE tenant_id=$1', [t])).rows[0];
@@ -23471,7 +23472,7 @@ app.get('/clinic/pay/:invoice_id/verify', requireAuth, requireNotBanned, require
         if (response.status === 'success' && response.data && response.data.status === 'successful') {
           await pool.query("UPDATE payment_transactions SET status='successful', paid_at=NOW() WHERE id=$1", [tx.id]);
           await pool.query("UPDATE patient_invoices SET paid_amount=paid_amount + $1 WHERE id=$2", [tx.amount, invoice.id]);
-          await audit(req.session.user.email, 'payment_successful', { ref, amount: tx.amount });
+          await audit(req.session.user.email, 'payment_successful', { ref, amount: tx.amount }, req.session.user.tenant_id, req);
           req.flash('success', `Payment of ${tx.amount.toLocaleString()} UGX confirmed!`);
           return res.redirect(`/clinic/pay/${invoice.id}`);
         }
@@ -23482,7 +23483,7 @@ app.get('/clinic/pay/:invoice_id/verify', requireAuth, requireNotBanned, require
     // Demo: auto-complete after 2 seconds for testing
     await pool.query("UPDATE payment_transactions SET status='successful', paid_at=NOW() WHERE id=$1", [tx.id]);
     await pool.query("UPDATE patient_invoices SET paid_amount=paid_amount + $1, status=CASE WHEN paid_amount + $1 >= total_amount THEN 'paid' ELSE 'partial' END WHERE id=$2", [tx.amount, invoice.id]);
-    await audit(req.session.user.email, 'payment_successful_demo', { ref, amount: tx.amount });
+    await audit(req.session.user.email, 'payment_successful_demo', { ref, amount: tx.amount }, req.session.user.tenant_id, req);
     req.flash('success', `Payment of ${tx.amount.toLocaleString()} UGX confirmed! (Demo)`);
   }
 
@@ -25244,7 +25245,7 @@ app.post('/business/quotations/save', requireAuth, requireNotBanned, ah(async (r
   const t = req.session.user.tenant_id;
   const { quote_no, customer_name, customer_contact, items, total, valid_until, notes } = req.body;
   await pool.query('INSERT INTO quotations(tenant_id,quote_no,customer_name,customer_contact,items,total,valid_until,notes) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8)', [t, quote_no, customer_name, customer_contact, items, total||0, valid_until||null, notes]);
-  await audit(req.session.user.email, 'create_quotation', `Quotation ${quote_no} for ${customer_name}`);
+  await audit(req.session.user.email, 'create_quotation', `Quotation ${quote_no} for ${customer_name}`, req.session.user.tenant_id, req);
   res.redirect('/business/quotations');
 }));
 
@@ -25305,7 +25306,7 @@ app.post('/business/deliveries/save', requireAuth, requireNotBanned, ah(async (r
   const t = req.session.user.tenant_id;
   const { order_no, customer_name, customer_address, items, driver_name, vehicle, notes } = req.body;
   await pool.query('INSERT INTO deliveries(tenant_id,order_no,customer_name,customer_address,items,driver_name,vehicle,notes) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8)', [t, order_no, customer_name, customer_address, items, driver_name, vehicle, notes]);
-  await audit(req.session.user.email, 'create_delivery', `Delivery ${order_no} for ${customer_name}`);
+  await audit(req.session.user.email, 'create_delivery', `Delivery ${order_no} for ${customer_name}`, req.session.user.tenant_id, req);
   res.redirect('/business/deliveries');
 }));
 
@@ -27678,7 +27679,7 @@ app.get('/entertainment/scrape-now', requireAuth, requireNotBanned, ah(async (re
       } catch(e) { console.warn('Built-in scrape error:', name, e.message); }
     }
   }
-  await audit(req.session.user.email, 'scrape_content', `Imported ${imported} items from web`);
+  await audit(req.session.user.email, 'scrape_content', `Imported ${imported} items from web`, req.session.user.tenant_id, req);
   res.redirect('/entertainment');
 }));
 
@@ -27731,7 +27732,7 @@ app.post('/webhook/flutterwave', express.raw({ type: 'application/json' }), ah(a
         await client.query('COMMIT');
         await fireWebhook(payment.tenant_id, 'payment', { ref: tx_ref, amount: payment.amount, plan, flw_id });
         await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
-        await audit(payment.tenant_id ? 'system' : 'unknown', 'payment_completed', `Flutterwave: ${tx_ref} UGX ${amount}`);
+        await audit(payment.tenant_id ? 'system' : 'unknown', 'payment_completed', `Flutterwave: ${tx_ref} UGX ${amount}`, payment.tenant_id, req);
         console.log(`[Flutterwave] Payment confirmed: ${tx_ref} - UGX ${amount}`);
       } else {
         await client.query('COMMIT');
@@ -28006,7 +28007,7 @@ app.post('/pay/manual/confirm', requireAuth, ah(async (req, res) => {
     // If metadata column doesn't exist, that's okay
   }
 
-  await audit(req.session.user.email, 'manual_payment_confirmed', `UGX ${amt} via ${method} from ${sender_phone}`);
+  await audit(req.session.user.email, 'manual_payment_confirmed', `UGX ${amt} via ${method} from ${sender_phone}`, req.session.user.tenant_id, req);
 
   // Notify admin about pending payment
   const adminEmail = platformSettings.developer_email || process.env.DEV_EMAIL || 'admin@ssewasswa.com';
@@ -28174,7 +28175,7 @@ app.post('/dev/payments/action', requireAuth, requireSuperAdmin, ah(async (req, 
       await client.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [amt]);
 
       await client.query('COMMIT');
-      await audit(req.session.user.email, 'payment_approved', `Approved payment #${pId}: UGX ${amt} for tenant #${tenant_id}`);
+      await audit(req.session.user.email, 'payment_approved', `Approved payment #${pId}: UGX ${amt} for tenant #${tenant_id}`, req.session.user.tenant_id, req);
 
       // Notify tenant
       try {
@@ -28197,7 +28198,7 @@ app.post('/dev/payments/action', requireAuth, requireSuperAdmin, ah(async (req, 
     }
   } else if (action === 'reject') {
     await pool.query('UPDATE payments SET status=$1 WHERE id=$2', ['rejected', pId]);
-    await audit(req.session.user.email, 'payment_rejected', `Rejected payment #${pId}`);
+    await audit(req.session.user.email, 'payment_rejected', `Rejected payment #${pId}`, req.session.user.tenant_id, req);
     req.session.flash = { type: 'success', msg: 'Payment rejected.' };
   }
 
@@ -28266,7 +28267,7 @@ app.get('/pay/mtn/status', requireAuth, ah(async (req, res) => {
     // Update payment records
     await pool.query('UPDATE payments SET status=$1,method=$2 WHERE reference=$3', ['completed', 'mtn_momo', ref]);
     await pool.query('UPDATE momo_payments SET status=$1 WHERE external_ref=$2', ['completed', ref]);
-    await audit('system', 'payment_status_change', `MoMo payment ${ref} status changed to completed`);
+    await audit('system', 'payment_status_change', `MoMo payment ${ref} status changed to completed`, null, req);
     const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1', [ref])).rows[0];
     if (payment) {
       // Try explicit plan from payment record first, fallback to description parsing
@@ -28292,7 +28293,7 @@ app.get('/pay/mtn/status', requireAuth, ah(async (req, res) => {
   } else if (status === 'FAILED' || status === 'REJECTED') {
     await pool.query('UPDATE payments SET status=$1 WHERE reference=$2', ['failed', ref]);
     await pool.query('UPDATE momo_payments SET status=$1 WHERE external_ref=$2', ['failed', ref]);
-    await audit('system', 'payment_status_change', `MoMo payment ${ref} status changed to ${status}`);
+    await audit('system', 'payment_status_change', `MoMo payment ${ref} status changed to ${status}`, null, req);
     res.send(renderPage('Payment Failed', `
       <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
         <div style="width:70px;height:70px;border-radius:50%;background:#dc2626;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:36px;color:white">&#10007;</div>
@@ -28511,13 +28512,13 @@ app.get('/school/students/generate-passwords', requireAuth, requireNotBanned, ah
     const exists = (await pool.query('SELECT id FROM student_accounts WHERE student_id=$1', [s.id])).rows[0];
     if (!exists) {
       const tempPass = 'STD' + crypto.randomBytes(4).toString('hex').toUpperCase();
-      const hash = await bcrypt.hash(tempPass, 10);
+      const hash = await bcrypt.hash(tempPass, 12);
       await pool.query('INSERT INTO student_accounts(student_id,password,temp_password) VALUES($1,$2,$3)', [s.id, hash, null]);
       generatedPasswords.push({ name: s.name, admission_no: s.admission_no, password: tempPass });
       created++;
     }
   }
-  await audit(req.session.user.email, 'student_passwords', `Generated passwords for ${created} students`);
+  await audit(req.session.user.email, 'student_passwords', `Generated passwords for ${created} students`, req.session.user.tenant_id, req);
   res.send(renderPage('Student Passwords', `
     <div class="card"><div class="alert alert-success"><h2>Passwords Generated!</h2><p>Created login credentials for ${created} students.</p><p class="muted" style="color:#dc2626;font-weight:700">Save these passwords now — they will NOT be shown again.</p></div>
     ${generatedPasswords.length ? `<div class="card"><h3>Generated Passwords (save these!)</h3><table><tr><th>Name</th><th>Admission No</th><th>Password</th></tr>${generatedPasswords.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.admission_no)}</td><td style="font-family:monospace;font-weight:700;color:#dc2626">${esc(p.password)}</td></tr>`).join('')}</table></div>` : ''}
@@ -28869,13 +28870,13 @@ app.get('/church/members/generate-passwords', requireAuth, requireNotBanned, ah(
     const exists = (await pool.query('SELECT id FROM church_accounts WHERE member_id=$1', [m.id])).rows[0];
     if (!exists) {
       const tempPass = 'CH' + crypto.randomBytes(4).toString('hex').toUpperCase();
-      const hash = await bcrypt.hash(tempPass, 10);
+      const hash = await bcrypt.hash(tempPass, 12);
       await pool.query('INSERT INTO church_accounts(member_id,password,temp_password) VALUES($1,$2,$3)', [m.id, hash, null]);
       generatedPasswords.push({ name: m.name, phone: m.phone, password: tempPass });
       created++;
     }
   }
-  await audit(req.session.user.email, 'church_passwords', `Generated passwords for ${created} members`);
+  await audit(req.session.user.email, 'church_passwords', `Generated passwords for ${created} members`, req.session.user.tenant_id, req);
   res.send(renderPage('Church Member Passwords', `
     <div class="card"><div class="alert alert-success"><h2>Passwords Generated!</h2><p>Created login credentials for ${created} members.</p><p class="muted" style="color:#dc2626;font-weight:700">Save these passwords now — they will NOT be shown again.</p></div>
     ${generatedPasswords.length ? `<div class="card"><h3>Generated Passwords (save these!)</h3><table><tr><th>Name</th><th>Phone</th><th>Password</th></tr>${generatedPasswords.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.phone||'')}</td><td style="font-family:monospace;font-weight:700;color:#dc2626">${esc(p.password)}</td></tr>`).join('')}</table></div>` : ''}
@@ -28953,7 +28954,7 @@ app.post('/school/fee-reminders/send-sms', requireAuth, requireNotBanned, ah(asy
     const ok = await sendSMS(f.guardian_phone, msg);
     if (ok?.sent) { await logSMS(t, f.guardian_phone, msg, 'fee_reminder'); sent++; } else if (ok?.skipped) { skipped++; } else { failed++; }
   }
-  await audit(req.session.user.email, 'fee_reminders', `Sent ${sent} SMS reminders (${failed} failed, ${skipped} opt-out)`);
+  await audit(req.session.user.email, 'fee_reminders', `Sent ${sent} SMS reminders (${failed} failed, ${skipped} opt-out)`, req.session.user.tenant_id, req);
   res.send(renderPage('Reminders Sent', `
     <div class="card"><div class="alert alert-success"><h2>SMS Reminders Sent!</h2><p>Successfully sent: ${sent}</p><p>Failed: ${failed}</p></div>
     <a href="/school/fee-reminders" class="btn">Back to Reminders</a></div>
@@ -28971,7 +28972,7 @@ app.post('/school/fee-reminders/send-email', requireAuth, requireNotBanned, ah(a
     await sendEmail(f.parent_email, `Fee Balance Reminder - ${f.student_name}`, msg);
     sent++;
   }
-  await audit(req.session.user.email, 'fee_email_reminders', `Sent ${sent} email reminders`);
+  await audit(req.session.user.email, 'fee_email_reminders', `Sent ${sent} email reminders`, req.session.user.tenant_id, req);
   res.send(renderPage('Emails Sent', `
     <div class="card"><div class="alert alert-success"><h2>Email Reminders Sent!</h2><p>${sent} emails sent.</p></div>
     <a href="/school/fee-reminders" class="btn">Back to Reminders</a></div>
@@ -29517,7 +29518,7 @@ app.post('/api/settings/country', requireAuth, ah(async (req, res) => {
     VALUES($1,$2,$3,$4,$5,NOW()) ON CONFLICT(tenant_id) DO UPDATE SET country_code=$2, currency=$3, preferred_payment=$4, flutterwave_enabled=$5, updated_at=NOW()`,
     [t, cc, currency || cfg.currency, preferred_payment || cfg.providers[0], flutterwave_enabled !== undefined ? flutterwave_enabled : cfg.flutterwave_supported]);
   
-  await audit(req.session.user.email, 'country_settings_updated', { country: cc, currency });
+  await audit(req.session.user.email, 'country_settings_updated', { country: cc, currency }, req.session.user.tenant_id, req);
   res.json({ success: true, country: cc, currency: currency || cfg.currency, availableProviders: cfg.providers });
 }));
 
@@ -29777,7 +29778,7 @@ app.post('/clinic/patient/:type/:id/allergy/save', requireAuth, requireNotBanned
   if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
   await pool.query('INSERT INTO patient_allergies(tenant_id,patient_type,patient_id,patient_name,allergen,reaction,severity,onset_date,verified_by,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
     [t, type, id, patientName, allergen, reaction || null, severity || 'moderate', onset_date || null, verified_by || null, notes || null]);
-  await audit(req.session.user.email, 'allergy_added', { patient: patientName, allergen });
+  await audit(req.session.user.email, 'allergy_added', { patient: patientName, allergen }, req.session.user.tenant_id, req);
   res.redirect(`/clinic/patient/${type}/${id}/ehr`);
 }));
 
@@ -29812,7 +29813,7 @@ app.post('/clinic/patient/:type/:id/chronic/save', requireAuth, requireNotBanned
   if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
   await pool.query('INSERT INTO patient_chronic_conditions(tenant_id,patient_type,patient_id,patient_name,condition_name,icd_code,diagnosed_date,treating_doctor,status,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
     [t, type, id, patientName, condition_name, icd_code || null, diagnosed_date || null, treating_doctor || null, status || 'active', notes || null]);
-  await audit(req.session.user.email, 'chronic_condition_added', { patient: patientName, condition: condition_name });
+  await audit(req.session.user.email, 'chronic_condition_added', { patient: patientName, condition: condition_name }, req.session.user.tenant_id, req);
   res.redirect(`/clinic/patient/${type}/${id}/ehr`);
 }));
 
@@ -29874,7 +29875,7 @@ app.post('/clinic/patient/:type/:id/vitals/save', requireAuth, requireNotBanned,
   const bmi = d.weight && d.height ? (d.weight / ((d.height/100) ** 2)).toFixed(1) : null;
   await pool.query('INSERT INTO patient_vitals(tenant_id,patient_type,patient_id,patient_name,temperature,blood_pressure_systolic,blood_pressure_diastolic,heart_rate,respiratory_rate,weight,height,bmi,oxygen_saturation,pain_level,recorded_by,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)',
     [t, type, id, patientName, d.temperature||null, d.blood_pressure_systolic||null, d.blood_pressure_diastolic||null, d.heart_rate||null, d.respiratory_rate||null, d.weight||null, d.height||null, bmi, d.oxygen_saturation||null, d.pain_level||0, d.recorded_by||null, d.notes||null]);
-  await audit(req.session.user.email, 'vitals_recorded', { patient: patientName });
+  await audit(req.session.user.email, 'vitals_recorded', { patient: patientName }, req.session.user.tenant_id, req);
   res.redirect(`/clinic/patient/${type}/${id}/ehr`);
 }));
 
@@ -30679,7 +30680,7 @@ app.post('/clinic/patient/:type/:id/immunization/save', requireAuth, requireNotB
   if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
   await pool.query('INSERT INTO patient_immunizations(tenant_id,patient_type,patient_id,patient_name,vaccine_name,dose_number,administered_date,administered_by,batch_number,next_dose_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
     [t, type, id, patientName, d.vaccine_name, d.dose_number||1, d.administered_date||null, d.administered_by||null, d.batch_number||null, d.next_dose_date||null, d.notes||null]);
-  await audit(req.session.user.email, 'immunization_added', { patient: patientName, vaccine: d.vaccine_name });
+  await audit(req.session.user.email, 'immunization_added', { patient: patientName, vaccine: d.vaccine_name }, req.session.user.tenant_id, req);
   res.redirect(`/clinic/patient/${type}/${id}/ehr`);
 }));
 
@@ -30716,7 +30717,7 @@ app.post('/clinic/patient/:type/:id/medication/save', requireAuth, requireNotBan
   if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
   await pool.query('INSERT INTO patient_medications(tenant_id,patient_type,patient_id,patient_name,medication_name,dosage,frequency,start_date,end_date,prescribed_by,reason,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
     [t, type, id, patientName, d.medication_name, d.dosage||null, d.frequency||null, d.start_date||null, d.end_date||null, d.prescribed_by||null, d.reason||null, d.notes||null]);
-  await audit(req.session.user.email, 'medication_added', { patient: patientName, medication: d.medication_name });
+  await audit(req.session.user.email, 'medication_added', { patient: patientName, medication: d.medication_name }, req.session.user.tenant_id, req);
   res.redirect(`/clinic/patient/${type}/${id}/ehr`);
 }));
 
@@ -30725,7 +30726,7 @@ app.get('/clinic/patient/:type/:id/medication/:medId/stop', requireAuth, require
   const t = req.session.user.tenant_id;
   const { type, id, medId } = req.params;
   await pool.query('UPDATE patient_medications SET is_active=false, end_date=CURRENT_DATE WHERE id=$1 AND tenant_id=$2', [medId, t]);
-  await audit(req.session.user.email, 'medication_stopped', { medicationId: medId });
+  await audit(req.session.user.email, 'medication_stopped', { medicationId: medId }, req.session.user.tenant_id, req);
   res.redirect(`/clinic/patient/${type}/${id}/ehr`);
 }));
 
@@ -30875,7 +30876,7 @@ app.post('/clinic/patient/:type/:id/invoice/save', requireAuth, requireNotBanned
       [t, inv.rows[0].id, item.desc, item.qty, item.price, item.total]);
   }
   
-  await audit(req.session.user.email, 'invoice_created', { patient: patientName, invoice: invoice_number, amount: totalAmount });
+  await audit(req.session.user.email, 'invoice_created', { patient: patientName, invoice: invoice_number, amount: totalAmount }, req.session.user.tenant_id, req);
   res.redirect(`/clinic/patient/${type}/${id}/billing`);
 }));
 
@@ -30963,7 +30964,7 @@ app.post('/clinic/patient/:type/:id/invoice/:invId/pay-manual', requireAuth, req
   const newStatus = newPaid >= inv.total_amount ? 'paid' : 'partial';
   
   await pool.query('UPDATE patient_invoices SET paid_amount=$1, status=$2 WHERE id=$3', [newPaid, newStatus, invId]);
-  await audit(req.session.user.email, 'payment_recorded', { invoice: inv.invoice_number, amount: amt, method });
+  await audit(req.session.user.email, 'payment_recorded', { invoice: inv.invoice_number, amount: amt, method }, req.session.user.tenant_id, req);
   res.redirect(`/clinic/patient/${type}/${id}/billing`);
 }));
 
@@ -31009,7 +31010,7 @@ app.post('/clinic/insurance/save', requireAuth, requireNotBanned, requireFeature
   const d = req.body;
   await pool.query('INSERT INTO insurance_providers(tenant_id,name,code,type,coverage_percentage,requires_preauth,contact_phone,contact_email,address,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
     [t, d.name, d.code||null, d.type||'private', d.coverage_percentage||80, d.requires_preauth==='true', d.contact_phone||null, d.contact_email||null, d.address||null, d.notes||null]);
-  await audit(req.session.user.email, 'insurance_provider_added', { name: d.name });
+  await audit(req.session.user.email, 'insurance_provider_added', { name: d.name }, req.session.user.tenant_id, req);
   res.redirect('/clinic/insurance');
 }));
 
@@ -31048,7 +31049,7 @@ app.post('/clinic/patient/:type/:id/insurance/save', requireAuth, requireNotBann
   if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
   await pool.query('INSERT INTO patient_insurance(tenant_id,patient_type,patient_id,patient_name,provider_id,policy_number,member_number,group_number,effective_date,expiry_date,coverage_percentage,is_primary) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
     [t, type, id, patientName, d.provider_id, d.policy_number||null, d.member_number||null, d.group_number||null, d.effective_date||null, d.expiry_date||null, d.coverage_percentage||null, d.is_primary!=='false']);
-  await audit(req.session.user.email, 'patient_insurance_added', { patient: patientName });
+  await audit(req.session.user.email, 'patient_insurance_added', { patient: patientName }, req.session.user.tenant_id, req);
   res.redirect(`/clinic/patient/${type}/${id}/billing`);
 }));
 
@@ -31091,7 +31092,7 @@ app.post('/clinic/patient/:type/:id/invoice/:invId/claim-submit', requireAuth, r
   await pool.query('INSERT INTO insurance_claims(tenant_id,patient_type,patient_id,patient_name,provider_id,invoice_id,claim_number,amount_claimed,status,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
     [t, type, id, patientName, provider_id, invId, claimNumber, amount_claimed || 0, 'submitted', notes || null]);
   
-  await audit(req.session.user.email, 'insurance_claim_submitted', { claim: claimNumber, amount: amount_claimed });
+  await audit(req.session.user.email, 'insurance_claim_submitted', { claim: claimNumber, amount: amount_claimed }, req.session.user.tenant_id, req);
   res.redirect(`/clinic/patient/${type}/${id}/billing`);
 }));
 
@@ -31122,14 +31123,14 @@ app.get('/clinic/claims/:id/approve', requireAuth, requireNotBanned, requireFeat
       await pool.query('UPDATE patient_invoices SET paid_amount=$1, insurance_cover=$2, status=$3 WHERE id=$4', [newPaid, claim.amount_claimed, newPaid >= inv.total_amount ? 'paid' : 'partial', claim.invoice_id]);
     }
   }
-  await audit(req.session.user.email, 'claim_approved', { claimId: req.params.id });
+  await audit(req.session.user.email, 'claim_approved', { claimId: req.params.id }, req.session.user.tenant_id, req);
   res.redirect('/clinic/claims');
 }));
 
 app.get('/clinic/claims/:id/reject', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('UPDATE insurance_claims SET status=$1, processed_at=NOW(), rejection_reason=$2 WHERE id=$3', ['rejected', 'Rejected by admin', req.params.id]);
-  await audit(req.session.user.email, 'claim_rejected', { claimId: req.params.id });
+  await audit(req.session.user.email, 'claim_rejected', { claimId: req.params.id }, req.session.user.tenant_id, req);
   res.redirect('/clinic/claims');
 }));
 
@@ -31708,7 +31709,7 @@ app.get('/dashboard/workers', requireAuth, ah(async (req, res) => {
       <form method="POST" action="/dashboard/workers/add" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div><label>Username</label><input name="username" placeholder="e.g. john" required></div>
         <div><label>Display Name</label><input name="display_name" placeholder="e.g. John Secretary" required></div>
-        <div><label>Password (min 4 chars)</label><input name="password" type="password" placeholder="Temporary password" required minlength="4"></div>
+        <div><label>Password (min 8 chars)</label><input name="password" type="password" placeholder="Temporary password" required minlength="8"></div>
         <div><label>Role</label>
           <select name="role">
             <option value="viewer">Viewer (Read Only)</option>
@@ -31758,8 +31759,8 @@ app.post('/dashboard/workers/add', requireAuth, ah(async (req, res) => {
   if (!username || !password || !display_name) {
     return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">All fields are required</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
   }
-  if (password.length < 4) {
-    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Password must be at least 4 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+  if (password.length < 8) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Password must be at least 8 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
   }
   const validRoles = ['viewer','content_manager','task_manager','full_worker'];
   if (!validRoles.includes(role)) {
@@ -31768,7 +31769,7 @@ app.post('/dashboard/workers/add', requireAuth, ah(async (req, res) => {
   const hash = await bcrypt.hash(password, 12);
   try {
     await pool.query('INSERT INTO dashboard_workers(tenant_id, username, password_hash, display_name, role) VALUES($1,$2,$3,$4,$5)', [t, username.toLowerCase().trim(), hash, display_name.trim(), role]);
-    await audit(u.email, 'add_worker', `Added worker "${username}" with role ${role}`);
+    await audit(u.email, 'add_worker', `Added worker "${username}" with role ${role}`, u.tenant_id, req);
   } catch (e) {
     if (e.message.includes('unique') || e.message.includes('duplicate')) {
       return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">This username already exists for your organization. Choose a different one.</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
@@ -31793,20 +31794,20 @@ app.get('/dashboard/workers/:id/reset-password', requireAuth, ah(async (req, res
   if (!worker) return res.redirect('/dashboard/workers');
   if (req.method === 'POST') {
     const { new_password } = req.body;
-    if (!new_password || new_password.length < 4) {
-      return res.send(renderPage('Reset Worker Password', '<div class="card"><div class="alert alert-error">Password must be at least 4 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+    if (!new_password || new_password.length < 8) {
+      return res.send(renderPage('Reset Worker Password', '<div class="card"><div class="alert alert-error">Password must be at least 8 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
     }
     const hash = await bcrypt.hash(new_password, 12);
     await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3', [hash, req.params.id, t]);
-    await audit(u.email, 'reset_worker_password', `Reset password for worker "${worker.username}"`);
+    await audit(u.email, 'reset_worker_password', `Reset password for worker "${worker.username}"`, u.tenant_id, req);
     res.redirect('/dashboard/workers');
   }
   res.send(renderPage('Reset Worker Password', `
     <div class="card" style="max-width:500px;margin:40px auto">
       <h3>Reset Password for ${esc(worker.display_name)} (@${esc(worker.username)})</h3>
       <form method="POST">
-        <label>New Password (min 4 chars)</label>
-        <input name="new_password" type="password" required minlength="4" placeholder="Enter new password">
+        <label>New Password (min 8 chars)</label>
+        <input name="new_password" type="password" required minlength="8" placeholder="Enter new password">
         <button class="btn btn-green" type="submit" style="margin-top:10px">Reset Password</button>
         <a href="/dashboard/workers" class="btn" style="margin-left:10px">Cancel</a>
       </form>
@@ -31819,13 +31820,13 @@ app.post('/dashboard/workers/:id/reset-password', requireAuth, ah(async (req, re
   if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin only');
   const t = u.tenant_id;
   const { new_password } = req.body;
-  if (!new_password || new_password.length < 4) {
-    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Password must be at least 4 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+  if (!new_password || new_password.length < 8) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Password must be at least 8 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
   }
   const hash = await bcrypt.hash(new_password, 12);
   await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3', [hash, req.params.id, t]);
   const worker = (await pool.query('SELECT username FROM dashboard_workers WHERE id = $1', [req.params.id])).rows[0];
-  await audit(u.email, 'reset_worker_password', `Reset password for worker "${worker?.username}"`);
+  await audit(u.email, 'reset_worker_password', `Reset password for worker "${worker?.username}"`, u.tenant_id, req);
   res.redirect('/dashboard/workers');
 }));
 
@@ -31835,7 +31836,7 @@ app.get('/dashboard/workers/:id/delete', requireAuth, ah(async (req, res) => {
   const worker = (await pool.query('SELECT username FROM dashboard_workers WHERE id = $1 AND tenant_id = $2', [req.params.id, u.tenant_id])).rows[0];
   if (worker) {
     await pool.query('DELETE FROM dashboard_workers WHERE id = $1 AND tenant_id = $2', [req.params.id, u.tenant_id]);
-    await audit(u.email, 'delete_worker', `Deleted worker "${worker.username}"`);
+    await audit(u.email, 'delete_worker', `Deleted worker "${worker.username}"`, u.tenant_id, req);
   }
   res.redirect('/dashboard/workers');
 }));
@@ -32153,7 +32154,7 @@ app.get('/worker/profile', requireWorkerAuth, ah(async (req, res) => {
       <h3 style="margin-top:20px">Change Password</h3>
       <form method="POST" action="/worker/profile/password">
         <input name="current_password" type="password" placeholder="Current Password" required>
-        <input name="new_password" type="password" placeholder="New Password (min 4 chars)" required minlength="4">
+        <input name="new_password" type="password" placeholder="New Password (min 8 chars)" required minlength="8">
         <button class="btn btn-green" type="submit" style="margin-top:10px">Update Password</button>
       </form>
       <a href="/worker/dashboard" class="btn" style="margin-top:10px;display:inline-block">Back to Dashboard</a>
@@ -32168,8 +32169,8 @@ app.post('/worker/profile/password', requireWorkerAuth, ah(async (req, res) => {
   if (!worker || !(await bcrypt.compare(current_password, worker.password_hash))) {
     return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Current password is incorrect</div><a href="/worker/profile" class="btn">Back</a></div>', req.session.user));
   }
-  if (new_password.length < 4) {
-    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">New password must be at least 4 characters</div><a href="/worker/profile" class="btn">Back</a></div>', req.session.user));
+  if (new_password.length < 8) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">New password must be at least 8 characters</div><a href="/worker/profile" class="btn">Back</a></div>', req.session.user));
   }
   const hash = await bcrypt.hash(new_password, 12);
   await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hash, w.id]);
@@ -34221,7 +34222,7 @@ app.post('/switch-portal', requireAuth, requireNotBanned, ah(async (req, res) =>
   if (user.role !== 'super_admin') {
     req.session.user.role = newType;
   }
-  await audit(user.email, 'portal_switch', 'Switched portal type from ' + oldType + ' to ' + newType);
+  await audit(user.email, 'portal_switch', 'Switched portal type from ' + oldType + ' to ' + newType, user.tenant_id, req);
   // If AJAX request, return JSON so frontend can do smooth redirect
   if (req.xhr || req.headers.accept === 'application/json') {
     return res.json({success:true, redirect:'/portal/' + newType, type:newType, oldType:oldType});
@@ -34440,7 +34441,7 @@ app.post('/inventory/save', requireAuth, requireNotBanned, requireFeature('inven
     const item = (await pool.query('SELECT id FROM inventory_items WHERE tenant_id=$1 AND sku=$2 ORDER BY id DESC LIMIT 1', [tid, sku || '']))?.rows[0];
     if (item) await pool.query('INSERT INTO inventory_transactions(tenant_id,item_id,transaction_type,quantity,unit_cost,performed_by,notes) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid, item.id, 'stock_in', current_stock, cost_price || 0, req.session.user.email, 'Opening stock']);
   }
-  await audit(req.session.user.email, 'inventory_item_created', 'Created item: ' + name);
+  await audit(req.session.user.email, 'inventory_item_created', 'Created item: ' + name, req.session.user.tenant_id, req);
   req.flash('success', 'Item created successfully');
   res.redirect('/inventory');
 }));
@@ -34481,7 +34482,7 @@ app.post('/inventory/:id/update', requireAuth, requireNotBanned, requireFeature(
   const tid = req.session.user.tenant_id;
   const { name, sku, category_id, description, unit, cost_price, selling_price, min_stock_level, max_stock_level, location, supplier } = req.body;
   await pool.query(`UPDATE inventory_items SET name=$1,sku=$2,category_id=$3,description=$4,unit=$5,cost_price=$6,selling_price=$7,min_stock_level=$8,max_stock_level=$9,location=$10,supplier=$11,updated_at=NOW() WHERE id=$12 AND tenant_id=$13`, [name, sku||null, category_id||null, description||'', unit||'pcs', cost_price||0, selling_price||0, min_stock_level||5, max_stock_level||1000, location||'', supplier||'', req.params.id, tid]);
-  await audit(req.session.user.email, 'inventory_item_updated', 'Updated item #' + req.params.id);
+  await audit(req.session.user.email, 'inventory_item_updated', 'Updated item #' + req.params.id, req.session.user.tenant_id, req);
   req.flash('success', 'Item updated');
   res.redirect('/inventory');
 }));
@@ -34510,7 +34511,7 @@ app.post('/inventory/:id/stock-in-save', requireAuth, requireNotBanned, requireF
   const { quantity, unit_cost, reference, notes } = req.body;
   await pool.query('UPDATE inventory_items SET current_stock = current_stock + $1, updated_at = NOW() WHERE id=$2 AND tenant_id=$3', [Number(quantity), req.params.id, tid]);
   await pool.query('INSERT INTO inventory_transactions(tenant_id,item_id,transaction_type,quantity,unit_cost,reference,notes,performed_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid, req.params.id, 'stock_in', Number(quantity), unit_cost||0, reference||'', notes||'', req.session.user.email]);
-  await audit(req.session.user.email, 'stock_in', 'Added ' + quantity + ' units to item #' + req.params.id);
+  await audit(req.session.user.email, 'stock_in', 'Added ' + quantity + ' units to item #' + req.params.id, req.session.user.tenant_id, req);
   req.flash('success', 'Stock added successfully');
   res.redirect('/inventory');
 }));
@@ -34538,7 +34539,7 @@ app.post('/inventory/:id/stock-out-save', requireAuth, requireNotBanned, require
   const { quantity, reference, notes } = req.body;
   await pool.query('UPDATE inventory_items SET current_stock = GREATEST(0, current_stock - $1), updated_at = NOW() WHERE id=$2 AND tenant_id=$3', [Number(quantity), req.params.id, tid]);
   await pool.query('INSERT INTO inventory_transactions(tenant_id,item_id,transaction_type,quantity,reference,notes,performed_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid, req.params.id, 'stock_out', Number(quantity), reference||'', notes||'', req.session.user.email]);
-  await audit(req.session.user.email, 'stock_out', 'Removed ' + quantity + ' units from item #' + req.params.id);
+  await audit(req.session.user.email, 'stock_out', 'Removed ' + quantity + ' units from item #' + req.params.id, req.session.user.tenant_id, req);
   req.flash('success', 'Stock removed');
   res.redirect('/inventory');
 }));
@@ -34695,7 +34696,7 @@ app.post('/inventory/purchase-orders/save', requireAuth, requireNotBanned, requi
     idx++;
   }
   await pool.query('UPDATE purchase_orders SET total_amount=$1 WHERE id=$2', [total, po.id]);
-  await audit(req.session.user.email, 'po_created', 'Created PO ' + poNum);
+  await audit(req.session.user.email, 'po_created', 'Created PO ' + poNum, req.session.user.tenant_id, req);
   req.flash('success', 'Purchase order created');
   res.redirect('/inventory/purchase-orders');
 }));
@@ -34747,7 +34748,7 @@ app.post('/inventory/adjustments/save', requireAuth, requireNotBanned, requireFe
   else { actualQty = newQty; }
   await pool.query('UPDATE inventory_items SET current_stock=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3', [actualQty, item_id, tid]);
   await pool.query('INSERT INTO stock_adjustments(tenant_id,item_id,adjustment_type,quantity,reason,performed_by) VALUES($1,$2,$3,$4,$5,$6)', [tid, item_id, adjustment_type, newQty, reason, req.session.user.email]);
-  await audit(req.session.user.email, 'stock_adjustment', adjustment_type + ' ' + newQty + ' for item #' + item_id);
+  await audit(req.session.user.email, 'stock_adjustment', adjustment_type + ' ' + newQty + ' for item #' + item_id, req.session.user.tenant_id, req);
   req.flash('success', 'Stock adjusted');
   res.redirect('/inventory/adjustments');
 }));
@@ -34865,7 +34866,7 @@ app.post('/parent-portal/settings/save', requireAuth, requireNotBanned, requireF
   } else {
     await pool.query('INSERT INTO student_portal_settings(tenant_id,portal_enabled,allow_grade_view,allow_attendance_view,allow_fees_view,allow_report_download,allow_communication,welcome_message) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid, ...vals, msg]);
   }
-  await audit(req.session.user.email, 'portal_settings_updated', 'Updated parent portal settings');
+  await audit(req.session.user.email, 'portal_settings_updated', 'Updated parent portal settings', req.session.user.tenant_id, req);
   req.flash('success', 'Settings saved');
   res.redirect('/parent-portal/settings');
 }));
@@ -34896,7 +34897,7 @@ app.post('/parent-portal/link-student/save', requireAuth, requireNotBanned, requ
   const accessCode = Math.random().toString(36).substring(2, 8).toUpperCase();
   try {
     await pool.query('INSERT INTO parent_accounts(tenant_id,student_id,parent_name,parent_email,parent_phone,relation,access_code) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid, student_id, parent_name, parent_email, parent_phone, relation, accessCode]);
-    await audit(req.session.user.email, 'parent_account_created', 'Created parent account for ' + parent_email + ' linked to student #' + student_id);
+    await audit(req.session.user.email, 'parent_account_created', 'Created parent account for ' + parent_email + ' linked to student #' + student_id, req.session.user.tenant_id, req);
     req.flash('success', 'Parent account created. Access code: ' + accessCode);
   } catch(e) {
     if (e.message.includes('parent_email') || e.message.includes('unique')) {
@@ -35208,7 +35209,7 @@ app.post('/notifications/send', requireAuth, requireNotBanned, requireFeature('n
   } else {
     await pool.query('INSERT INTO notifications(tenant_id,title,message,type,link) VALUES($1,$2,$3,$4,$5)', [tid, title, message, type || 'info', link || null]);
   }
-  await audit(req.session.user.email, 'notification_sent', 'Sent "' + title + '" to ' + (send_to === 'specific' ? user_email : 'all users'));
+  await audit(req.session.user.email, 'notification_sent', 'Sent "' + title + '" to ' + (send_to === 'specific' ? user_email : 'all users'), req.session.user.tenant_id, req);
   req.flash('success', 'Notification sent');
   res.redirect('/notifications');
 }));
@@ -35423,7 +35424,7 @@ app.post('/receipts/templates/save', requireAuth, requireNotBanned, requireFeatu
   const tid = req.session.user.tenant_id;
   const { name, template_type, header_text, footer_text, auto_number_prefix, show_stamp, stamp_text } = req.body;
   await pool.query('INSERT INTO document_templates(tenant_id,name,template_type,header_text,footer_text,auto_number_prefix,show_stamp,stamp_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid, name, template_type || 'receipt', header_text || '', footer_text || '', auto_number_prefix || 'DOC', show_stamp === 'on', stamp_text || '']);
-  await audit(req.session.user.email, 'template_created', 'Created template: ' + name);
+  await audit(req.session.user.email, 'template_created', 'Created template: ' + name, req.session.user.tenant_id, req);
   req.flash('success', 'Template created');
   res.redirect('/receipts/templates');
 }));
@@ -35505,7 +35506,7 @@ app.post('/receipts/generate-save', requireAuth, requireNotBanned, requireFeatur
   const content = { items, notes: notes || '' };
   await pool.query('INSERT INTO generated_documents(tenant_id,template_id,doc_number,doc_type,title,content,recipient_name,recipient_email,amount,generated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [tid, template_id || null, docNumber, doc_type || 'receipt', title, JSON.stringify(content), recipient_name, recipient_email || null, amount || 0, req.session.user.email]);
   if (template) await pool.query('UPDATE document_templates SET next_number = next_number + 1 WHERE id=$1', [template.id]);
-  await audit(req.session.user.email, 'document_generated', 'Generated ' + docNumber + ': ' + title);
+  await audit(req.session.user.email, 'document_generated', 'Generated ' + docNumber + ': ' + title, req.session.user.tenant_id, req);
   req.flash('success', 'Document generated: ' + docNumber);
   res.redirect('/receipts');
 }));
@@ -35542,7 +35543,7 @@ app.get('/receipts/:id/view', requireAuth, requireNotBanned, requireFeature('rec
 
 app.get('/receipts/:id/finalize', requireAuth, requireNotBanned, requireFeature('receipt_builder'), ah(async (req, res) => {
   await pool.query('UPDATE generated_documents SET status=$1 WHERE id=$2 AND tenant_id=$3', ['final', req.params.id, req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'document_finalized', 'Finalized document #' + req.params.id);
+  await audit(req.session.user.email, 'document_finalized', 'Finalized document #' + req.params.id, req.session.user.tenant_id, req);
   req.flash('success', 'Document finalized');
   res.redirect('/receipts/' + req.params.id + '/view');
 }));
@@ -35640,7 +35641,7 @@ app.post('/calendar/save', requireAuth, requireNotBanned, requireFeature('event_
   const tid = req.session.user.tenant_id;
   const { title, description, event_type, location, start_time, end_time, all_day, max_attendees, is_recurring, recurring_pattern, recurring_end_date } = req.body;
   await pool.query('INSERT INTO calendar_events(tenant_id,title,description,event_type,start_time,end_time,all_day,location,max_attendees,is_recurring,recurring_pattern,recurring_end_date,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)', [tid, title, description||'', event_type||'event', start_time, end_time||null, all_day==='on', location||'', max_attendees||0, is_recurring==='on', recurring_pattern||null, recurring_end_date||null, req.session.user.email]);
-  await audit(req.session.user.email, 'event_created', 'Created event: ' + title);
+  await audit(req.session.user.email, 'event_created', 'Created event: ' + title, req.session.user.tenant_id, req);
   req.flash('success', 'Event created');
   res.redirect('/calendar');
 }));
@@ -35850,7 +35851,7 @@ app.post('/campaigns/save', requireAuth, requireNotBanned, requireFeature('campa
     await pool.query('INSERT INTO campaign_recipients(tenant_id,campaign_id,recipient_name,recipient_phone,recipient_email) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [tid, campaign.id, r.name, r.phone||null, r.email||null]);
   }
   await pool.query('UPDATE sms_campaigns SET recipient_count=$1 WHERE id=$2', [recipients.length, campaign.id]);
-  await audit(req.session.user.email, 'campaign_created', 'Campaign: ' + name + ' with ' + recipients.length + ' recipients');
+  await audit(req.session.user.email, 'campaign_created', 'Campaign: ' + name + ' with ' + recipients.length + ' recipients', req.session.user.tenant_id, req);
   req.flash('success', 'Campaign created with ' + recipients.length + ' recipients');
   res.redirect('/campaigns');
 }));
@@ -35900,7 +35901,7 @@ app.get('/campaigns/:id/send', requireAuth, requireNotBanned, requireFeature('ca
     }
   }
   await pool.query('UPDATE sms_campaigns SET sent_count=$1,failed_count=$2 WHERE id=$3', [sent, failed, c.id]);
-  await audit(req.session.user.email, 'campaign_sent', 'Sent campaign "' + c.name + '": ' + sent + ' sent, ' + failed + ' failed');
+  await audit(req.session.user.email, 'campaign_sent', 'Sent campaign "' + c.name + '": ' + sent + ' sent, ' + failed + ' failed', req.session.user.tenant_id, req);
   req.flash('success', 'Campaign sent: ' + sent + ' delivered, ' + failed + ' failed');
   res.redirect('/campaigns');
 }));
@@ -36163,7 +36164,7 @@ app.post('/appraisals/save', requireAuth, requireNotBanned, requireFeature('staf
   const avgScore = (totalScore / kpis.length).toFixed(1);
   const rating = avgScore >= 4.5 ? 'outstanding' : avgScore >= 3.5 ? 'excellent' : avgScore >= 2.5 ? 'good' : avgScore >= 1.5 ? 'satisfactory' : 'needs_improvement';
   await pool.query('INSERT INTO staff_appraisals(tenant_id,staff_id,staff_name,appraisal_period,criteria,overall_score,rating,strengths,improvements,goals,appraiser,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [tid, staff_id, staff?.name || 'Unknown', appraisal_period, JSON.stringify(criteria), avgScore, rating, strengths||'', improvements||'', goals||'', req.session.user.email, 'submitted']);
-  await audit(req.session.user.email, 'appraisal_submitted', 'Appraisal for ' + (staff?.name || '') + ': ' + rating + ' (' + avgScore + '/5)');
+  await audit(req.session.user.email, 'appraisal_submitted', 'Appraisal for ' + (staff?.name || '') + ': ' + rating + ' (' + avgScore + '/5)', req.session.user.tenant_id, req);
   req.flash('success', 'Appraisal submitted: ' + rating + ' (' + avgScore + '/5)');
   res.redirect('/appraisals');
 }));
@@ -37315,7 +37316,7 @@ app.get('/auth/google/callback', ah(async (req, res) => {
       const googleSubdomain = 'google-' + Math.floor(Math.random() * 9999);
       const tenantResult = await pool.query('INSERT INTO tenants (name, type, email, verified, approved, subdomain) VALUES ($1, $2, $3, true, true, $4) RETURNING id', [profile.name || 'Google User', 'individual', profile.email, googleSubdomain]);
       const tenantId = tenantResult.rows[0].id;
-      const hash = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 10);
+      const hash = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 12);
       u = (await pool.query('INSERT INTO users (tenant_id, email, password, role, approved) VALUES ($1, $2, $3, $4, true) RETURNING id, tenant_id, email, role, approved, dark_mode, created_at', [tenantId, profile.email, hash, 'admin'])).rows[0];
       await pool.query('INSERT INTO subscriptions (tenant_id, plan, status) VALUES ($1, \'starter\', \'active\')', [tenantId]);
       u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [profile.email])).rows[0];
@@ -37358,7 +37359,7 @@ app.get('/auth/microsoft/callback', ah(async (req, res) => {
       const msSubdomain = 'ms-' + Math.floor(Math.random() * 9999);
       const tenantResult = await pool.query('INSERT INTO tenants (name, type, email, verified, approved, subdomain) VALUES ($1, $2, $3, true, true, $4) RETURNING id', [profile.displayName || 'Microsoft User', 'individual', email, msSubdomain]);
       const tenantId = tenantResult.rows[0].id;
-      const hash = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 10);
+      const hash = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 12);
       u = (await pool.query('INSERT INTO users (tenant_id, email, password, role, approved) VALUES ($1, $2, $3, $4, true) RETURNING id, tenant_id, email, role, approved, dark_mode, created_at', [tenantId, email, hash, 'admin'])).rows[0];
       await pool.query('INSERT INTO subscriptions (tenant_id, plan, status) VALUES ($1, \'starter\', \'active\')', [tenantId]);
       u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
@@ -39440,13 +39441,23 @@ const processRecurringDonations = async () => {
 const checkSubscriptionExpiry = async () => {
   try {
     const expired = (await pool.query(
-      "SELECT s.*, t.name as tenant_name FROM subscriptions s JOIN tenants t ON s.tenant_id = t.id WHERE s.status = 'active' AND s.expires_at < NOW()"
+      "SELECT s.*, t.name as tenant_name, t.email as tenant_email FROM subscriptions s JOIN tenants t ON s.tenant_id = t.id WHERE s.status = 'active' AND s.expires_at < NOW() AND s.plan != 'free'"
     )).rows;
     for (const sub of expired) {
       await pool.query("UPDATE subscriptions SET status='expired' WHERE id=$1", [sub.id]);
-      console.log(`[AutoSub] Subscription expired for tenant ${sub.tenant_name} (ID: ${sub.tenant_id})`);
+      // Create a new free-tier subscription so the tenant keeps access
+      const freeExpires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+      await pool.query("INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,'free',0,'active',$2) ON CONFLICT DO NOTHING", [sub.tenant_id, freeExpires]);
+      // Notify tenant admin
+      try {
+        const adminEmail = (await pool.query("SELECT email FROM users WHERE tenant_id=$1 AND role IN ('super_admin','admin') LIMIT 1", [sub.tenant_id])).rows[0]?.email;
+        if (adminEmail) {
+          queueEmail(adminEmail, `Your ${sub.plan} subscription has expired`, `<div style="max-width:500px;margin:0 auto;font-family:sans-serif"><h2 style="color:#dc2626">Subscription Expired</h2><p>Your <b>${sub.plan}</b> subscription for <b>${sub.tenant_name}</b> expired on ${new Date(sub.expires_at).toLocaleDateString()}.</p><p>You have been automatically switched to the <b>Free</b> plan. You can upgrade anytime from the <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing" style="color:#1c7796">Billing page</a>.</p><p style="margin-top:20px"><a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing" style="display:inline-block;padding:10px 24px;background:#1c7796;color:white;border-radius:6px;text-decoration:none">Upgrade Now</a></p></div>`);
+        }
+      } catch(emailErr) { console.warn('[AutoSub] Notification error:', emailErr.message); }
+      console.log(`[AutoSub] Subscription expired for tenant ${sub.tenant_name} (ID: ${sub.tenant_id}), downgraded to Free`);
     }
-    if (expired.length > 0) console.log(`[AutoSub] Expired ${expired.length} subscription(s)`);
+    if (expired.length > 0) console.log(`[AutoSub] Expired ${expired.length} subscription(s), all downgraded to Free`);
   } catch (e) { console.warn('[AutoSub] Expiry check error:', e.message); }
 };
 
