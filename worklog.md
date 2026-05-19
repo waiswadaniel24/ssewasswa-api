@@ -1,106 +1,91 @@
-# Git Merge Conflict Resolution Worklog
-
-**File:** `/home/z/my-project/server.js`
-**Date:** 2025-01-XX
-**Strategy:** Keep "Updated upstream" side, remove "Stashed changes" side, strip all conflict markers.
-
-## Conflicts Resolved: 11 total
-
-### Conflict 1 — Line ~2799 (Notification Button Styling — renderPage)
-- **Kept:** Professional button with `padding:6px;border-radius:10px;transition:all 0.2s`
-- **Removed:** Stashed version with simpler styling and dynamic `title="${esc(uiT(...))}"`
-
-### Conflict 2 — Lines ~2807-2825 (Notification Panel — renderPage)
-- **Kept:** Upstream panel with `380px` width, `calc(100% + 8px)` positioning, gradient colors, CSS animation, and `var(--border)` references
-- **Removed:** Stashed version with `350px` width, `top:35px` absolute positioning, hardcoded hex colors
-
-### Conflict 3 — Lines ~2830-2926 (Modules Dropdown, Nav Links, Bottom Nav, Footer — renderPage)
-- **Kept:** Professional `.dd` class-based dropdown system with `ddModules`, `ddMore`, `ddPortal` dropdowns; language picker with flag emojis; enhanced bottom nav with backdrop-filter blur; polished footer with gradient branding
-- **Removed:** Stashed version with inline `modulesDropdown`, flat nav links, simpler bottom nav, and basic footer
-
-### Conflict 4 — Lines ~13994-14022 (Duplicate `uiT` Helper — renderPageV3)
-- **Kept:** Upstream (empty — `uiT` already defined earlier in the function scope)
-- **Removed:** Entire stashed `uiT` definition block (27 lines of duplicate translation helper)
-
-### Conflict 5 — Lines ~14062-14065 (Title Tag — renderPageV3)
-- **Kept:** Upstream (empty — title tag properly placed later in the favicon block)
-- **Removed:** Stashed `<title>` tag placement
-
-### Conflict 6 — Lines ~14083-14106 (Favicon & PWA Links — renderPageV3)
-- **Kept:** Full set of upstream icons: 16x16, 32x32, 192x192, 512x512 PNG favicons; 6 apple-touch-icon sizes; Apple mobile web app meta tags; theme-color `#059669`; MS application meta; `<title>` tag
-- **Removed:** Stashed version with single `1024x1024` icon and `#4f46e5` theme-color
-
-### Conflict 7 — Line ~14184 (Notification Button — renderPageV3)
-- **Kept:** Same as Conflict 1 — professional styling version
-- **Removed:** Stashed simpler button
-
-### Conflict 8 — Lines ~14192-14210 (Notification Panel — renderPageV3)
-- **Kept:** Same as Conflict 2 — professional upstream panel
-- **Removed:** Stashed simpler panel
-
-### Conflict 9 — Lines ~14216-14266 (More Dropdown, Bottom Nav, Footer — renderPageV3)
-- **Kept:** Upstream `ddMore3` dropdown with Worker Portal & Guide links; enhanced bottom nav with blur backdrop; professional footer with gradient branding
-- **Removed:** Stashed flat nav links, no bottom nav, simpler footer
-
-### Conflict 10 — Lines ~14295-14298 (Comment — renderPageV3 script)
-- **Kept:** Upstream (empty)
-- **Removed:** Stashed comment `// Dropdown close manager (V3)`
-
-### Conflict 11 — Lines ~14303-14350 (Dropdown Logic — renderPageV3 script)
-- **Kept:** Full upstream implementation: `toggleDD()` function, `.dd.open` class management, document click-outside handler, desktop hover support with debounced mouseleave, Escape key handler
-- **Removed:** Stashed minimal version with only `_openDropdown` tracking and basic click-outside
-
-## Verification
-- `grep -n '<<<<<<\|>>>>>>>'` — **0 matches** (clean)
-- `grep -c '^=======$'` — **0 matches** (no conflict separators; remaining `===` are code comment dividers)
-- All 11 conflicts resolved successfully.
 ---
-Task ID: 1
-Agent: Main Agent
-Task: Fix deployment crash and organize site-wide menu, dashboard & item display for ALL portal types
+Task ID: 1.2
+Agent: Main
+Task: Increase minimum password length from 4 to 8 characters
 
 Work Log:
-- Fixed duplicate `const uiT` declaration at line 2554 that caused SyntaxError crash on deploy
-- Merged unique translation entries (nav.worker, nav.guide) from duplicate into original
-- Resolved all 11 git merge conflict markers (<<<<<<< Updated upstream / >>>>>>> Stashed changes)
-- Improved renderPage CSS for ALL portal types:
-  - Better card styling with compact padding, hover effects, card-actions/card-desc utilities
-  - Enhanced table styling with sticky headers, alternating rows, status badges
-  - Gradient dash-section headers with improved visual hierarchy
-  - Added dash-search CSS class for module search bar
-  - Added page-header and info-banner utility classes
-  - Improved responsive breakpoints for mobile
-- Added universal dashboard module search bar with `/` keyboard shortcut
-- Search filters cards across all dash-sections, hides empty sections
-- All changes in shared renderPage function - applies to all 15 portal types universally
+- Searched for all instances of "min 4 chars", minlength="4", and .length < 4
+- Found 14 locations across registration, password reset, staff creation, worker management, change password
+- Updated all HTML placeholders, minlength attributes, and server-side validation checks
+- Some instances (registration) were already at 8
 
 Stage Summary:
-- Server deploys successfully (syntax verified)
-- Changes pushed to GitHub (commit d7f0b86)
-- Render.com will auto-deploy from push
-- Site: https://ssewasswa.onrender.com
+- 11 password length locations updated from 4 to 8
+- Registration form was already at 8 (no change needed)
+
 ---
-Task ID: 2
-Agent: Main Agent
-Task: Integrate PesaPal payment gateway for real money earnings
+Task ID: 1.3
+Agent: Main
+Task: Standardize bcrypt cost to 12 rounds in all contexts
 
 Work Log:
-- Analyzed existing payment infrastructure (Flutterwave, MTN MoMo, Airtel Money, DPO)
-- Added PesaPal API helper functions: getPesapalToken, submitPesapalOrder, getPesapalTransactionStatus, registerPesapalIPN
-- Added PesaPal as first tab in checkout page (before MTN MoMo, Airtel, DPO, Flutterwave)
-- Added PesaPal payment form with phone + email fields
-- Added POST /pay/pesapal/initiate - submits order to PesaPal, redirects user to PesaPal payment page
-- Added GET /pay/pesapal/callback - handles user return, checks payment status, activates subscription
-- Added POST /pay/pesapal/ipn - server-to-server webhook for instant payment notifications
-- Added GET /pay/pesapal/status - polling endpoint for payment status checks
-- Added PesaPal to COUNTRY_PAYMENT_CONFIG (UG, KE, TZ, RW, ZM, ET, SO)
-- Added pesapal_supported flag and provider filter in getProvidersForCountry
-- Added Ethiopia and Somalia to country config
-- All routes handle: payment record creation, subscription activation, tenant verification, revenue tracking (90/10 split), webhooks, audit logging
+- Searched for all bcrypt.hash() calls with cost factor
+- Found 18 total instances: 7 at cost 12, 11 at cost 10
+- Updated all 11 instances from cost 10 to cost 12
 
 Stage Summary:
-- PesaPal fully integrated with all payment flows
-- Supports M-Pesa, Airtel Money, Visa, Mastercard across East Africa
-- IPN webhook endpoint registered at /pay/pesapal/ipn
-- Revenue split: 90% developer, 10% platform (via developer_revenue table)
-- Syntax verified clean, pushed to GitHub
+- All 18 bcrypt.hash() calls now use cost factor 12
+- Includes: registration, password reset, staff creation, worker creation, OAuth, seed data
+
+---
+Task ID: 1.4 + 1.6
+Agent: Main + Subagent
+Task: Fix audit() helper to include tenant_id, IP address, and session ID
+
+Work Log:
+- Changed audit() signature from (email, action, details) to (email, action, details, tenantId, req)
+- Added tenant_id and ip_address columns to INSERT query
+- Added ALTER TABLE for ip_address column on audit_logs
+- Used subagent to update all 223 audit() callers to pass tenantId and req
+
+Stage Summary:
+- audit() function now records tenant_id and IP address
+- All 223 callers updated (205 req.session.user, 1 login_failed, 1 login, 1 2FA login, 1 register, 1 password_reset, 1 MoMo completed, 1 MoMo failed, 1 Flutterwave webhook, 4 worker mgmt, 1 voter, 1 portal_switch x2, 1 oauth_login, 1 database_cleanup)
+- Backward compatible: null defaults for unauthenticated contexts
+
+---
+Task ID: 1.5
+Agent: Main
+Task: Implement subscription expiry cron job with auto-downgrade
+
+Work Log:
+- Found existing checkSubscriptionExpiry() function at line 39441
+- Confirmed it was already scheduled (every 24h, first run 5min after startup)
+- Enhanced function to: filter out free-tier subscriptions, auto-create free subscription on expiry, send email notification to tenant admin
+
+Stage Summary:
+- Subscription expiry checker now downgrades expired paid plans to Free automatically
+- Tenant admin receives email notification with upgrade link
+- Free subscriptions are excluded from expiry checks
+
+---
+Task ID: 1.8
+Agent: Main
+Task: Add subscription cancellation UI and API route
+
+Work Log:
+- Added POST /billing/cancel route with full cancellation logic
+- Added yellow warning banner with Cancel Subscription button on billing page
+- Added expiry date display on billing page
+- Cancellation: marks subscription as cancelled, creates free subscription, sends email
+
+Stage Summary:
+- POST /billing/cancel route fully functional
+- Confirmation dialog prevents accidental cancellation
+- Email + in-app notification on cancellation
+- Expiry date now visible on billing page
+
+---
+Task ID: 1.7
+Agent: Main
+Task: Enable auto_backup feature flag and add admin notification
+
+Work Log:
+- Changed auto_backup feature flag seed from false to true
+- Added UPDATE statement to force-enable for existing databases
+- Enhanced runAutoBackup() to send daily email report to super_admin
+
+Stage Summary:
+- Auto backup now enabled by default for all tenants
+- Super admin receives daily backup completion email
+- Backup report includes tenant count and log link
