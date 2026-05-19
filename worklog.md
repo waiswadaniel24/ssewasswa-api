@@ -79,3 +79,28 @@ Stage Summary:
 - Changes pushed to GitHub (commit d7f0b86)
 - Render.com will auto-deploy from push
 - Site: https://ssewasswa.onrender.com
+---
+Task ID: 2
+Agent: Main Agent
+Task: Integrate PesaPal payment gateway for real money earnings
+
+Work Log:
+- Analyzed existing payment infrastructure (Flutterwave, MTN MoMo, Airtel Money, DPO)
+- Added PesaPal API helper functions: getPesapalToken, submitPesapalOrder, getPesapalTransactionStatus, registerPesapalIPN
+- Added PesaPal as first tab in checkout page (before MTN MoMo, Airtel, DPO, Flutterwave)
+- Added PesaPal payment form with phone + email fields
+- Added POST /pay/pesapal/initiate - submits order to PesaPal, redirects user to PesaPal payment page
+- Added GET /pay/pesapal/callback - handles user return, checks payment status, activates subscription
+- Added POST /pay/pesapal/ipn - server-to-server webhook for instant payment notifications
+- Added GET /pay/pesapal/status - polling endpoint for payment status checks
+- Added PesaPal to COUNTRY_PAYMENT_CONFIG (UG, KE, TZ, RW, ZM, ET, SO)
+- Added pesapal_supported flag and provider filter in getProvidersForCountry
+- Added Ethiopia and Somalia to country config
+- All routes handle: payment record creation, subscription activation, tenant verification, revenue tracking (90/10 split), webhooks, audit logging
+
+Stage Summary:
+- PesaPal fully integrated with all payment flows
+- Supports M-Pesa, Airtel Money, Visa, Mastercard across East Africa
+- IPN webhook endpoint registered at /pay/pesapal/ipn
+- Revenue split: 90% developer, 10% platform (via developer_revenue table)
+- Syntax verified clean, pushed to GitHub
