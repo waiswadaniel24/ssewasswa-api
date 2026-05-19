@@ -78,6 +78,34 @@ module.exports = function(app, pool, bcrypt, ah, esc, renderPage, audit, sendEma
 <meta name="robots" content="index, follow">
 <link rel="icon" href="/favicon.png">
 <link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#059669">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Comfort">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="apple-touch-icon" sizes="152x152" href="/icon-152.png">
+<link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png">
+<link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png">
+<script>
+// CRITICAL: Capture beforeinstallprompt EARLY in <head> before any other scripts.
+// This event fires when Chrome evaluates PWA criteria, which can happen
+// before body scripts execute. Previous bug: listener was at bottom of page.
+window._pwaPrompt=null;
+window.addEventListener('beforeinstallprompt',function(e){
+  e.preventDefault();
+  window._pwaPrompt=e;
+  console.log('[PWA] beforeinstallprompt captured in <head> — install is available');
+  // Signal to buttons that install is ready
+  window._pwaReady=true;
+  // If buttons already exist, update them
+  var nb=document.getElementById('nav-install-btn');
+  if(nb){nb.style.opacity='1';nb.title='Install app on your device';}
+  var mb=document.getElementById('mobile-install-btn');
+  if(mb){mb.style.opacity='1';}
+  var fb=document.getElementById('float-install-btn');
+  if(fb){fb.style.opacity='1';}
+});
+</script>
 <style>
 :root {
   --navy-900: #0f172a;
@@ -591,7 +619,7 @@ ul { list-style: none; }
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
 </button>
 
-<div id="float-install-btn" style="position:fixed;bottom:92px;right:28px;z-index:89;flex-direction:column;align-items:center;gap:4px">
+<div id="float-install-btn" style="position:fixed;bottom:92px;right:28px;z-index:89;display:flex;flex-direction:column;align-items:center;gap:4px">
   <a href="/install" onclick="_pwaInstall();return false" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#059669,#10b981);color:white;padding:12px 20px;border-radius:50px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(5,150,105,0.4);font-family:sans-serif;animation:pulse-glow 2s ease-in-out infinite">&#128241; Install App</a>
   <style>@keyframes pulse-glow{0%,100%{box-shadow:0 4px 20px rgba(5,150,105,0.4)}50%{box-shadow:0 4px 30px rgba(5,150,105,0.7)}}</style>
 </div>
@@ -625,26 +653,115 @@ try {
   }
 } catch(e) {}
 
-if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js?v=4').catch(function(){});}
-// === PWA INSTALL LOGIC ===
-var _pwaPrompt=null;
+// === SERVICE WORKER REGISTRATION ===
+if('serviceWorker' in navigator){
+  window.addEventListener('load',function(){
+    navigator.serviceWorker.register('/sw.js').then(function(reg){
+      console.log('[SW] Registered successfully, scope:',reg.scope);
+    }).catch(function(err){
+      console.warn('[SW] Registration failed:',err);
+    });
+  });
+}
+
+// === PWA INSTALL LOGIC (v9.0 — Fixed) ===
+// NOTE: beforeinstallprompt is captured EARLY in <head> and stored in window._pwaPrompt
+// This fixes the bug where the event fired before the body script ran.
 var _isStandalone=window.matchMedia('(display-mode:standalone)').matches||window.navigator.standalone===true;
-window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();_pwaPrompt=e;
-console.log('[PWA] beforeinstallprompt captured');
-});
+
+// === TOAST NOTIFICATION SYSTEM ===
+function showToast(msg,type,duration){
+  type=type||'info';duration=duration||4000;
+  var existing=document.getElementById('pwa-toast');
+  if(existing)existing.remove();
+  var t=document.createElement('div');
+  t.id='pwa-toast';
+  var colors={success:'background:#059669;color:#fff',error:'background:#dc2626;color:#fff',info:'background:#1e293b;color:#fff',warning:'background:#d97706;color:#fff'};
+  t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:14px 28px;border-radius:12px;font-weight:600;font-size:14px;z-index:10000;box-shadow:0 8px 30px rgba(0,0,0,0.2);transition:opacity 0.3s;max-width:90vw;text-align:center;font-family:sans-serif;'+(colors[type]||colors.info);
+  t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(function(){t.style.opacity='0';setTimeout(function(){if(t.parentNode)t.remove();},300);},duration);
+}
+
+// === INSTALL CLICK HANDLER ===
 function _pwaInstall(){
-if(_pwaPrompt){_pwaPrompt.prompt();_pwaPrompt.userChoice.then(function(c){if(c.outcome==='accepted'){console.log('[PWA] App installed');} _pwaPrompt=null;_hidePwaBtns();}).catch(function(){_pwaPrompt=null;});}
-else{window.location.href='/install';}
+  var prompt=window._pwaPrompt;
+  if(prompt){
+    console.log('[PWA] Triggering install prompt');
+    prompt.prompt();
+    prompt.userChoice.then(function(c){
+      if(c.outcome==='accepted'){
+        console.log('[PWA] User accepted the install prompt');
+        showToast('App installed successfully!','success');
+      } else {
+        console.log('[PWA] User dismissed the install prompt');
+        showToast('You can install later from the browser menu','info',5000);
+      }
+      window._pwaPrompt=null;
+      _hidePwaBtns();
+    }).catch(function(err){
+      console.warn('[PWA] Install prompt error:',err);
+      window._pwaPrompt=null;
+      showToast('Install failed — try your browser menu','error');
+    });
+  } else {
+    // No prompt available — show helpful instructions instead of silent redirect
+    var isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
+    var isSafari=/Safari/.test(navigator.userAgent)&&!/Chrome/.test(navigator.userAgent);
+    if(isIOS||isSafari){
+      showToast('Tap Share → "Add to Home Screen" to install','info',6000);
+    } else if(/Android/.test(navigator.userAgent)){
+      showToast('Tap browser menu ⋮ → "Install app" to install','info',6000);
+    } else {
+      showToast('Use browser menu or address bar icon to install','info',6000);
+    }
+    // Also redirect to install page after a brief delay so user sees the toast
+    setTimeout(function(){window.location.href='/install';},2000);
+  }
 }
+
 function _hidePwaBtns(){
-_pwaPrompt=null;
-var fb=document.getElementById('float-install-btn');if(fb)fb.style.display='none';
-var nb=document.getElementById('nav-install-btn');if(nb)nb.style.display='none';
-var mb=document.getElementById('mobile-install-btn');if(mb)mb.style.display='none';
+  window._pwaPrompt=null;
+  var fb=document.getElementById('float-install-btn');if(fb)fb.style.display='none';
+  var nb=document.getElementById('nav-install-btn');if(nb)nb.style.display='none';
+  var mb=document.getElementById('mobile-install-btn');if(mb)mb.style.display='none';
 }
-window.addEventListener('appinstalled',function(){_hidePwaBtns();});
+
+window.addEventListener('appinstalled',function(){
+  console.log('[PWA] App installed event fired');
+  showToast('App installed successfully!','success');
+  _hidePwaBtns();
+});
+
 // Show install buttons always if not in standalone mode (PWA already installed)
 if(_isStandalone){_hidePwaBtns();}
+
+// === PWA INSTALL DEBUG CHECK ===
+setTimeout(function(){
+  if(!window._pwaPrompt && !_isStandalone){
+    console.log('[PWA Debug] Install prompt NOT captured after 3s. Possible reasons:');
+    console.log('  - App is already installed');
+    console.log('  - Manifest missing or invalid');
+    console.log('  - Service worker not registered');
+    console.log('  - Not served over HTTPS');
+    console.log('  - Browser does not support PWA install');
+    // Check manifest
+    fetch('/manifest.json').then(function(r){return r.json()}).then(function(m){
+      console.log('[PWA Debug] Manifest loaded:',m.name,m.short_name,m.display);
+      console.log('[PWA Debug] Icons:',(m.icons||[]).map(function(i){return i.sizes}).join(', '));
+    }).catch(function(e){console.warn('[PWA Debug] Manifest fetch failed:',e)});
+    // Check SW
+    navigator.serviceWorker.getRegistration().then(function(r){
+      console.log('[PWA Debug] SW registered:',!!r,r&&r.scope);
+    });
+    // Check if in iframe (PWA install requires top-level frame)
+    if(window!==window.top){
+      console.warn('[PWA Debug] Page is in iframe — PWA install requires top-level navigation');
+    }
+  } else if(window._pwaPrompt){
+    console.log('[PWA Debug] Install prompt is available and ready');
+  }
+},3000);
 (function(){
   var navbar = document.getElementById('navbar');
   if(!navbar) return;

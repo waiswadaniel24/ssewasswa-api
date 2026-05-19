@@ -138,6 +138,23 @@ module.exports = async function (pool) {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
+    // --- user_invitations ---
+    // Email-based user invitations with accept/reject flow
+    `CREATE TABLE IF NOT EXISTS user_invitations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      email VARCHAR(255) NOT NULL,
+      role VARCHAR(100) DEFAULT 'staff',
+      token VARCHAR(255) NOT NULL UNIQUE,
+      invited_by INTEGER REFERENCES users(id),
+      expires_at TIMESTAMP NOT NULL,
+      accepted_at TIMESTAMP,
+      declined_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_invitations_token ON user_invitations(token)`,
+    `CREATE INDEX IF NOT EXISTS idx_invitations_tenant ON user_invitations(tenant_id)`,
+
     // --- user_dashboard_prefs ---
     // Per-user dashboard customization (widget visibility, layout)
     `CREATE TABLE IF NOT EXISTS user_dashboard_prefs (
@@ -306,7 +323,8 @@ module.exports = async function (pool) {
   // ============================================================
   if (typeof VALID_TABLES !== 'undefined') {
     ['scraped_content', 'scraped_jobs', 'scraped_opportunities',
-     'developer_revenue', 'poll_options', 'ad_clicks', 'user_dashboard_prefs'
+     'developer_revenue', 'poll_options', 'ad_clicks', 'user_dashboard_prefs',
+     'user_invitations'
     ].forEach(t => VALID_TABLES.add(t));
   }
 

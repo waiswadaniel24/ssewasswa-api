@@ -436,3 +436,20 @@ html.dark .live-indicator {
 html.dark .live-dot {
   background: #34d399;
 }
+
+/* === Form Validation Styles === */
+.validation-invalid {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 1px #ef4444 !important;
+}
+.validation-valid {
+  border-color: #10b981 !important;
+}
+.validation-error {
+  animation: validationShake 0.3s ease;
+}
+@keyframes validationShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}

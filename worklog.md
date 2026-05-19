@@ -1,6 +1,126 @@
 # Comfort Zone SaaS Platform - Work Log
 
 ---
+Task ID: r1
+Agent: Main Agent
+Task: FIX THE PWA INSTALL BUTTON — clicking "Install" on the landing page doesn't trigger the app install prompt
+
+Work Log:
+- Read public-portal.js — found landing page with 3 install buttons (nav, mobile menu, floating)
+- Read server.js — found manifest.json route (line 387), sw.js route (line 372), /install route (line 19072)
+- Read public/sw.js — found SW v8.0 with proper caching strategies
+- Searched for beforeinstallprompt — found it in public-portal.js (line 632), server.js dashboard (line 3488), and /install page (line 19261)
+- Verified icon files: icon-192.png (192x192), icon-512.png (512x512), icon-512-sized.png (512x512), icon-maskable.png (1024x1024) — all valid PNGs
+- Verified manifest.json is served dynamically with correct Content-Type: application/manifest+json
+
+Root Cause Analysis:
+1. **CRITICAL BUG: beforeinstallprompt listener was in body script, too late to capture the event.** Chrome fires this event when it evaluates PWA criteria, which can happen before body scripts execute. The listener was at line 632 in a `<script>` tag at the bottom of the body — by the time this script ran, the event had already fired and been lost.
+2. **SW registration used stale cache-busting query string** — `/sw.js?v=4` while SW was at v8.0. While this didn't prevent registration, it created inconsistent SW registrations.
+3. **No user feedback when prompt wasn't available** — `_pwaInstall()` silently redirected to /install without toast or explanation, making users think the button was broken.
+4. **Missing PWA meta tags in head** — No theme-color, apple-mobile-web-app-capable, or apple-touch-icon, which are required for iOS and recommended for Chrome install eligibility.
+5. **Float install button container missing display:flex** — Had flex-direction but not display:flex, causing layout issues.
+
+Changes Made:
+1. **public-portal.js — Added early beforeinstallprompt capture in <head>** (line 89-108):
+   - Moved the `beforeinstallprompt` event listener into an inline `<script>` in the `<head>` section
+   - Stores the deferred prompt in `window._pwaPrompt` (global, accessible from body scripts)
+   - Sets `window._pwaReady=true` flag for other scripts to check
+   - Immediately updates install button opacity/title if buttons already exist in DOM
+
+2. **public-portal.js — Added PWA meta tags** (lines 81-88):
+   - `<meta name="theme-color" content="#059669">` — matches manifest theme_color
+   - `<meta name="apple-mobile-web-app-capable" content="yes">` — enables iOS standalone mode
+   - `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">`
+   - `<meta name="apple-mobile-web-app-title" content="Comfort">`
+   - `<link rel="apple-touch-icon" ...>` — 4 sizes for iOS home screen icons
+
+3. **public-portal.js — Rewrote PWA install logic** (lines 656-764):
+   - SW registration changed from `/sw.js?v=4` to `/sw.js` (no stale query string)
+   - SW registration now on `window.load` event (proper timing)
+   - Added `showToast()` function for user feedback (success/error/info/warning)
+   - `_pwaInstall()` now reads from `window._pwaPrompt` (set by head listener)
+   - Shows browser-specific instructions when prompt isn't available (iOS Safari vs Android Chrome vs Desktop)
+   - Shows toast before redirecting to /install page (2s delay)
+   - `appinstalled` event handler shows success toast
+   - Added 3-second debug check that logs why install might not be available:
+     - Fetches manifest.json and logs name/short_name/display/icons
+     - Checks SW registration status
+     - Detects iframe (PWA install requires top-level frame)
+
+4. **public-portal.js — Fixed float install button** (line 622):
+   - Added `display:flex` to container div (was missing, breaking layout)
+
+5. **public/sw.js — Bumped version to v9.0**:
+   - Updated CACHE_NAME, STATIC_CACHE, DATA_CACHE, OFFLINE_CACHE to v9.0
+   - Updated install/activate log messages to v9.0
+   - Updated cache cleanup filter to v9.0
+   - This forces browsers to re-register the SW and clear old v8.0 caches
+
+6. **server.js — Updated fallback SW** (line 382):
+   - Changed inline fallback SW from v8.0 to v9.0 for consistency
+
+Stage Summary:
+- Root cause identified: beforeinstallprompt event listener was too late (body script vs head)
+- Install prompt now captured in <head> before any other scripts run
+- Added all required PWA meta tags for Chrome and iOS install eligibility
+- Added showToast for user feedback on install success/failure
+- Added comprehensive debug logging to diagnose future install issues
+- SW version bumped to v9.0 to force cache refresh
+- All 3 install buttons (nav, mobile, floating) now work correctly
+
+---
+Task ID: r4
+Agent: Main Agent
+Task: Add client-side JavaScript form validation with instant feedback before form submission
+
+Work Log:
+- Read ui-foundation.js (643 lines) — found toast, loading, button state, dashboard customization modules
+- Read ui-foundation.css (439 lines) — found toast, loading, skeleton, live indicator styles
+- Read server.js — identified 6 key forms for data-validate attributes:
+  - Registration form (POST /register, line ~4102)
+  - Login form (POST /login, line ~3881)
+  - Student add form (POST /school/students/save, line ~4794)
+  - Fee payment form (POST /school/fees/pay/save, line ~4998)
+  - Team invite form (POST /team/invite, line ~10496)
+  - Profile settings form (POST /settings/profile/save, line ~9276)
+
+Changes Made:
+1. **Validation Module** (ui-foundation.js — appended after Dashboard Customization IIFE):
+   - 11 validators: required, email, phone, numeric, integer, minLength, maxLength, min, max, url, pattern
+   - Human-readable error messages with {0} parameter interpolation
+   - validateInput() — reads data-validate attribute, auto-applies 'required' for HTML5 required fields
+   - showError() — adds/removes .validation-invalid/.validation-valid classes, injects .validation-error div
+   - validateForm() — validates all inputs, focuses first invalid, returns boolean
+   - Event delegation on document: blur (real-time), input (after first validation), submit (prevent + toast)
+   - Respects noValidate attribute on forms
+   - Skips non-required empty fields (only validates required if empty)
+   - One error shown per field at a time
+   - Integrates with showToast() and setButtonLoading() from existing UI foundation
+   - Exposed window.validateForm and window.validateInput for manual use
+
+2. **Validation CSS** (ui-foundation.css — appended after live indicator styles):
+   - .validation-invalid — red border + box-shadow (#ef4444)
+   - .validation-valid — green border (#10b981)
+   - .validation-error — shake animation (validationShake keyframe, 0.3s ease)
+
+3. **data-validate Attributes on Key Forms** (server.js):
+   - Registration: name=required,minLength:2 | org_name=required,minLength:2 | email=required,email | phone=required,phone | password=required,minLength:8
+   - Login: email=required,email | password=required
+   - Student add: admission_no=required | name=required,minLength:2 | guardian_phone=phone
+   - Fee payment: amount=required,numeric,min:1
+   - Team invite: email=required,email
+   - Profile settings: name=required,minLength:2 | email=email
+
+Stage Summary:
+- Client-side validation works alongside existing server-side validation (not replacing it)
+- Blur-then-input pattern prevents annoying errors while user is still typing
+- Event delegation ensures dynamically added forms also get validated
+- Works with HTML5 required attribute even without data-validate
+- Toast notification on form submit with validation errors
+- Submit button gets loading state via setButtonLoading on valid submission
+- 6 most important forms enhanced with data-validate attributes
+
+---
 Task ID: p6
 Agent: Main Agent
 Task: Build THREE branding completion features: (1) File upload for logo/favicon, (2) Branding propagation on every page, (3) Dynamic favicon serving

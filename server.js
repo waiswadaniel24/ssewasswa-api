@@ -379,7 +379,7 @@ app.get('/sw.js', (req, res) => {
   if (_fs.existsSync(swPath)) {
     res.sendFile(swPath);
   } else {
-    res.send(`const CACHE_NAME='comfort-v8.0';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/login','/offline'])).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));self.clients.claim()});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{if(r.status===200){const rc=r.clone();caches.open(CACHE_NAME).then(c=>c.put(e.request,rc))}return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))))});`);
+    res.send(`const CACHE_NAME='comfort-v9.0';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/login','/offline'])).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));self.clients.claim()});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{if(r.status===200){const rc=r.clone();caches.open(CACHE_NAME).then(c=>c.put(e.request,rc))}return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))))});`);
   }
 });
 
@@ -560,7 +560,8 @@ app.use((req, res, next) => {
 const CSRF_EXEMPT_PATHS = [
   '/api/webhook/', '/ipn/', '/pesapal/ipn', '/flutterwave/webhook',
   '/mtn-momo/callback', '/dpo/callback', '/api/public/', '/stripe/webhook',
-  '/auth/google', '/auth/microsoft', '/auth/callback'
+  '/auth/google', '/auth/microsoft', '/auth/callback',
+  '/invite/accept', '/invite/decline'
 ];
 const isCSRFExempt = (path) => CSRF_EXEMPT_PATHS.some(p => path.includes(p));
 
@@ -765,7 +766,7 @@ const VALID_TABLES = new Set([
   'org_attachments', 'meeting_action_items', 'org_health_scores',
   'org_meeting_minutes', 'org_surveys', 'org_survey_responses',
   'org_discussions', 'org_discussion_replies', 'org_email_templates',
-  'org_broadcasts', 'org_data_backups'
+  'org_broadcasts', 'org_data_backups', 'user_invitations'
 ]);
 const validateTable = (table) => {
   if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
@@ -3879,8 +3880,8 @@ app.get('/login', (req, res) => {
           <div class="auth-subtitle">Sign in to your Comfort account</div>
         </div>
         <form method="POST" action="/login">
-          <input name="email" type="email" placeholder="Email address" required class="auth-input">
-          <input name="password" type="password" placeholder="Password" required class="auth-input">
+          <input name="email" type="email" placeholder="Email address" required class="auth-input" data-validate="required,email">
+          <input name="password" type="password" placeholder="Password" required class="auth-input" data-validate="required">
           <button type="submit" class="auth-btn">Login</button>
         </form>
         <div class="auth-links">No account? <a href="/register">Create one</a></div>
@@ -4100,8 +4101,8 @@ app.get('/register', (req, res) => {
           <div class="auth-subtitle">Join Comfort Zone — All-in-one management platform for Africa</div>
         </div>
         <form method="POST" action="/register" id="regForm">
-          <input name="name" placeholder="Your Full Name" required class="auth-input">
-          <input name="org_name" placeholder="Organization / Institution / Business Name" required class="auth-input">
+          <input name="name" placeholder="Your Full Name" required class="auth-input" data-validate="required,minLength:2">
+          <input name="org_name" placeholder="Organization / Institution / Business Name" required class="auth-input" data-validate="required,minLength:2">
           <label class="auth-label">Portal Type *</label>
           <select name="type" id="regType" required onchange="toggleBizSubtype()" class="auth-select">
             <option value="">-- Select Portal Type --</option>
@@ -4117,9 +4118,9 @@ app.get('/register', (req, res) => {
           </div>
           <label class="auth-label">Subscription Plan *</label>
           ${planRadios}
-          <input name="email" type="email" placeholder="Your Email" required class="auth-input">
-          <input name="phone" placeholder="Phone +256..." required class="auth-input">
-          <input name="password" type="password" placeholder="Choose a Password (min 8 chars)" minlength="8" required class="auth-input">
+          <input name="email" type="email" placeholder="Your Email" required class="auth-input" data-validate="required,email">
+          <input name="phone" placeholder="Phone +256..." required class="auth-input" data-validate="required,phone">
+          <input name="password" type="password" placeholder="Choose a Password (min 8 chars)" minlength="8" required class="auth-input" data-validate="required,minLength:8">
           <input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required class="auth-input">
           <button type="submit" class="auth-btn">Create Account &rarr;</button>
         </form>
@@ -4792,8 +4793,8 @@ app.get('/school/students/new', requireAuth, requireNotBanned, ah(async (req, re
   res.send(renderPage('Add Student', `
     <div class="card" style="max-width:600px;margin:40px auto"><h3>Add New Student</h3>
       <form method="POST" action="/school/students/save">
-        <input name="admission_no" placeholder="Admission Number" required>
-        <input name="name" placeholder="Full Name" required>
+        <input name="admission_no" placeholder="Admission Number" required data-validate="required">
+        <input name="name" placeholder="Full Name" required data-validate="required,minLength:2">
         <select name="class" onchange="var o=this.nextElementSibling;o.style.display=this.value==='__other'?'block':'none';if(this.value!=='__other')o.value=''">
           <option value="">Select Class</option>
           ${classes.rows.map(c => '<option>'+esc(c.class)+'</option>').join('')}
@@ -4807,7 +4808,7 @@ app.get('/school/students/new', requireAuth, requireNotBanned, ah(async (req, re
         </select>
         <input name="stream_other" style="display:none" class="form-control" placeholder="Enter new stream">
         <input name="guardian_name" placeholder="Guardian/Parent Name">
-        <input name="guardian_phone" placeholder="Guardian Phone +256...">
+        <input name="guardian_phone" placeholder="Guardian Phone +256..." data-validate="phone">
         <button class="btn btn-green">Add Student</button>
       </form>
     </div>
@@ -4999,7 +5000,7 @@ app.get('/school/fees/pay', requireAuth, requireNotBanned, ah(async (req, res) =
         <select name="fee_id" required><option value="">Select Student (with balance)</option>
           ${fees.map(f => `<option value="${f.id}">${esc(f.student_name)} - Balance UGX ${(f.amount - f.paid).toLocaleString()} (${f.term} ${f.year})</option>`).join('')}
         </select>
-        <input name="amount" type="number" placeholder="Payment Amount UGX" required>
+        <input name="amount" type="number" placeholder="Payment Amount UGX" required data-validate="required,numeric,min:1">
         <button class="btn btn-green">Record Payment</button>
       </form>
     </div>
@@ -9274,8 +9275,8 @@ app.get('/settings/profile', requireAuth, ah(async (req, res) => {
   res.send(renderPage('Profile Settings', `
     <div class="card" style="max-width:600px;margin:40px auto"><h3>Organization Profile</h3>
       <form method="POST" action="/settings/profile/save">
-        <input name="name" value="${esc(tenant.name)}" required>
-        <input name="email" type="email" value="${esc(tenant.email)}">
+        <input name="name" value="${esc(tenant.name)}" required data-validate="required,minLength:2">
+        <input name="email" type="email" value="${esc(tenant.email)}" data-validate="email">
         <input name="phone" value="${esc(tenant.phone)}">
         <input name="address" value="${esc(tenant.address || '')}" placeholder="Address">
         <textarea name="description" rows="4" placeholder="About your organization">${esc(tenant.description || '')}</textarea>
@@ -10483,18 +10484,23 @@ app.get('/api/subscription/status', requireAuth, ah(async (req, res) => {
 // === TEAM MANAGEMENT — ADMIN/STAFF ACCESS ===
 app.get('/team', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const [users, roles] = await Promise.all([
+  const msg = req.query.msg ? `<div class="alert alert-success" style="margin-bottom:16px">&#10003; ${esc(req.query.msg)}</div>` : '';
+  const [users, roles, pendingInvites] = await Promise.all([
     pool.query('SELECT u.id,u.email,u.role,u.approved,u.is_active,u.permissions,u.created_at FROM users u WHERE u.tenant_id=$1 ORDER BY u.created_at DESC', [t]),
-    pool.query('SELECT * FROM role_permissions WHERE tenant_id=$1', [t])
+    pool.query('SELECT * FROM role_permissions WHERE tenant_id=$1', [t]),
+    pool.query('SELECT * FROM user_invitations WHERE tenant_id=$1 AND accepted_at IS NULL AND declined_at IS NULL AND expires_at > NOW() ORDER BY created_at DESC', [t])
   ]);
   const isAdmin = req.session.user.role === 'admin' || req.session.user.role === 'super_admin';
+  const csrfToken = req.csrfToken || req.cookies?.['CSRF-TOKEN'] || '';
   res.send(renderPage('Team Management', `
+    ${msg}
     <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
       <h1>Team & Access Control</h1><p style="opacity:0.9;margin-top:4px">Manage who can access what in your organization</p>
     </div>
-    ${isAdmin ? `<div class="card"><h3>Add Team Member</h3>
+    ${isAdmin ? `
+    <div class="card"><h3>Add Team Member (Manual)</h3>
       <form method="POST" action="/team/invite" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div><label>Email</label><input name="email" type="email" placeholder="staff@example.com" required></div>
+        <div><label>Email</label><input name="email" type="email" placeholder="staff@example.com" required data-validate="required,email"></div>
         <div><label>Role</label>
           <select name="role">
             <option value="staff">Staff (Basic Access)</option>
@@ -10510,7 +10516,51 @@ app.get('/team', requireAuth, ah(async (req, res) => {
         <div style="grid-column:1/-1"><button class="btn btn-green" type="submit">Add Team Member</button></div>
       </form>
     </div>
-    <div style="display:flex;gap:10px;margin-bottom:15px">
+
+    <div class="card" style="margin-top:20px">
+      <h3>&#9993; Invite by Email</h3>
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Send an invitation email — the recipient creates their own password</p>
+      <form method="POST" action="/team/invite-email">
+        <input type="hidden" name="_csrf" value="${esc(csrfToken)}">
+        <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:end">
+          <div>
+            <label>Email Address</label>
+            <input type="email" name="email" required placeholder="colleague@example.com" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px">
+          </div>
+          <div>
+            <label>Role</label>
+            <select name="role" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px">
+              <option value="staff">Staff</option>
+              <option value="admin">Admin</option>
+              <option value="teacher">Teacher</option>
+              <option value="accountant">Accountant</option>
+              <option value="viewer">Viewer</option>
+            </select>
+          </div>
+          <button type="submit" style="padding:8px 20px;background:#4f46e5;color:white;border:none;border-radius:6px;cursor:pointer">Send Invite</button>
+        </div>
+      </form>
+    </div>
+
+    ${pendingInvites.rows.length > 0 ? `
+    <div class="card" style="margin-top:20px">
+      <h3>&#9203; Pending Invitations (${pendingInvites.rows.length})</h3>
+      <table style="width:100%;border-collapse:collapse">
+        <tr style="background:#f8fafc"><th style="padding:8px;text-align:left">Email</th><th style="padding:8px;text-align:left">Role</th><th style="padding:8px;text-align:left">Sent</th><th style="padding:8px;text-align:left">Expires</th><th style="padding:8px;text-align:left">Action</th></tr>
+        ${pendingInvites.rows.map(inv => `
+          <tr>
+            <td style="padding:8px">${esc(inv.email)}</td>
+            <td style="padding:8px"><span class="tag">${esc(inv.role)}</span></td>
+            <td style="padding:8px">${new Date(inv.created_at).toLocaleDateString()}</td>
+            <td style="padding:8px">${new Date(inv.expires_at).toLocaleDateString()}</td>
+            <td style="padding:8px"><a href="/team/invite/cancel/${inv.id}" style="color:#ef4444" onclick="return confirm('Cancel invitation to ${esc(inv.email)}?')">Cancel</a></td>
+          </tr>
+        `).join('')}
+      </table>
+    </div>
+    ` : ''}
+
+    <div style="display:flex;gap:10px;margin-bottom:15px;margin-top:15px">
       <a href="/team/permissions" class="btn" style="background:#7c3aed;color:white">Manage Role Permissions</a>
     </div>` : '<p class="muted">Only admins can add team members.</p>'}
 
@@ -45204,6 +45254,316 @@ app.get('/admin/rbac', requireAuth, requireNotBanned, requireRole('admin', 'supe
 }));
 
 console.log('[UniversalRBAC] Portal-agnostic RBAC routes registered — /rbac/* (accessible from all portal types)');
+
+// ============================================================
+// EMAIL-BASED USER INVITATIONS — Accept/Reject Flow
+// ============================================================
+
+// POST /team/invite-email — Send invitation email to a new user
+app.post('/team/invite-email', requireAuth, requireNotBanned, requireRole('admin'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { email, role } = req.body;
+  const inviterName = req.session.user.email;
+  const validRoles = ['staff', 'admin', 'teacher', 'accountant', 'nurse', 'viewer', 'librarian'];
+  const assignedRole = validRoles.includes(role) ? role : 'staff';
+
+  if (!email || !validateEmail(email)) {
+    return res.redirect('/team?msg=' + encodeURIComponent('Please enter a valid email address'));
+  }
+
+  // Check if user already exists in this tenant
+  const existingUser = (await pool.query('SELECT id FROM users WHERE email=$1 AND tenant_id=$2', [email, t])).rows[0];
+  if (existingUser) {
+    return res.redirect('/team?msg=' + encodeURIComponent('A user with this email already exists in your organization'));
+  }
+
+  // Check for existing pending invitation
+  const existingInvite = (await pool.query(
+    "SELECT id FROM user_invitations WHERE email=$1 AND tenant_id=$2 AND accepted_at IS NULL AND declined_at IS NULL AND expires_at > NOW()",
+    [email, t]
+  )).rows[0];
+  if (existingInvite) {
+    return res.redirect('/team?msg=' + encodeURIComponent('A pending invitation already exists for this email'));
+  }
+
+  // Generate unique token and set expiry (7 days)
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const baseUrl = PLATFORM_CONFIG.baseUrl || process.env.BASE_URL || 'https://ssewasswa.onrender.com';
+
+  // Get tenant name for the email
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const orgName = tenant?.name || 'Ssewasswa Platform';
+
+  // Insert invitation record
+  await pool.query(
+    'INSERT INTO user_invitations(tenant_id, email, role, token, invited_by, expires_at) VALUES($1,$2,$3,$4,$5,$6)',
+    [t, email, assignedRole, token, req.session.user.id, expiresAt]
+  );
+
+  // Send branded invitation email
+  const emailHtml = `
+    <h2>You're Invited!</h2>
+    <p><strong>${esc(inviterName)}</strong> has invited you to join <strong>${esc(orgName)}</strong> on Ssewasswa Platform.</p>
+    <p>Your role: <strong>${esc(assignedRole)}</strong></p>
+    <div style="margin:20px 0">
+      <a href="${baseUrl}/invite/accept?token=${token}" style="background:#4f46e5;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block">Accept Invitation</a>
+      <a href="${baseUrl}/invite/decline?token=${token}" style="background:#ef4444;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block;margin-left:8px">Decline</a>
+    </div>
+    <p style="color:#94a3b8;font-size:13px">This invitation expires in 7 days.</p>
+  `;
+  await sendEmail(email, `You're invited to join ${orgName}`, emailHtml, orgName, t);
+
+  await audit(inviterName, 'invite_user', `Invited ${email} as ${assignedRole}`, t, req);
+
+  res.redirect('/team?msg=' + encodeURIComponent(`Invitation sent to ${email}`));
+}));
+
+// GET /invite/accept?token=xxx — Show invitation acceptance form
+app.get('/invite/accept', ah(async (req, res) => {
+  const { token } = req.query;
+  if (!token) {
+    return res.send(renderPage('Invalid Invitation', '<div class="card"><div class="alert alert-error"><h2>Invalid Invitation</h2><p>This invitation link is invalid. Please contact your organization admin for a new invitation.</p></div></div>', null));
+  }
+
+  // Validate token
+  const inv = (await pool.query(
+    'SELECT ui.*, t.name as org_name FROM user_invitations ui LEFT JOIN tenants t ON ui.tenant_id=t.id WHERE ui.token=$1',
+    [token]
+  )).rows[0];
+
+  if (!inv) {
+    return res.send(renderPage('Invalid Invitation', '<div class="card"><div class="alert alert-error"><h2>Invalid Invitation</h2><p>This invitation link is invalid or has been revoked.</p></div></div>', null));
+  }
+
+  if (inv.accepted_at) {
+    return res.send(renderPage('Already Accepted', '<div class="card"><div class="alert alert-success"><h2>Invitation Already Accepted</h2><p>You have already accepted this invitation. <a href="/login">Log in</a> to continue.</p></div></div>', null));
+  }
+
+  if (inv.declined_at) {
+    return res.send(renderPage('Invitation Declined', '<div class="card"><div class="alert alert-error"><h2>Invitation Declined</h2><p>You have already declined this invitation. Contact your organization admin if you changed your mind.</p></div></div>', null));
+  }
+
+  if (new Date(inv.expires_at) < new Date()) {
+    return res.send(renderPage('Invitation Expired', '<div class="card"><div class="alert alert-error"><h2>Invitation Expired</h2><p>This invitation has expired. Please contact your organization admin for a new invitation.</p></div></div>', null));
+  }
+
+  res.send(renderPage('Accept Invitation', `
+    <style>
+      .invite-wrapper{max-width:480px;margin:32px auto}
+      .invite-card{background:var(--bg-card);border-radius:16px;padding:32px;box-shadow:var(--shadow-lg);border:1px solid var(--border)}
+      .invite-header{text-align:center;margin-bottom:24px}
+      .invite-icon{display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;font-size:24px;margin-bottom:12px}
+      .invite-header h2{margin:0;font-size:22px;font-weight:700}
+      .invite-header p{color:var(--text-muted);font-size:14px;margin-top:4px}
+      .invite-details{background:var(--bg-body);border-radius:12px;padding:16px;margin:16px 0}
+      .invite-details dt{font-weight:600;margin-top:8px}
+      .invite-details dt:first-child{margin-top:0}
+      .invite-details dd{color:var(--text-muted);margin:2px 0 0}
+      .invite-form label{display:block;font-weight:600;margin-top:14px;margin-bottom:4px}
+      .invite-form input{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box;background:var(--input-bg);color:var(--text)}
+      .invite-form input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(79,70,229,0.1)}
+      .invite-btn{width:100%;padding:12px;border:none;border-radius:8px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;font-size:15px;font-weight:700;cursor:pointer;margin-top:20px}
+      .invite-btn:hover{opacity:0.95}
+    </style>
+    <div class="invite-wrapper">
+      <div class="invite-card">
+        <div class="invite-header">
+          <div class="invite-icon">&#128279;</div>
+          <h2>You're Invited!</h2>
+          <p>Join your team on Ssewasswa Platform</p>
+        </div>
+        <div class="invite-details">
+          <dt>Organization</dt><dd>${esc(inv.org_name || 'Ssewasswa Platform')}</dd>
+          <dt>Your Email</dt><dd>${esc(inv.email)}</dd>
+          <dt>Your Role</dt><dd>${esc(inv.role)}</dd>
+        </div>
+        <form class="invite-form" method="POST" action="/invite/accept?token=${esc(token)}">
+          <input type="hidden" name="token" value="${esc(token)}">
+          <label>Full Name</label>
+          <input type="text" name="name" required placeholder="Your full name" autocomplete="name">
+          <label>Phone Number</label>
+          <input type="tel" name="phone" placeholder="+256 700 000 000" autocomplete="tel">
+          <label>Password</label>
+          <input type="password" name="password" required placeholder="Create a password (min 8 chars)" autocomplete="new-password" minlength="8">
+          <button type="submit" class="invite-btn">Accept & Create Account</button>
+        </form>
+        <p style="text-align:center;margin-top:12px"><a href="/invite/decline?token=${esc(token)}" style="color:#ef4444;font-size:13px">Decline this invitation</a></p>
+      </div>
+    </div>
+  `, null));
+}));
+
+// POST /invite/accept — Process invitation acceptance
+app.post('/invite/accept', ah(async (req, res) => {
+  const { token, name, phone, password } = req.body;
+
+  if (!token) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Invalid invitation token.</div></div>', null));
+  }
+
+  // Validate password
+  if (!password || password.length < 8) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error"><h2>Password Too Short</h2><p>Password must be at least 8 characters long.</p><a href="/invite/accept?token=' + esc(token) + '" class="btn">Go Back</a></div></div>', null));
+  }
+
+  // Validate invitation
+  const inv = (await pool.query(
+    'SELECT ui.*, t.name as org_name FROM user_invitations ui LEFT JOIN tenants t ON ui.tenant_id=t.id WHERE ui.token=$1',
+    [token]
+  )).rows[0];
+
+  if (!inv || inv.accepted_at || inv.declined_at || new Date(inv.expires_at) < new Date()) {
+    return res.send(renderPage('Invalid Invitation', '<div class="card"><div class="alert alert-error"><h2>Invalid or Expired Invitation</h2><p>This invitation is no longer valid. Please contact your organization admin.</p></div></div>', null));
+  }
+
+  // Check if user already exists with this email in the tenant
+  const existingUser = (await pool.query('SELECT id FROM users WHERE email=$1 AND tenant_id=$2', [inv.email, inv.tenant_id])).rows[0];
+  if (existingUser) {
+    // Mark invitation as accepted and redirect to login
+    await pool.query('UPDATE user_invitations SET accepted_at=NOW() WHERE id=$1', [inv.id]);
+    return res.redirect('/login');
+  }
+
+  // Create user account
+  const hash = await bcrypt.hash(password, PLATFORM_CONFIG.bcryptRounds || 12);
+  const displayName = name || inv.email.split('@')[0];
+  const result = await pool.query(
+    'INSERT INTO users(tenant_id, email, password, role, approved, is_active, permissions, phone, name) VALUES($1,$2,$3,$4,true,true,$5,$6,$7) RETURNING id, email, role, tenant_id, approved, is_active',
+    [inv.tenant_id, inv.email, hash, inv.role, '', phone || null, displayName]
+  );
+
+  // Mark invitation as accepted
+  await pool.query('UPDATE user_invitations SET accepted_at=NOW() WHERE id=$1', [inv.id]);
+
+  // Auto-login the new user
+  const newUser = result.rows[0];
+  // Enrich session with tenant info like login route does
+  const tenantRow = (await pool.query('SELECT name, type FROM tenants WHERE id=$1', [inv.tenant_id])).rows[0];
+  newUser.tenant_name = tenantRow?.name;
+  newUser.tenant_type = tenantRow?.type;
+  req.session.user = newUser;
+
+  await audit(inv.email, 'accept_invitation', `Accepted invitation to join ${inv.org_name || 'organization'}`, inv.tenant_id, req);
+
+  res.redirect('/dashboard?msg=' + encodeURIComponent(`Welcome to ${inv.org_name || 'Ssewasswa Platform'}!`));
+}));
+
+// GET /invite/decline?token=xxx — Show decline confirmation page
+app.get('/invite/decline', ah(async (req, res) => {
+  const { token } = req.query;
+  if (!token) {
+    return res.send(renderPage('Invalid Invitation', '<div class="card"><div class="alert alert-error"><h2>Invalid Invitation</h2><p>This invitation link is invalid.</p></div></div>', null));
+  }
+
+  const inv = (await pool.query(
+    'SELECT ui.*, t.name as org_name FROM user_invitations ui LEFT JOIN tenants t ON ui.tenant_id=t.id WHERE ui.token=$1',
+    [token]
+  )).rows[0];
+
+  if (!inv) {
+    return res.send(renderPage('Invalid Invitation', '<div class="card"><div class="alert alert-error"><h2>Invalid Invitation</h2><p>This invitation link is invalid or has been revoked.</p></div></div>', null));
+  }
+
+  if (inv.accepted_at) {
+    return res.redirect('/login');
+  }
+
+  if (inv.declined_at) {
+    return res.send(renderPage('Already Declined', '<div class="card"><div class="alert alert-error"><h2>Invitation Already Declined</h2><p>You have already declined this invitation.</p></div></div>', null));
+  }
+
+  if (new Date(inv.expires_at) < new Date()) {
+    return res.send(renderPage('Invitation Expired', '<div class="card"><div class="alert alert-error"><h2>Invitation Expired</h2><p>This invitation has already expired.</p></div></div>', null));
+  }
+
+  res.send(renderPage('Decline Invitation', `
+    <style>
+      .decline-wrapper{max-width:480px;margin:32px auto}
+      .decline-card{background:var(--bg-card);border-radius:16px;padding:32px;box-shadow:var(--shadow-lg);border:1px solid var(--border);text-align:center}
+      .decline-icon{display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:16px;background:#fef2f2;color:#ef4444;font-size:24px;margin-bottom:12px}
+      .decline-card h2{margin:0 0 8px;font-size:22px;font-weight:700}
+      .decline-card p{color:var(--text-muted);font-size:14px;margin:4px 0}
+      .decline-details{background:var(--bg-body);border-radius:12px;padding:16px;margin:16px 0;text-align:left}
+      .decline-details dt{font-weight:600;margin-top:8px}
+      .decline-details dt:first-child{margin-top:0}
+      .decline-details dd{color:var(--text-muted);margin:2px 0 0}
+      .decline-btn{padding:12px 28px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;margin:4px}
+      .decline-btn-red{background:#ef4444;color:white}
+      .decline-btn-red:hover{background:#dc2626}
+      .decline-btn-gray{background:#e2e8f0;color:#475569}
+      .decline-btn-gray:hover{background:#cbd5e1}
+    </style>
+    <div class="decline-wrapper">
+      <div class="decline-card">
+        <div class="decline-icon">&#10060;</div>
+        <h2>Decline Invitation?</h2>
+        <p>Are you sure you want to decline this invitation?</p>
+        <div class="decline-details">
+          <dt>Organization</dt><dd>${esc(inv.org_name || 'Ssewasswa Platform')}</dd>
+          <dt>Email</dt><dd>${esc(inv.email)}</dd>
+          <dt>Role</dt><dd>${esc(inv.role)}</dd>
+        </div>
+        <form method="POST" action="/invite/decline?token=${esc(token)}" style="margin-top:16px">
+          <input type="hidden" name="token" value="${esc(token)}">
+          <button type="submit" class="decline-btn decline-btn-red">Yes, Decline</button>
+          <a href="/invite/accept?token=${esc(token)}" class="decline-btn decline-btn-gray" style="text-decoration:none;display:inline-block;line-height:20px">Go Back</a>
+        </form>
+      </div>
+    </div>
+  `, null));
+}));
+
+// POST /invite/decline — Process decline
+app.post('/invite/decline', ah(async (req, res) => {
+  const { token } = req.body;
+  if (!token) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Invalid request.</div></div>', null));
+  }
+
+  const inv = (await pool.query(
+    'SELECT * FROM user_invitations WHERE token=$1',
+    [token]
+  )).rows[0];
+
+  if (!inv || inv.accepted_at || inv.declined_at || new Date(inv.expires_at) < new Date()) {
+    return res.send(renderPage('Invalid Invitation', '<div class="card"><div class="alert alert-error"><h2>Invalid or Expired</h2><p>This invitation is no longer valid.</p></div></div>', null));
+  }
+
+  await pool.query('UPDATE user_invitations SET declined_at=NOW() WHERE id=$1', [inv.id]);
+
+  await audit(inv.email, 'decline_invitation', `Declined invitation to join organization (tenant_id: ${inv.tenant_id})`, inv.tenant_id, req);
+
+  res.send(renderPage('Invitation Declined', `
+    <div style="max-width:480px;margin:32px auto">
+      <div class="card" style="text-align:center;padding:32px">
+        <div style="display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:16px;background:#fef2f2;color:#ef4444;font-size:24px;margin-bottom:12px">&#10060;</div>
+        <h2>You've Declined the Invitation</h2>
+        <p style="color:var(--text-muted)">The organization admin has been notified. If you change your mind, please contact them for a new invitation.</p>
+      </div>
+    </div>
+  `, null));
+}));
+
+// GET /team/invite/cancel/:id — Cancel a pending invitation
+app.get('/team/invite/cancel/:id', requireAuth, requireNotBanned, requireRole('admin'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const invId = req.params.id;
+
+  const inv = (await pool.query(
+    'SELECT * FROM user_invitations WHERE id=$1 AND tenant_id=$2 AND accepted_at IS NULL AND declined_at IS NULL',
+    [invId, t]
+  )).rows[0];
+
+  if (inv) {
+    await pool.query('DELETE FROM user_invitations WHERE id=$1', [invId]);
+    await audit(req.session.user.email, 'cancel_invitation', `Cancelled invitation for ${inv.email}`, t, req);
+  }
+
+  res.redirect('/team?msg=' + encodeURIComponent('Invitation cancelled'));
+}));
+
+console.log('[Invitations] Email-based user invitation routes registered — /team/invite-email, /invite/accept, /invite/decline');
 
 // ============================================================
 // PHASE 4 COMPLETE: All remaining gap analysis tasks implemented

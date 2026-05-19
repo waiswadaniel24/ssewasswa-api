@@ -640,3 +640,148 @@
 
   console.log('[Dashboard Customization] Initialized');
 })();
+
+// === Client-Side Form Validation ===
+(function() {
+  // Validation rules
+  var validators = {
+    required: function(val) { return val.trim().length > 0; },
+    email: function(val) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val); },
+    phone: function(val) { return /^[\+]?[\d\s\-\(\)]{7,15}$/.test(val); },
+    numeric: function(val) { return /^\d+(\.\d+)?$/.test(val); },
+    integer: function(val) { return /^\d+$/.test(val); },
+    minLength: function(val, len) { return val.length >= parseInt(len); },
+    maxLength: function(val, len) { return val.length <= parseInt(len); },
+    min: function(val, min) { return parseFloat(val) >= parseFloat(min); },
+    max: function(val, max) { return parseFloat(val) <= parseFloat(max); },
+    url: function(val) { try { new URL(val); return true; } catch(e) { return false; } },
+    pattern: function(val, pat) { return new RegExp(pat).test(val); }
+  };
+
+  var errorMessages = {
+    required: 'This field is required',
+    email: 'Please enter a valid email address',
+    phone: 'Please enter a valid phone number',
+    numeric: 'Please enter a number',
+    integer: 'Please enter a whole number',
+    minLength: 'Must be at least {0} characters',
+    maxLength: 'Must be at most {0} characters',
+    min: 'Must be at least {0}',
+    max: 'Must be at most {0}',
+    url: 'Please enter a valid URL',
+    pattern: 'Invalid format'
+  };
+
+  // Validate a single input
+  function validateInput(input) {
+    var rules = (input.dataset.validate || '').split(',').filter(Boolean);
+    if (!rules.length && input.required) rules.push('required');
+
+    var value = input.value;
+    var errors = [];
+
+    for (var i = 0; i < rules.length; i++) {
+      var parts = rules[i].split(':');
+      var rule = parts[0];
+      var param = parts[1];
+
+      // Skip validation if empty and not required
+      if (rule !== 'required' && value.trim() === '') continue;
+
+      var validator = validators[rule];
+      if (validator && !validator(value, param)) {
+        var msg = errorMessages[rule] || 'Invalid value';
+        msg = msg.replace('{0}', param);
+        errors.push(msg);
+        break; // Show one error at a time per field
+      }
+    }
+
+    return errors;
+  }
+
+  // Show/hide error for an input
+  function showError(input, errors) {
+    var container = input.parentElement;
+    var existing = container.querySelector('.validation-error');
+
+    if (existing) existing.remove();
+    input.classList.remove('validation-invalid', 'validation-valid');
+
+    if (errors.length) {
+      input.classList.add('validation-invalid');
+      var errEl = document.createElement('div');
+      errEl.className = 'validation-error';
+      errEl.textContent = errors[0];
+      errEl.style.cssText = 'color:#ef4444;font-size:12px;margin-top:2px;padding-left:4px';
+      container.appendChild(errEl);
+    } else if (input.value.trim()) {
+      input.classList.add('validation-valid');
+    }
+  }
+
+  // Validate all inputs in a form
+  function validateForm(form) {
+    var inputs = form.querySelectorAll('input, select, textarea');
+    var isValid = true;
+    var firstInvalidFocused = false;
+
+    for (var i = 0; i < inputs.length; i++) {
+      var errors = validateInput(inputs[i]);
+      showError(inputs[i], errors);
+      if (errors.length) {
+        isValid = false;
+        // Focus first invalid input only
+        if (!firstInvalidFocused) {
+          inputs[i].focus();
+          firstInvalidFocused = true;
+        }
+      }
+    }
+
+    return isValid;
+  }
+
+  // Attach to all forms
+  document.addEventListener('DOMContentLoaded', function() {
+    // Real-time validation on blur
+    document.addEventListener('blur', function(e) {
+      if (e.target.matches && e.target.matches('input, textarea, select')) {
+        var errors = validateInput(e.target);
+        showError(e.target, errors);
+      }
+    }, true);
+
+    // Validate on input (after first blur / once validation state is set)
+    document.addEventListener('input', function(e) {
+      if (e.target.classList.contains('validation-invalid') || e.target.classList.contains('validation-valid')) {
+        var errors = validateInput(e.target);
+        showError(e.target, errors);
+      }
+    });
+
+    // Validate on form submit
+    document.addEventListener('submit', function(e) {
+      var form = e.target;
+      if (!form.noValidate) {
+        if (!validateForm(form)) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (window.showToast) {
+            showToast('Please fix the errors before submitting', 'error');
+          }
+          return false;
+        }
+        // Add loading state to submit button
+        var submitBtn = form.querySelector('[type="submit"], button:not([type])');
+        if (submitBtn && window.setButtonLoading) {
+          setButtonLoading(submitBtn, true);
+        }
+      }
+    }, true);
+  });
+
+  // Expose for manual use
+  window.validateForm = validateForm;
+  window.validateInput = validateInput;
+})();

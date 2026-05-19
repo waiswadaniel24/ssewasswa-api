@@ -1,5 +1,6 @@
 // ============================================================
-// Comfort Zone — Service Worker v8.0 (Updated 2026-05-19)
+// Comfort Zone — Service Worker v9.0 (Updated 2026-05-19)
+// PWA Install Fix: SW version bumped to force re-registration
 // ============================================================
 // Strategies:
 //   - Cache-first: static assets (HTML, CSS, JS, images, fonts)
@@ -9,10 +10,10 @@
 //   - Push notifications: enhanced with data and actions
 // ============================================================
 
-const CACHE_NAME = 'comfort-v8.0';
-const STATIC_CACHE = 'comfort-static-v8.0';
-const DATA_CACHE = 'comfort-data-v8.0';
-const OFFLINE_CACHE = 'comfort-offline-v8.0';
+const CACHE_NAME = 'comfort-v9.0';
+const STATIC_CACHE = 'comfort-static-v9.0';
+const DATA_CACHE = 'comfort-data-v9.0';
+const OFFLINE_CACHE = 'comfort-offline-v9.0';
 
 // Assets to pre-cache on install
 const PRECACHE_URLS = [
@@ -43,7 +44,7 @@ const SWR_PREFIXES = ['/dashboard', '/students', '/fees'];
 // INSTALL EVENT
 // ============================================================
 self.addEventListener('install', event => {
-  console.log('[SW] Installing service worker v8.0...');
+  console.log('[SW] Installing service worker v9.0...');
   event.waitUntil(
     caches.open(STATIC_CACHE).then(cache => {
       return cache.addAll(PRECACHE_URLS).catch(err => {
@@ -61,12 +62,12 @@ self.addEventListener('install', event => {
 // ACTIVATE EVENT
 // ============================================================
 self.addEventListener('activate', event => {
-  console.log('[SW] Activating service worker v8.0...');
+  console.log('[SW] Activating service worker v9.0...');
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames
-          .filter(name => !name.includes('v8.0'))
+          .filter(name => !name.includes('v9.0'))
           .map(name => {
             console.log('[SW] Deleting old cache:', name);
             return caches.delete(name);
