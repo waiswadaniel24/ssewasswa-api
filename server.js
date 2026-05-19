@@ -800,6 +800,120 @@ const createFlutterwaveCheckout = async (tenantId, amount, email, plan, referenc
 };
 
 // ============================================================
+// PESAPAL PAYMENT GATEWAY (M-Pesa, Airtel Money, Visa, MC)
+// ============================================================
+const PESAPAL_CONSUMER_KEY = process.env.PESAPAL_CONSUMER_KEY || '';
+const PESAPAL_CONSUMER_SECRET = process.env.PESAPAL_CONSUMER_SECRET || '';
+const PESAPAL_BASE_URL = process.env.PESAPAL_MODE === 'live'
+  ? 'https://pay.pesapal.com/v3'
+  : 'https://cybqa.pesapal.com/cybqa/api';
+
+let pesapalToken = null;
+let pesapalTokenExpiry = 0;
+
+const getPesapalToken = async () => {
+  if (pesapalToken && Date.now() < pesapalTokenExpiry) return pesapalToken;
+  if (!PESAPAL_CONSUMER_KEY || !PESAPAL_CONSUMER_SECRET) return null;
+  try {
+    const auth = Buffer.from(`${PESAPAL_CONSUMER_KEY}:${PESAPAL_CONSUMER_SECRET}`).toString('base64');
+    const resp = await fetch(`${PESAPAL_BASE_URL}/api/Auth/RequestToken`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    const data = await resp.json();
+    if (data.token) {
+      pesapalToken = data.token;
+      pesapalTokenExpiry = Date.now() + (data.expiry_in_seconds ? (data.expiry_in_seconds - 60) * 1000 : 3500000);
+      return pesapalToken;
+    }
+    return null;
+  } catch (e) {
+    console.warn('PesaPal auth error:', e.message);
+    return null;
+  }
+};
+
+const submitPesapalOrder = async (order) => {
+  const token = await getPesapalToken();
+  if (!token) return null;
+  try {
+    const resp = await fetch(`${PESAPAL_BASE_URL}/api/Transactions/SubmitOrder`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        id: order.reference,
+        currency: order.currency || 'UGX',
+        amount: order.amount,
+        description: order.description || 'Comfort Payment',
+        callback_url: order.callbackUrl,
+        cancellation_url: order.cancelUrl,
+        notification_id: order.notificationId || '',
+        billing_address: {
+          email_address: order.email || '',
+          phone_number: order.phone || '',
+          country_code: order.countryCode || 'UG',
+          first_name: order.firstName || '',
+          last_name: order.lastName || '',
+          line_1: '',
+          city: '',
+          state: '',
+          postal_code: '',
+          zip_code: ''
+        }
+      })
+    });
+    const data = await resp.json();
+    return data;
+  } catch (e) {
+    console.warn('PesaPal submit order error:', e.message);
+    return null;
+  }
+};
+
+const getPesapalTransactionStatus = async (orderTrackingId) => {
+  const token = await getPesapalToken();
+  if (!token) return null;
+  try {
+    const resp = await fetch(`${PESAPAL_BASE_URL}/api/Transactions/GetTransactionStatus?orderTrackingId=${encodeURIComponent(orderTrackingId)}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    return await resp.json();
+  } catch (e) {
+    console.warn('PesaPal status error:', e.message);
+    return null;
+  }
+};
+
+const registerPesapalIPN = async (ipnUrl) => {
+  const token = await getPesapalToken();
+  if (!token) return null;
+  try {
+    const resp = await fetch(`${PESAPAL_BASE_URL}/api/RegisteredIPN`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        url: ipnUrl,
+        ipn_notification_type: 'POST'
+      })
+    });
+    const data = await resp.json();
+    return data;
+  } catch (e) {
+    console.warn('PesaPal IPN registration error:', e.message);
+    return null;
+  }
+};
+
+// ============================================================
 // v12.1: UGANDA PAYMENT PROVIDERS (MTN MoMo + Airtel Money + DPO)
 // ============================================================
 
@@ -10361,6 +10475,212 @@ app.get('/billing/callback', requireAuth, ah(async (req, res) => {
     }
   }
   res.redirect('/billing');
+}));
+
+// ============================================================
+// PESAPAL PAYMENT ROUTES
+// ============================================================
+
+// Initiate PesaPal payment
+app.post('/pay/pesapal/initiate', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { phone, email, amount, reference, plan, description, type, item_id } = req.body;
+  const amt = parseInt(amount) || 0;
+  const ref = reference || 'PP-' + Date.now();
+  const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
+
+  if (amt <= 0) return res.redirect('/billing?error=invalid_amount');
+
+  // Get tenant country for currency
+  const countryCode = await getTenantCountry(t);
+  const countryCfg = COUNTRY_PAYMENT_CONFIG[countryCode] || COUNTRY_PAYMENT_CONFIG.UG;
+  const currency = countryCfg.currency;
+
+  // Submit order to PesaPal
+  const result = await submitPesapalOrder({
+    reference: ref,
+    amount: amt,
+    currency: currency,
+    description: description || `${plan || 'Comfort'} Payment`,
+    email: email || req.session.user.email || '',
+    phone: phone || '',
+    countryCode: countryCode,
+    firstName: req.session.user.name?.split(' ')[0] || '',
+    lastName: req.session.user.name?.split(' ').slice(1).join(' ') || '',
+    callbackUrl: `${baseUrl}/pay/pesapal/callback`,
+    cancelUrl: `${baseUrl}/billing`
+  });
+
+  if (result && result.redirect_url) {
+    // Update payment record with pesapal method
+    await pool.query('UPDATE payments SET method=$1 WHERE reference=$2', ['pesapal', ref]);
+    // Store pesapal order tracking
+    try {
+      await pool.query('INSERT INTO momo_payments(tenant_id,phone,amount,reference,status,type,external_ref) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING', [t, phone||req.session.user.email, amt, ref, 'pending', 'pesapal', result.order_tracking_id || ref]);
+    } catch(e) { /* log but don't block */ }
+    // Redirect to PesaPal payment page
+    return res.redirect(result.redirect_url);
+  }
+
+  // If PesaPal submission failed, show error
+  res.send(renderPage('Payment Error', `
+    <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+      <div style="width:70px;height:70px;border-radius:50%;background:#fee2e2;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:32px;color:#dc2626">!</div>
+      <h2>Payment Initiation Failed</h2>
+      <p class="muted" style="margin:15px 0">${result?.error?.message || result?.message || 'Could not connect to PesaPal. Please try again or use another payment method.'}</p>
+      <div class="card" style="background:#f8fafc">
+        <p>Amount: ${currency} ${amt.toLocaleString()}</p>
+        <p>Reference: ${esc(ref)}</p>
+      </div>
+      <a href="/pay/checkout?amount=${amt}&plan=${esc(plan||'')}&description=${esc(description||'')}" class="btn" style="margin-top:15px">Try Again</a>
+      <a href="/billing" class="btn btn-sm" style="margin-top:10px;display:inline-block;margin-left:10px">Back to Billing</a>
+    </div>
+  `, req.session.user));
+}));
+
+// PesaPal callback (user returns after payment)
+app.get('/pay/pesapal/callback', requireAuth, ah(async (req, res) => {
+  const { OrderTrackingId, OrderMerchantReference } = req.query;
+  const ref = OrderMerchantReference;
+
+  if (OrderTrackingId) {
+    // Check payment status from PesaPal
+    const status = await getPesapalTransactionStatus(OrderTrackingId);
+
+    if (status && status.payment_status === 'COMPLETED') {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const payment = (await client.query('SELECT * FROM payments WHERE reference=$1 FOR UPDATE', [ref])).rows[0];
+        if (payment && payment.status === 'pending') {
+          await client.query('UPDATE payments SET status=$1, method=$2 WHERE reference=$3', ['completed', 'pesapal', ref]);
+          const plan = payment.plan || 'basic';
+          const expires = new Date(Date.now() + SUBSCRIPTION_DURATION);
+          try {
+            await client.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [payment.tenant_id, plan, payment.amount, 'active', expires]);
+            // If subscription exists, update it
+            await client.query('UPDATE subscriptions SET plan=$1, amount=$2, status=$3, expires_at=$4 WHERE tenant_id=$5 AND status=$6', [plan, payment.amount, 'active', expires, payment.tenant_id, 'active']);
+          } catch(e) { logger.error('pesapal_subscription_error', { error: e.message, ref }); }
+          // Auto-verify tenant
+          await client.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
+          await client.query('UPDATE subscriptions SET auto_verified=true WHERE tenant_id=$1 AND status=$2', [payment.tenant_id, 'active']);
+          // Update momo_payments record
+          await client.query('UPDATE momo_payments SET status=$1 WHERE reference=$2 AND type=$3', ['completed', ref, 'pesapal']);
+          // Track developer revenue (90% to developer, 10% platform)
+          await client.query('INSERT INTO developer_revenue(tenant_id,amount,source,description) VALUES($1,$2,$3,$4)', [payment.tenant_id, Math.floor(payment.amount * 0.9), 'pesapal', `PesaPal subscription: ${plan}`]);
+          await audit(req.session.user.email, 'pesapal_payment', `PesaPal payment completed: ${ref} for ${plan}`);
+          await fireWebhook(payment.tenant_id, 'payment', { ref, amount: payment.amount, plan, method: 'pesapal' });
+          await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
+        }
+        await client.query('COMMIT');
+      } catch(e) {
+        await client.query('ROLLBACK');
+        logger.error('pesapal_callback_error', { error: e.message, ref });
+      } finally {
+        client.release();
+      }
+      // Show success page
+      return res.send(renderPage('Payment Successful', `
+        <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+          <div style="width:80px;height:80px;border-radius:50%;background:#dcfce7;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:40px;color:#16a34a">&#10003;</div>
+          <h2 style="color:#16a34a">Payment Successful!</h2>
+          <p style="font-size:18px;margin:15px 0">Your payment has been processed via PesaPal</p>
+          <div class="card" style="background:#f0fdf4;border:2px solid #16a34a">
+            <p>Reference: <strong>${esc(ref)}</strong></p>
+            <p>Tracking: <strong>${esc(OrderTrackingId)}</strong></p>
+          </div>
+          <p class="muted" style="margin-top:15px">Your subscription has been activated. Thank you!</p>
+          <a href="/billing" class="btn btn-green" style="margin-top:15px">Go to Billing</a>
+          <a href="/dashboard" class="btn" style="margin-top:10px;display:inline-block;margin-left:10px">Dashboard</a>
+        </div>
+      `, req.session.user));
+    } else {
+      // Payment not completed
+      const payStatus = status?.payment_status || 'UNKNOWN';
+      await pool.query('UPDATE payments SET status=$1 WHERE reference=$2', [payStatus.toLowerCase(), ref]);
+      return res.send(renderPage('Payment Pending', `
+        <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+          <div style="width:70px;height:70px;border-radius:50%;background:#fef9c3;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:32px;color:#ca8a04">&#9203;</div>
+          <h2>Payment ${payStatus === 'FAILED' ? 'Failed' : 'Pending'}</h2>
+          <p class="muted" style="margin:15px 0">Status: <strong>${esc(payStatus)}</strong></p>
+          <p class="muted">If you completed payment, it may take a few minutes to process. If payment failed, please try again.</p>
+          <a href="/pay/checkout?amount=${amt||''}&plan=${esc(plan||'')}&description=${esc(description||'')}" class="btn" style="margin-top:15px">Try Again</a>
+          <a href="/billing" class="btn btn-sm" style="margin-top:10px;display:inline-block;margin-left:10px">Back to Billing</a>
+        </div>
+      `, req.session.user));
+    }
+  }
+
+  res.redirect('/billing');
+}));
+
+// PesaPal IPN (Instant Payment Notification - server-to-server webhook from PesaPal)
+app.post('/pay/pesapal/ipn', ah(async (req, res) => {
+  try {
+    const { order_tracking_id, order_merchant_reference, payment_status, payment_method } = req.body;
+
+    if (!order_tracking_id || !order_merchant_reference) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    logger.info('pesapal_ipn', { tracking: order_tracking_id, merchant_ref: order_merchant_reference, status: payment_status });
+
+    if (payment_status === 'COMPLETED') {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const ref = order_merchant_reference;
+        const payment = (await client.query('SELECT * FROM payments WHERE reference=$1 FOR UPDATE', [ref])).rows[0];
+        if (payment && payment.status === 'pending') {
+          await client.query('UPDATE payments SET status=$1, method=$2 WHERE reference=$3', ['completed', 'pesapal', ref]);
+          const plan = payment.plan || 'basic';
+          const expires = new Date(Date.now() + SUBSCRIPTION_DURATION);
+          try {
+            await client.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [payment.tenant_id, plan, payment.amount, 'active', expires]);
+            await client.query('UPDATE subscriptions SET plan=$1, amount=$2, status=$3, expires_at=$4 WHERE tenant_id=$5 AND status=$6', [plan, payment.amount, 'active', expires, payment.tenant_id, 'active']);
+          } catch(e) { /* subscription already exists */ }
+          await client.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
+          await client.query('UPDATE subscriptions SET auto_verified=true WHERE tenant_id=$1 AND status=$2', [payment.tenant_id, 'active']);
+          await client.query('UPDATE momo_payments SET status=$1 WHERE reference=$2 AND type=$3', ['completed', ref, 'pesapal']);
+          await client.query('INSERT INTO developer_revenue(tenant_id,amount,source,description) VALUES($1,$2,$3,$4)', [payment.tenant_id, Math.floor(payment.amount * 0.9), 'pesapal', `PesaPal IPN: ${plan}`]);
+          await fireWebhook(payment.tenant_id, 'payment', { ref, amount: payment.amount, plan, method: 'pesapal' });
+          await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
+        }
+        await client.query('COMMIT');
+      } catch(e) {
+        await client.query('ROLLBACK');
+        logger.error('pesapal_ipn_error', { error: e.message, ref: order_merchant_reference });
+      } finally {
+        client.release();
+      }
+    }
+
+    // PesaPal expects a 200 OK response
+    res.status(200).json({ success: true });
+  } catch(e) {
+    logger.error('pesapal_ipn_exception', { error: e.message });
+    res.status(500).json({ error: 'Internal error' });
+  }
+}));
+
+// PesaPal payment status check (polling endpoint)
+app.get('/pay/pesapal/status', requireAuth, ah(async (req, res) => {
+  const { ref } = req.query;
+  if (!ref) return res.json({ status: 'error', message: 'Missing reference' });
+
+  const status = await getPesapalTransactionStatus(ref);
+  if (status) {
+    res.json({
+      status: 'ok',
+      payment_status: status.payment_status,
+      payment_method: status.payment_method_description,
+      amount: status.amount,
+      currency: status.currency,
+      message: status.description || status.payment_status
+    });
+  } else {
+    res.json({ status: 'error', message: 'Could not check PesaPal status' });
+  }
 }));
 
 // === API KEYS & WEBHOOKS ===
@@ -27452,7 +27772,8 @@ app.get('/pay/checkout', requireAuth, ah(async (req, res) => {
   const hasAirtel = !!(process.env.AIRTEL_CLIENT_ID && process.env.AIRTEL_CLIENT_SECRET);
   const hasDpo = !!process.env.DPO_COMPANY_TOKEN;
   const hasFlw = !!process.env.FLW_SECRET_KEY;
-  const hasAnyProvider = hasMtn || hasAirtel || hasDpo || hasFlw;
+  const hasPesaPal = !!(process.env.PESAPAL_CONSUMER_KEY && process.env.PESAPAL_CONSUMER_SECRET);
+  const hasAnyProvider = hasMtn || hasAirtel || hasDpo || hasFlw || hasPesaPal;
   
   // Record pending payment
   if (amt > 0) {
@@ -27468,14 +27789,36 @@ app.get('/pay/checkout', requireAuth, ah(async (req, res) => {
       </div>
       ${hasAnyProvider ? `
         <div class="tab-bar" style="margin-bottom:20px">
-          ${hasMtn ? '<a href="#" class="active" onclick="showPayTab(\'mtn\')">MTN MoMo</a>' : ''}
-          ${hasAirtel ? `<a href="#" ${!hasMtn?'class="active"':''} onclick="showPayTab('airtel')">Airtel Money</a>` : ''}
-          ${hasDpo ? `<a href="#" ${!hasMtn&&!hasAirtel?'class="active"':''} onclick="showPayTab('card')">Card Payment</a>` : ''}
-          ${hasFlw ? `<a href="#" ${!hasMtn&&!hasAirtel&&!hasDpo?'class="active"':''} onclick="showPayTab('flutterwave')">Flutterwave</a>` : ''}
+          ${hasPesaPal ? '<a href="#" class="active" onclick="showPayTab(\'pesapal\')">PesaPal</a>' : ''}
+          ${hasMtn ? '<a href="#" onclick="showPayTab(\'mtn\')">MTN MoMo</a>' : ''}
+          ${hasAirtel ? `<a href="#" ${!hasPesaPal&&!hasMtn?'class="active"':''} onclick="showPayTab('airtel')">Airtel Money</a>` : ''}
+          ${hasDpo ? `<a href="#" ${!hasPesaPal&&!hasMtn&&!hasAirtel?'class="active"':''} onclick="showPayTab('card')">Card Payment</a>` : ''}
+          ${hasFlw ? `<a href="#" ${!hasPesaPal&&!hasMtn&&!hasAirtel&&!hasDpo?'class="active"':''} onclick="showPayTab('flutterwave')">Flutterwave</a>` : ''}
+        </div>
+
+        <!-- PesaPal (M-Pesa, Airtel Money, Visa, Mastercard) -->
+        <div id="pay-pesapal" style="${hasPesaPal?'':'display:none'}">
+          <div style="text-align:center;margin-bottom:15px">
+            <div style="width:50px;height:50px;border-radius:12px;background:linear-gradient(135deg,#4CAF50,#2E7D32);margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:white">PP</div>
+            <h3>PesaPal</h3>
+            <p class="muted">M-Pesa, Airtel Money, Visa, Mastercard</p>
+          </div>
+          <form method="POST" action="/pay/pesapal/initiate">
+            <input type="hidden" name="amount" value="${amt}">
+            <input type="hidden" name="reference" value="${esc(ref)}">
+            <input type="hidden" name="plan" value="${esc(plan||'')}">
+            <input type="hidden" name="description" value="${esc(description||'')}">
+            <input type="hidden" name="type" value="${esc(type||'')}">
+            <input type="hidden" name="item_id" value="${esc(item_id||'')}">
+            <input name="phone" placeholder="Phone Number (e.g. 077x/078x/070x)" required pattern="^(\\+?256|0|\\+?254|\\+?255)?[7]\\d{8}$">
+            <input name="email" type="email" placeholder="Email Address (optional)" value="${esc(req.session.user.email||'')}">
+            <button class="btn btn-green" style="width:100%;padding:16px;font-size:18px;background:linear-gradient(135deg,#4CAF50,#2E7D32);color:white">Pay UGX ${amt.toLocaleString()} with PesaPal</button>
+          </form>
+          <p class="muted" style="text-align:center;margin-top:10px;font-size:12px">You will be redirected to PesaPal's secure payment page</p>
         </div>
 
         <!-- MTN MoMo -->
-        <div id="pay-mtn" style="${hasMtn?'':'display:none'}">
+        <div id="pay-mtn" style="display:none">
           <div style="text-align:center;margin-bottom:15px">
             <div style="width:50px;height:50px;border-radius:12px;background:#FFC300;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:#000">M</div>
             <h3>MTN Mobile Money</h3>
@@ -28437,16 +28780,18 @@ app.get('/school/fee-reminders-link', requireAuth, ah(async (req, res) => { res.
 
 // --- Country Payment Configuration ---
 const COUNTRY_PAYMENT_CONFIG = {
-  UG: { name: 'Uganda', currency: 'UGX', providers: ['mtn_momo', 'airtel_money', 'dpo_card'], phone_prefix: '256', flutterwave_supported: false },
-  KE: { name: 'Kenya', currency: 'KES', providers: ['mtn_momo', 'flutterwave'], phone_prefix: '254', flutterwave_supported: true },
-  NG: { name: 'Nigeria', currency: 'NGN', providers: ['flutterwave'], phone_prefix: '234', flutterwave_supported: true },
-  GH: { name: 'Ghana', currency: 'GHS', providers: ['mtn_momo', 'flutterwave'], phone_prefix: '233', flutterwave_supported: true },
-  TZ: { name: 'Tanzania', currency: 'TZS', providers: ['mtn_momo', 'airtel_money', 'flutterwave'], phone_prefix: '255', flutterwave_supported: true },
-  RW: { name: 'Rwanda', currency: 'RWF', providers: ['mtn_momo', 'flutterwave'], phone_prefix: '250', flutterwave_supported: true },
-  ZA: { name: 'South Africa', currency: 'ZAR', providers: ['flutterwave', 'dpo_card'], phone_prefix: '27', flutterwave_supported: true },
-  CD: { name: 'DRC', currency: 'CDF', providers: ['mtn_momo', 'airtel_money'], phone_prefix: '243', flutterwave_supported: false },
-  ZM: { name: 'Zambia', currency: 'ZMW', providers: ['airtel_money', 'mtn_momo'], phone_prefix: '260', flutterwave_supported: false },
-  MW: { name: 'Malawi', currency: 'MWK', providers: ['airtel_money'], phone_prefix: '265', flutterwave_supported: false }
+  UG: { name: 'Uganda', currency: 'UGX', providers: ['pesapal', 'mtn_momo', 'airtel_money', 'dpo_card'], phone_prefix: '256', flutterwave_supported: false, pesapal_supported: true },
+  KE: { name: 'Kenya', currency: 'KES', providers: ['pesapal', 'mtn_momo', 'flutterwave'], phone_prefix: '254', flutterwave_supported: true, pesapal_supported: true },
+  NG: { name: 'Nigeria', currency: 'NGN', providers: ['flutterwave'], phone_prefix: '234', flutterwave_supported: true, pesapal_supported: false },
+  GH: { name: 'Ghana', currency: 'GHS', providers: ['mtn_momo', 'flutterwave'], phone_prefix: '233', flutterwave_supported: true, pesapal_supported: false },
+  TZ: { name: 'Tanzania', currency: 'TZS', providers: ['pesapal', 'mtn_momo', 'airtel_money', 'flutterwave'], phone_prefix: '255', flutterwave_supported: true, pesapal_supported: true },
+  RW: { name: 'Rwanda', currency: 'RWF', providers: ['pesapal', 'mtn_momo', 'flutterwave'], phone_prefix: '250', flutterwave_supported: true, pesapal_supported: true },
+  ZA: { name: 'South Africa', currency: 'ZAR', providers: ['flutterwave', 'dpo_card'], phone_prefix: '27', flutterwave_supported: true, pesapal_supported: false },
+  CD: { name: 'DRC', currency: 'CDF', providers: ['mtn_momo', 'airtel_money'], phone_prefix: '243', flutterwave_supported: false, pesapal_supported: false },
+  ZM: { name: 'Zambia', currency: 'ZMW', providers: ['pesapal', 'airtel_money', 'mtn_momo'], phone_prefix: '260', flutterwave_supported: false, pesapal_supported: true },
+  MW: { name: 'Malawi', currency: 'MWK', providers: ['airtel_money'], phone_prefix: '265', flutterwave_supported: false, pesapal_supported: false },
+  ET: { name: 'Ethiopia', currency: 'ETB', providers: ['pesapal'], phone_prefix: '251', flutterwave_supported: false, pesapal_supported: true },
+  SO: { name: 'Somalia', currency: 'USD', providers: ['pesapal'], phone_prefix: '252', flutterwave_supported: false, pesapal_supported: true }
 };
 
 // Detect country from phone number
@@ -28481,6 +28826,7 @@ const getProvidersForCountry = (countryCode) => {
     countryName: cfg.name,
     currency: cfg.currency,
     providers: cfg.providers.filter(p => {
+      if (p === 'pesapal') return !!(process.env.PESAPAL_CONSUMER_KEY && process.env.PESAPAL_CONSUMER_SECRET) && cfg.pesapal_supported;
       if (p === 'mtn_momo') return !!(process.env.MTN_COLLECTION_USER_ID && process.env.MTN_COLLECTION_API_KEY);
       if (p === 'airtel_money') return !!(process.env.AIRTEL_CLIENT_ID && process.env.AIRTEL_CLIENT_SECRET);
       if (p === 'flutterwave') return cfg.flutterwave_supported && !!process.env.FLW_SECRET_KEY;
@@ -28488,7 +28834,8 @@ const getProvidersForCountry = (countryCode) => {
       return false;
     }),
     allConfiguredProviders: cfg.providers,
-    flutterwaveSupported: cfg.flutterwave_supported
+    flutterwaveSupported: cfg.flutterwave_supported,
+    pesapalSupported: cfg.pesapal_supported
   };
 };
 
