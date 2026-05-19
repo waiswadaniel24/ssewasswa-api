@@ -119,8 +119,8 @@ if (process.env.SENTRY_DSN) {
     Sentry.init({
       dsn: process.env.SENTRY_DSN,
       environment: process.env.NODE_ENV || 'development',
-      tracesSampleRate: 0.1,
-      profilesSampleRate: 0.1,
+      tracesSampleRate: 0.5,
+      profilesSampleRate: 0.5,
       integrations: [Sentry.captureConsoleIntegration ? Sentry.captureConsoleIntegration({ levels: ['error', 'warn'] }) : undefined].filter(Boolean),
     });
     console.log('[Sentry] Error monitoring initialized with console capture');
@@ -631,6 +631,42 @@ const validate = (schema) => (req, res, next) => {
 
 const requireAuth = (req, res, next) => req.session.user ? next() : res.redirect('/login');
 const requireNotBanned = (req, res, next) => req.session.user?.banned ? res.status(403).send('Account banned') : next();
+
+// === TENANT BRANDING PRELOADER (Phase 2: White Labeling) ===
+// Loads tenant branding (custom_css, logo_url, primary_color) into session
+// so renderPage() can inject them without async DB queries per request.
+// Refreshes every 5 minutes to pick up branding changes.
+const loadTenantBranding = async (req) => {
+  if (!req.session?.user?.tenant_id) return;
+  const now = Date.now();
+  // Cache in session for 5 minutes
+  if (req.session._brandingLoadedAt && now - req.session._brandingLoadedAt < 5 * 60 * 1000) return;
+  try {
+    const tenant = (await pool.query(
+      'SELECT custom_css, logo_url, favicon_url, primary_color, secondary_color, font_family FROM tenants WHERE id=$1',
+      [req.session.user.tenant_id]
+    )).rows[0];
+    if (tenant) {
+      req.session.tenantBranding = {
+        custom_css: tenant.custom_css || '',
+        logo_url: tenant.logo_url || '',
+        favicon_url: tenant.favicon_url || '',
+        primary_color: tenant.primary_color || '',
+        secondary_color: tenant.secondary_color || '',
+        font_family: tenant.font_family || ''
+      };
+      req.session._brandingLoadedAt = now;
+    }
+  } catch (e) { /* non-critical: branding load failure should not block requests */ }
+};
+// Auto-load branding on every authenticated request (runs after requireAuth)
+app.use((req, res, next) => {
+  if (req.session?.user) {
+    loadTenantBranding(req).then(() => next()).catch(() => next());
+  } else {
+    next();
+  }
+});
 const requireTenantAccess = (req, res, next) => {
   const u = req.session.user;
   if (u.role === 'super_admin') return next();
@@ -2793,6 +2829,8 @@ ${platformSettings.google_verification ? `<meta name="google-site-verification" 
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}">
 <meta name="user-lang" content="${lang}">
+${typeof csrfTokenOrReq === 'object' && csrfTokenOrReq?.session?.tenantBranding?.favicon_url ? `<link rel="icon" href="${esc(csrfTokenOrReq.session.tenantBranding.favicon_url)}">` : ''}
+${typeof csrfTokenOrReq === 'object' && csrfTokenOrReq?.session?.tenantBranding?.font_family ? `<style>body{font-family:'${esc(csrfTokenOrReq.session.tenantBranding.font_family)}',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important}</style>` : ''}
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
@@ -2937,6 +2975,7 @@ a{color:var(--primary);text-decoration:none;font-weight:500;transition:color 0.2
 @media(min-width:769px) and (max-width:1024px){.stats{grid-template-columns:repeat(4,1fr)}.grid{grid-template-columns:repeat(2,1fr)}.stat-num{font-size:28px}}
 @media(max-width:380px){.grid{grid-template-columns:1fr!important;gap:8px}}
 @media print{.nav,.bottom-nav,.float-install-btn,.btn-group{display:none!important}.card{border:none!important;box-shadow:none!important;break-inside:avoid}body{background:white!important;padding:0!important;color:#000!important}}
+${typeof csrfTokenOrReq === 'object' && csrfTokenOrReq?.session?.tenantBranding?.custom_css ? `\n/* Tenant Custom CSS */\n${sanitizeCSS(csrfTokenOrReq.session.tenantBranding.custom_css)}\n` : ''}
 </style>
 <!-- CookieYes Consent Banner -->
 <script id="cookieyes" type="text/javascript" src="https://cdn-cookieyes.com/client_data/0e110963fc8230516a615baf/script.js"></script>
@@ -3621,7 +3660,9 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
   const validPlans = ['free','basic','pro','enterprise'];
   const chosenPlan = validPlans.includes(plan) ? plan : 'free';
   const planAmounts = { free: 0, basic: 50000, pro: 150000, enterprise: 0 };
-  const tenant = await pool.query('INSERT INTO tenants(name,type,email,phone,subdomain,approved) VALUES($1,$2,$3,$4,$5,true) RETURNING id', [org_name, type, email, phone, subdomain]);
+  // Phase 2: Admin approval queue — check if tenant approval is required
+  const requireApproval = platformSettings.require_tenant_approval === 'true';
+  const tenant = await pool.query('INSERT INTO tenants(name,type,email,phone,subdomain,approved) VALUES($1,$2,$3,$4,$5,$6) RETURNING id', [org_name, type, email, phone, subdomain, !requireApproval]);
   const newTenantId = tenant.rows[0].id;
   // Save business_type if provided
   if (business_type && type === 'business') {
@@ -3666,7 +3707,19 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
   if (chosenPlan !== 'free') {
     try { await pool.query('UPDATE subscriptions SET plan=$1, amount=$2, status=$3 WHERE tenant_id=$4', [chosenPlan, planAmounts[chosenPlan], 'pending_payment', newTenantId]); } catch(e) { /* non-critical */ }
   }
-  res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Account created! Check your email for a welcome message. You can now login.</div><a href="/login" class="btn">Login</a></div>', null));
+  // Phase 2: If approval required, show pending page; otherwise redirect to login
+  if (requireApproval) {
+    // Notify super_admin of pending tenant
+    try {
+      const superAdmin = (await pool.query("SELECT email FROM users WHERE role='super_admin' LIMIT 1")).rows[0];
+      if (superAdmin) {
+        queueEmail(1, superAdmin.email, 'New Tenant Awaiting Approval', `<div style="max-width:500px;margin:0 auto;font-family:sans-serif"><h2>New Tenant Registration</h2><p><b>${esc(org_name)}</b> (${esc(type)}) has signed up and is awaiting your approval.</p><p>Email: ${esc(email)}</p><p><a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/admin/tenants" style="display:inline-block;padding:10px 24px;background:#4f46e5;color:white;border-radius:6px;text-decoration:none">Review Pending Tenants</a></p></div>`);
+      }
+    } catch(e) { console.warn('[Approval Queue] Notification error:', e.message); }
+    res.send(renderPage('Registration Submitted', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><div style="font-size:48px;margin-bottom:16px">&#9203;</div><h2>Registration Submitted</h2><p style="color:var(--text-muted);margin:16px 0">Your account for <b>${esc(org_name)}</b> has been submitted and is awaiting admin approval. You will receive an email once your account is approved.</p><a href="/login" class="btn" style="margin-top:16px">Back to Login</a></div>`, null, req));
+  } else {
+    res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Account created! Check your email for a welcome message. You can now login.</div><a href="/login" class="btn">Login</a></div>', null, req));
+  }
 }));
 
 app.get('/logout', (req, res) => {
@@ -12000,8 +12053,59 @@ const apiAuth = async (req, res, next) => {
   const keyHash = crypto.createHash('sha256').update(key).digest('hex');
   const apiKey = (await pool.query('SELECT * FROM api_keys WHERE key_hash=$1', [keyHash])).rows[0];
   if (!apiKey) return res.status(401).json({ error: 'Invalid API key' });
+  if (apiKey.is_active === false) return res.status(403).json({ error: 'API key has been revoked' });
   await pool.query('UPDATE api_keys SET last_used=NOW() WHERE id=$1', [apiKey.id]);
   req.apiKey = apiKey;
+
+  // === Per-API-key rate limiting (Phase 2) ===
+  // Plan-based limits: free=60/min, basic=200/min, pro=500/min, enterprise=2000/min
+  try {
+    const rateKey = `api_rate:${apiKey.id}`;
+    const now = Date.now();
+    const windowMs = 60 * 1000;
+    let record = cacheGetLocal(rateKey);
+    if (!record || now - record.startTime > windowMs) {
+      record = { count: 1, startTime: now };
+    } else {
+      record.count++;
+    }
+    const planLimits = { free: 60, basic: 200, pro: 500, enterprise: 2000 };
+    const limit = planLimits[apiKey.plan] || 60;
+    cacheSetLocal(rateKey, record, windowMs);
+    res.set('X-RateLimit-Limit', String(limit));
+    res.set('X-RateLimit-Remaining', String(Math.max(0, limit - record.count)));
+    res.set('X-RateLimit-Reset', String(Math.floor((record.startTime + windowMs) / 1000)));
+    if (record.count > limit) {
+      return res.status(429).json({ error: 'Rate limit exceeded', limit, remaining: 0, reset_at: new Date(record.startTime + windowMs).toISOString() });
+    }
+  } catch (e) { /* fail-open: rate limit check error should not block requests */ }
+
+  next();
+};
+
+// === PER-API-KEY RATE LIMITING (Phase 2) ===
+// Standalone rate limiter middleware (can be applied to routes without apiAuth)
+const apiRateLimiter = async (req, res, next) => {
+  if (!req.apiKey) return next();
+  try {
+    const rateKey = `api_rate:${req.apiKey.id}`;
+    const now = Date.now();
+    const windowMs = 60 * 1000;
+    let record = cacheGetLocal(rateKey);
+    if (!record || now - record.startTime > windowMs) {
+      record = { count: 1, startTime: now };
+    } else {
+      record.count++;
+    }
+    const planLimits = { free: 60, basic: 200, pro: 500, enterprise: 2000 };
+    const limit = planLimits[planLimits.free] || 60;
+    cacheSetLocal(rateKey, record, windowMs);
+    res.set('X-RateLimit-Limit', String(limit));
+    res.set('X-RateLimit-Remaining', String(Math.max(0, limit - record.count)));
+    if (record.count > limit) {
+      return res.status(429).json({ error: 'Rate limit exceeded', limit, remaining: 0 });
+    }
+  } catch (e) { console.warn('[API Rate Limit] Check error:', e.message); }
   next();
 };
 
