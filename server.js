@@ -320,9 +320,9 @@ app.get('/test-session', (req, res) => {
   res.type('text').send('OK');
 });
 
-// DEBUG: Test route that uses renderPage
+// DEBUG: Test route that uses renderPageLite
 app.get('/test-render', (req, res) => {
-  res.send(renderPage('Test', '<div class="card"><h2>Render OK</h2></div>', null, req));
+  res.send(renderPageLite('Test', '<div class="card"><h2>Render OK</h2></div>', null, req));
 });
 
 // Generate CSRF token and store in session (AFTER session middleware)
@@ -2563,6 +2563,25 @@ const ds = (icon, title, cardsHtml) => {
 </div>`;
 };
 
+// === LIGHTWEIGHT PAGE RENDERER (for low-memory environments like Render free tier) ===
+const renderPageLite = (title, content, user, csrfTokenOrReq) => {
+  const csrfToken = typeof csrfTokenOrReq === 'string' ? csrfTokenOrReq : (csrfTokenOrReq?.csrfToken || null);
+  let safeContent = content || '';
+  if (csrfToken && safeContent.includes('<form')) {
+    safeContent = safeContent.replace(/<form\b([^>]*)>/gi, (tag, attrs) =>
+      tag + '<input type="hidden" name="_csrf" value="' + csrfToken + '">');
+  }
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} — Comfort</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f8fafc;color:#1e293b;line-height:1.6}
+.container{max-width:960px;margin:0 auto;padding:16px}nav{background:#1e40af;color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:space-between}nav a{color:#fff;text-decoration:none;margin:0 8px;font-size:14px}
+.card{background:#fff;border-radius:8px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.1);margin:16px 0}.btn{display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;text-decoration:none;font-size:14px}
+.btn:hover{background:#1d4ed8}input{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:6px;margin:8px 0;font-size:14px}footer{text-align:center;padding:20px;color:#94a3b8;font-size:13px}
+.alert{padding:12px;border-radius:6px;margin:12px 0}.alert-error{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}</style></head>
+<body><nav><strong>Comfort</strong><div><a href="/">Home</a><a href="/login">Login</a><a href="/register">Register</a><a href="/pricing">Pricing</a></div></nav>
+<div class="container">${safeContent}</div>
+<footer>Comfort Platform &copy; ${new Date().getFullYear()}</footer></body></html>`;
+};
+
 // === RENDER PAGE (with dark mode support) ===
 const renderPage = (title, content, user, csrfTokenOrReq) => {
   const dark = user?.dark_mode || false;
@@ -3205,6 +3224,7 @@ app.get('/home', ah(async (req, res) => {
 }));
 
 app.get('/login', (req, res) => {
+<<<<<<< HEAD
   res.send(renderPage('Login', `
     <style>
       @keyframes authFloat1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(12px,-18px) scale(1.08)}}
@@ -27892,22 +27912,65 @@ app.get('/pay/checkout', requireAuth, ah(async (req, res) => {
           </script>
         </div>
       ` : `
-        <!-- No payment provider configured - show manual payment instructions -->
-        <div class="alert alert-info">
-          <h3>Manual Payment</h3>
-          <p>Online payments are not yet configured. Pay manually:</p>
-          <div style="margin:15px 0;padding:15px;background:#f0fdf4;border-radius:10px;border:1px solid #059669">
-            <p style="font-weight:700;margin-bottom:8px">MTN MoMo:</p>
-            <p>Send <strong>UGX ${amt.toLocaleString()}</strong> to <strong>0780000000</strong></p>
+        <!-- No payment provider configured - Manual Payment with Confirmation -->
+        <div style="border:2px solid #4f46e5;border-radius:16px;overflow:hidden">
+          <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:16px 20px">
+            <h3 style="margin:0;color:white">Pay with Mobile Money</h3>
+            <p style="margin:4px 0 0;opacity:0.9;font-size:13px">Send money to our business number, then confirm below</p>
           </div>
-          <div style="margin:15px 0;padding:15px;background:#fef2f2;border-radius:10px;border:1px solid #dc2626">
-            <p style="font-weight:700;margin-bottom:8px">Airtel Money:</p>
-            <p>Send <strong>UGX ${amt.toLocaleString()}</strong> to <strong>0700000000</strong></p>
+          <div style="padding:20px">
+            <!-- Step 1: Send Money -->
+            <div style="margin-bottom:16px;padding:14px;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0">
+              <h4 style="margin:0 0 8px;font-size:14px;color:#059669">Step 1: Send Money</h4>
+              <div style="display:grid;gap:10px">
+                <div style="display:flex;align-items:center;gap:10px;padding:10px;background:white;border-radius:8px;border:1px solid #d1fae5">
+                  <div style="width:36px;height:36px;border-radius:8px;background:#FFC300;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;color:#000">M</div>
+                  <div><div style="font-weight:700;font-size:13px">MTN MoMo</div><div style="font-size:13px">Send <strong>UGX ${amt.toLocaleString()}</strong> to <strong style="color:#059669">${esc(platformSettings.developer_phone || '0780000000')}</strong></div></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;padding:10px;background:white;border-radius:8px;border:1px solid #fecaca">
+                  <div style="width:36px;height:36px;border-radius:8px;background:#ED1C24;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;color:white">A</div>
+                  <div><div style="font-weight:700;font-size:13px">Airtel Money</div><div style="font-size:13px">Send <strong>UGX ${amt.toLocaleString()}</strong> to <strong style="color:#dc2626">${esc(platformSettings.developer_phone || '0700000000')}</strong></div></div>
+                </div>
+              </div>
+              <p style="margin:8px 0 0;font-size:12px;color:#64748b">Use reference: <strong style="color:#4f46e5">${esc(ref)}</strong></p>
+            </div>
+
+            <!-- Step 2: Confirm Payment -->
+            <div style="margin-bottom:16px;padding:14px;background:#eff6ff;border-radius:10px;border:1px solid #bfdbfe">
+              <h4 style="margin:0 0 8px;font-size:14px;color:#1d4ed8">Step 2: Confirm Your Payment</h4>
+              <p style="font-size:12px;color:#64748b;margin-bottom:10px">After sending money, fill in the details below so we can verify your payment</p>
+              <form method="POST" action="/pay/manual/confirm">
+                <input type="hidden" name="reference" value="${esc(ref)}">
+                <input type="hidden" name="amount" value="${amt}">
+                <input type="hidden" name="plan" value="${esc(plan||'')}">
+                <div style="margin-bottom:10px">
+                  <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Payment Method</label>
+                  <select name="method" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px">
+                    <option value="">Select...</option>
+                    <option value="mtn_momo">MTN MoMo</option>
+                    <option value="airtel_money">Airtel Money</option>
+                    <option value="bank_transfer">Bank Transfer</option>
+                    <option value="cash">Cash</option>
+                  </select>
+                </div>
+                <div style="margin-bottom:10px">
+                  <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Phone Number You Sent From</label>
+                  <input name="sender_phone" placeholder="e.g. 0782123456" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px">
+                </div>
+                <div style="margin-bottom:10px">
+                  <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Your Name (as on the payment)</label>
+                  <input name="sender_name" placeholder="Full name" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px">
+                </div>
+                <button type="submit" class="btn btn-green" style="width:100%;padding:14px;font-size:16px;font-weight:700">I Have Paid — Confirm Payment</button>
+              </form>
+            </div>
+
+            <!-- Info -->
+            <div style="padding:10px;background:#fefce8;border-radius:8px;border:1px solid #fde68a">
+              <p style="font-size:12px;color:#92400e;margin:0"><strong>Note:</strong> Your subscription will be activated within minutes once we verify your payment. You can also send a screenshot via WhatsApp for faster verification.</p>
+            </div>
           </div>
-          <p>Reference: <strong>${esc(ref)}</strong></p>
-          <p class="muted" style="margin-top:10px">Send screenshot to admin for verification</p>
         </div>
-        <a href="/billing" class="btn" style="width:100%">Back to Billing</a>
       `}
       <div style="margin-top:20px;padding:15px;background:${req.session.user?.dark_mode ? '#334155' : '#f8fafc'};border-radius:10px">
         <p class="muted" style="font-size:12px">Reference: ${esc(ref)}</p>
@@ -27924,6 +27987,222 @@ app.get('/pay/checkout', requireAuth, ah(async (req, res) => {
     }
     </script>
   `, req.session.user));
+}));
+
+// === MANUAL PAYMENT CONFIRMATION (works without API keys) ===
+app.post('/pay/manual/confirm', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { reference, amount, plan, method, sender_phone, sender_name } = req.body;
+  const amt = parseInt(amount) || 0;
+
+  // Update the pending payment with confirmation details
+  await pool.query('UPDATE payments SET method=$1, status=$2, description=$3 WHERE reference=$4 AND tenant_id=$5',
+    [method || 'manual', 'pending_verification', `Manual payment: ${method || 'manual'} from ${sender_phone || ''} (${sender_name || ''})`, reference, t]);
+
+  // Also store the confirmation details in a structured way
+  try {
+    await pool.query('UPDATE payments SET metadata=COALESCE(metadata,$1)::jsonb WHERE reference=$2 AND tenant_id=$3',
+      [JSON.stringify({ method, sender_phone, sender_name, confirmed_at: new Date().toISOString() }), reference, t]);
+  } catch(e) {
+    // If metadata column doesn't exist, that's okay
+  }
+
+  await audit(req.session.user.email, 'manual_payment_confirmed', `UGX ${amt} via ${method} from ${sender_phone}`);
+
+  // Notify admin about pending payment
+  const adminEmail = platformSettings.developer_email || process.env.DEV_EMAIL || 'admin@ssewasswa.com';
+  try {
+    await sendEmail(adminEmail, `Payment Confirmation: UGX ${amt.toLocaleString()}`, `
+      <h2>New Payment Confirmation</h2>
+      <p><strong>Amount:</strong> UGX ${amt.toLocaleString()}</p>
+      <p><strong>Method:</strong> ${method}</p>
+      <p><strong>From:</strong> ${sender_name} (${sender_phone})</p>
+      <p><strong>Plan:</strong> ${plan || 'N/A'}</p>
+      <p><strong>Reference:</strong> ${reference}</p>
+      <p><strong>Tenant ID:</strong> ${t}</p>
+      <p><a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/dev/payments">Review Payment</a></p>
+    `);
+  } catch(e) {}
+
+  res.send(renderPage('Payment Submitted', `
+    <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+      <div style="font-size:60px;margin-bottom:16px">&#9989;</div>
+      <h1>Payment Submitted!</h1>
+      <p style="margin:16px 0;font-size:16px">Your payment of <strong>UGX ${amt.toLocaleString()}</strong> via <strong>${esc(method)}</strong> has been submitted for verification.</p>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;margin:16px 0;text-align:left">
+        <p style="margin:0 0 8px"><strong>What happens next:</strong></p>
+        <ul style="margin:0;padding-left:20px;font-size:14px;line-height:1.8">
+          <li>We verify your payment on our end</li>
+          <li>Your subscription is activated automatically</li>
+          <li>You will receive a confirmation email</li>
+          <li>Usually takes <strong>5-30 minutes</strong></li>
+        </ul>
+      </div>
+      <div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:12px;margin:16px 0;text-align:left">
+        <p style="margin:0;font-size:13px;color:#92400e"><strong>Need faster verification?</strong> Send a screenshot of your payment via WhatsApp to <strong>${esc(platformSettings.developer_phone || 'our support number')}</strong></p>
+      </div>
+      <div style="margin-top:20px">
+        <a href="/billing" class="btn">Back to Billing</a>
+        <a href="/dashboard" class="btn" style="background:#64748b;margin-left:8px">Go to Dashboard</a>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+// === ADMIN: PENDING PAYMENTS DASHBOARD ===
+app.get('/dev/payments', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const [pending, recent, total] = await Promise.all([
+    pool.query("SELECT p.*, t.name as tenant_name, t.email as tenant_email FROM payments p JOIN tenants t ON p.tenant_id=t.id WHERE p.status IN ('pending','pending_verification') ORDER BY p.created_at DESC"),
+    pool.query("SELECT p.*, t.name as tenant_name FROM payments p JOIN tenants t ON p.tenant_id=t.id WHERE p.status NOT IN ('pending','pending_verification') ORDER BY p.created_at DESC LIMIT 30"),
+    pool.query("SELECT COALESCE(SUM(amount),0) as total FROM payments WHERE status='completed'")
+  ]);
+
+  const pendingCount = pending.rows.length;
+  const totalRevenue = parseInt(total.rows[0]?.total || 0);
+
+  const statusColor = (s) => {
+    if (s === 'completed') return '#059669';
+    if (s === 'pending_verification') return '#d97706';
+    if (s === 'pending') return '#6366f1';
+    if (s === 'rejected') return '#dc2626';
+    return '#64748b';
+  };
+
+  const methodLabel = (m) => {
+    const map = { mtn_momo: 'MTN MoMo', airtel_money: 'Airtel Money', bank_transfer: 'Bank Transfer', cash: 'Cash', manual: 'Manual', flutterwave: 'Flutterwave', card: 'Card' };
+    return map[m] || m || 'Unknown';
+  };
+
+  res.send(renderPage('Payment Management', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)">
+      <h1>Payment Management</h1><p>Review and confirm manual payments</p>
+    </div>
+
+    <!-- Stats -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:20px">
+      <div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:14px;padding:20px;text-align:center">
+        <div style="font-size:32px;font-weight:900;color:#d97706">${pendingCount}</div>
+        <div style="color:#92400e;font-size:13px;font-weight:700">Pending Verification</div>
+      </div>
+      <div style="background:#d1fae5;border:2px solid #059669;border-radius:14px;padding:20px;text-align:center">
+        <div style="font-size:32px;font-weight:900;color:#059669">UGX ${totalRevenue.toLocaleString()}</div>
+        <div style="color:#065f46;font-size:13px;font-weight:700">Total Revenue</div>
+      </div>
+    </div>
+
+    <!-- Pending Payments -->
+    <div class="card">
+      <h2>Pending Verification (${pendingCount})</h2>
+      ${pending.rows.length > 0 ? `
+        <div style="overflow-x:auto"><table>
+          <tr><th>Date</th><th>Tenant</th><th>Amount</th><th>Method</th><th>Details</th><th>Ref</th><th>Action</th></tr>
+          ${pending.rows.map(p => {
+            let details = {};
+            try { details = JSON.parse(p.metadata || '{}'); } catch(e) {}
+            return `<tr style="background:${p.status === 'pending_verification' ? '#fffbeb' : 'white'}">
+              <td style="font-size:12px">${new Date(p.created_at).toLocaleDateString()}</td>
+              <td><strong>${esc(p.tenant_name || '')}</strong><br><span style="font-size:11px;color:#64748b">${esc(p.tenant_email || '')}</span></td>
+              <td style="font-weight:700">UGX ${Number(p.amount).toLocaleString()}</td>
+              <td><span class="tag">${esc(methodLabel(p.method))}</span></td>
+              <td style="font-size:12px">${details.sender_name ? esc(details.sender_name) + ' (' + esc(details.sender_phone) + ')' : esc(p.description || '')}</td>
+              <td style="font-size:11px;font-family:monospace">${esc(p.reference || '')}</td>
+              <td>
+                <form method="POST" action="/dev/payments/action" style="display:inline">
+                  <input type="hidden" name="payment_id" value="${p.id}">
+                  <input type="hidden" name="action" value="approve">
+                  <input type="hidden" name="tenant_id" value="${p.tenant_id}">
+                  <input type="hidden" name="amount" value="${p.amount}">
+                  <input type="hidden" name="plan" value="${p.plan || ''}">
+                  <button type="submit" style="background:#059669;color:white;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px">Approve</button>
+                </form>
+                <form method="POST" action="/dev/payments/action" style="display:inline">
+                  <input type="hidden" name="payment_id" value="${p.id}">
+                  <input type="hidden" name="action" value="reject">
+                  <button type="submit" onclick="return confirm('Reject this payment?')" style="background:#dc2626;color:white;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px">Reject</button>
+                </form>
+              </td>
+            </tr>`;
+          }).join('')}
+        </table></div>
+      ` : '<div style="text-align:center;padding:30px"><div style="font-size:48px">&#9989;</div><p style="color:#059669;font-weight:700">All payments are verified!</p><p class="muted">No pending payments to review</p></div>'}
+    </div>
+
+    <!-- Recent Completed Payments -->
+    <div class="card">
+      <h2>Recent Payments</h2>
+      ${recent.rows.length > 0 ? `
+        <div style="overflow-x:auto"><table>
+          <tr><th>Date</th><th>Tenant</th><th>Amount</th><th>Method</th><th>Status</th></tr>
+          ${recent.rows.map(p => `<tr>
+            <td style="font-size:12px">${new Date(p.created_at).toLocaleDateString()}</td>
+            <td>${esc(p.tenant_name || '')}</td>
+            <td style="font-weight:700">UGX ${Number(p.amount).toLocaleString()}</td>
+            <td><span class="tag">${esc(methodLabel(p.method))}</span></td>
+            <td><span style="color:${statusColor(p.status)};font-weight:700">${esc(p.status)}</span></td>
+          </tr>`).join('')}
+        </table></div>
+      ` : '<p class="muted">No payments yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+// === ADMIN: APPROVE/REJECT PAYMENT ===
+app.post('/dev/payments/action', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { payment_id, action, tenant_id, amount, plan } = req.body;
+  const pId = parseInt(payment_id);
+  const amt = parseInt(amount) || 0;
+
+  if (action === 'approve') {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Update payment status
+      await client.query('UPDATE payments SET status=$1 WHERE id=$2', ['completed', pId]);
+
+      // Create subscription
+      if (plan && tenant_id) {
+        const expires = new Date(Date.now() + SUBSCRIPTION_DURATION);
+        try {
+          await client.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [tenant_id, plan, amt, 'active', expires]);
+        } catch(e) { console.error('[Payment] Sub insert error:', e.message); }
+        // Auto-verify tenant
+        await client.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [tenant_id]);
+      }
+
+      // Record as platform revenue
+      await client.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [amt, `subscription:${plan || 'manual'}`]);
+      await client.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [amt]);
+
+      await client.query('COMMIT');
+      await audit(req.session.user.email, 'payment_approved', `Approved payment #${pId}: UGX ${amt} for tenant #${tenant_id}`);
+
+      // Notify tenant
+      try {
+        const tenant = (await pool.query('SELECT name,email FROM tenants WHERE id=$1', [tenant_id])).rows[0];
+        if (tenant?.email) {
+          await sendEmail(tenant.email, 'Payment Confirmed - Subscription Active', `
+            <h2>Payment Confirmed!</h2>
+            <p>Your payment of <strong>UGX ${amt.toLocaleString()}</strong> for the <strong>${plan}</strong> plan has been verified.</p>
+            <p>Your subscription is now active. Enjoy the full features!</p>
+          `);
+        }
+      } catch(e) {}
+
+      req.session.flash = { type: 'success', msg: `Payment approved! UGX ${amt.toLocaleString()} for ${plan} plan. Subscription activated.` };
+    } catch(e) {
+      await client.query('ROLLBACK');
+      req.session.flash = { type: 'error', msg: 'Error approving payment: ' + e.message };
+    } finally {
+      client.release();
+    }
+  } else if (action === 'reject') {
+    await pool.query('UPDATE payments SET status=$1 WHERE id=$2', ['rejected', pId]);
+    await audit(req.session.user.email, 'payment_rejected', `Rejected payment #${pId}`);
+    req.session.flash = { type: 'success', msg: 'Payment rejected.' };
+  }
+
+  res.redirect('/dev/payments');
 }));
 
 // MTN MoMo payment initiation
