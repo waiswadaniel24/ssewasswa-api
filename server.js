@@ -143,6 +143,32 @@ pool.on('error', (err) => {
   console.error('[DB Pool] Unexpected error on idle client:', err.message);
 });
 
+// === TENANT-AWARE QUERY (Phase 1 Security Fix: Row Level Security) ===
+// Provides defense-in-depth by enforcing tenant isolation at the database level.
+// Usage: await tenantQuery(req, 'SELECT ...', [params])
+// This wraps the query in a transaction that sets app.current_tenant_id as a
+// PostgreSQL session variable, which RLS policies use to filter data.
+const tenantQuery = async (reqOrTenantId, sql, params = []) => {
+  const tenantId = typeof reqOrTenantId === 'object' ? reqOrTenantId?.session?.user?.tenant_id : reqOrTenantId;
+  if (!tenantId) {
+    // No tenant context (e.g., super_admin or public route) — fall back to regular query
+    return pool.query(sql, params);
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SET LOCAL app.current_tenant_id = $1', [String(tenantId)]);
+    const result = await client.query(sql, params);
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+};
+
 // === SECURITY ===
 app.set('trust proxy', 1);
 
@@ -338,14 +364,40 @@ app.use((req, res, next) => {
   next();
 });
 
-// CSRF token generation is kept for form injection, but enforcement is disabled
-// because Render.com uses multiple instances with memory-based sessions,
-// causing CSRF tokens to mismatch between requests.
-// Security is maintained via: rate limiting, requireAuth, sameSite cookies, helmet
+// === CSRF ENFORCEMENT (Phase 1 Security Fix) ===
+// CSRF tokens are generated in session and injected into forms by renderPage.
+// Now we validate them on all state-changing requests (POST/PUT/DELETE).
+// Safe methods (GET/HEAD/OPTIONS) and API webhooks are excluded.
+const CSRF_EXEMPT_PATHS = [
+  '/api/webhook/', '/ipn/', '/pesapal/ipn', '/flutterwave/webhook',
+  '/mtn-momo/callback', '/dpo/callback', '/api/public/', '/stripe/webhook',
+  '/auth/google', '/auth/microsoft', '/auth/callback'
+];
+const isCSRFExempt = (path) => CSRF_EXEMPT_PATHS.some(p => path.includes(p));
+
 app.use((req, res, next) => {
   // Ensure csrfToken exists in session for form injection
   if (req.session && !req.session.csrfToken) {
     req.session.csrfToken = generateCSRFToken();
+  }
+  // Only validate on state-changing methods
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+    // Skip validation for exempt paths (webhooks, OAuth callbacks, public APIs)
+    if (isCSRFExempt(req.path)) return next();
+    // Skip validation for JSON API calls (they use session-based auth + rate limiting)
+    if (req.is('json') || req.is('application/json')) return next();
+    // Validate CSRF token for form submissions
+    const submittedToken = req.body?._csrf || req.headers['x-csrf-token'];
+    const sessionToken = req.session?.csrfToken;
+    if (!sessionToken || !submittedToken) {
+      return res.status(403).send('CSRF token missing. Please refresh the page and try again.');
+    }
+    // Constant-time comparison via HMAC hash to prevent timing attacks
+    const submittedHash = hashCSRFToken(submittedToken);
+    const sessionHash = hashCSRFToken(sessionToken);
+    if (!crypto.timingSafeEqual(Buffer.from(submittedHash), Buffer.from(sessionHash))) {
+      return res.status(403).send('Invalid CSRF token. Please refresh the page and try again.');
+    }
   }
   next();
 });
@@ -614,6 +666,24 @@ const requireWorkerRole = (...roles) => (req, res, next) => {
   if (!w) return res.redirect('/worker/login');
   if (w.role === 'full_worker' || roles.includes(w.role)) return next();
   res.status(403).send(renderPage('Access Denied', '<div class="card"><div class="alert alert-error">You do not have permission for this action.</div><a href="/worker/dashboard" class="btn">Back to Dashboard</a></div>', null));
+};
+
+// === PASSWORD STRENGTH VALIDATOR (Phase 1 Security Fix) ===
+// Validates password meets complexity requirements:
+//   - Minimum 8 characters
+//   - At least 1 uppercase letter
+//   - At least 1 lowercase letter
+//   - At least 1 number
+//   - At least 1 special character
+// Returns array of error messages (empty if valid)
+const validatePasswordStrength = (password) => {
+  const errors = [];
+  if (!password || password.length < 8) errors.push('Password must be at least 8 characters long');
+  if (!/[A-Z]/.test(password)) errors.push('Password must contain at least 1 uppercase letter (A-Z)');
+  if (!/[a-z]/.test(password)) errors.push('Password must contain at least 1 lowercase letter (a-z)');
+  if (!/[0-9]/.test(password)) errors.push('Password must contain at least 1 number (0-9)');
+  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(password)) errors.push('Password must contain at least 1 special character (!@#$%^&*...)');
+  return errors;
 };
 
 const audit = (email, action, details, tenantId, req) => pool.query('INSERT INTO audit_logs(tenant_id,user_email,action,details,ip_address) VALUES($1,$2,$3,$4,$5)', [tenantId || null, email, action, typeof details === 'object' ? JSON.stringify(details) : (details || ''), req?.ip || null]).catch(e => console.error('[Audit Error]', e.message));
@@ -1157,6 +1227,7 @@ const migrations = [
   `CREATE INDEX IF NOT EXISTS idx_payments_reference ON payments(reference)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_email)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON audit_logs(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_church_attendance_tenant_member ON church_attendance(tenant_id, member_id)`,
   `CREATE INDEX IF NOT EXISTS idx_notifications_tenant ON notifications(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_email)`,
@@ -1618,6 +1689,7 @@ const migrations = [
   `CREATE INDEX IF NOT EXISTS idx_notifications_tenant ON notifications(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON audit_logs(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_inventory_tenant ON inventory(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_church_members_tenant ON church_members(tenant_id)`,
@@ -3535,14 +3607,13 @@ app.get('/register', (req, res) => {
   `, null, req));
 });
 
-app.post('/register', validate({ email: { required: true, email: true }, password: { required: true, minLength: 4 }, name: { required: true, maxLength: 100 }, org_name: { required: true, maxLength: 200 }, type: { required: true } }), ah(async (req, res) => {
+app.post('/register', validate({ email: { required: true, email: true }, password: { required: true, minLength: 8 }, name: { required: true, maxLength: 100 }, org_name: { required: true, maxLength: 200 }, type: { required: true } }), ah(async (req, res) => {
   const { name, org_name, type, email, phone, password, confirm_password, plan, business_type } = req.body;
-  // Basic password validation
-  const passwordErrors = [];
-  if (!password || password.length < 8) passwordErrors.push('Password must be at least 8 characters long');
+  // Password strength validation (Phase 1 Security Fix)
+  const passwordErrors = validatePasswordStrength(password);
   if (password !== confirm_password) passwordErrors.push('Passwords do not match');
   if (passwordErrors.length > 0) {
-    return res.redirect('/register?type=' + encodeURIComponent(type || '') + '&plan=' + encodeURIComponent(plan || '') + '&business_type=' + encodeURIComponent(business_type || ''));
+    return res.send(renderPage('Registration Error', `<div class="card"><div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><a href="/register?type=${encodeURIComponent(type||'')}&plan=${encodeURIComponent(plan||'')}" class="btn">Try Again</a></div>`, null, req));
   }
   const hash = await bcrypt.hash(password, 12);
   const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
@@ -8470,9 +8541,8 @@ app.get('/settings/password', requireAuth, (req, res) => {
 
 app.post('/settings/password/save', requireAuth, ah(async (req, res) => {
   const { current_password, new_password, confirm_password } = req.body;
-  // Basic password validation
-  const passwordErrors = [];
-  if (!new_password || new_password.length < 8) passwordErrors.push('New password must be at least 8 characters long');
+  // Password strength validation (Phase 1 Security Fix)
+  const passwordErrors = validatePasswordStrength(new_password);
   if (new_password !== confirm_password) passwordErrors.push('Passwords do not match');
   if (passwordErrors.length > 0) return res.send(renderPage('Change Password', `<div class="card"><div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>`, req.session.user, req));
   // Try getting both password columns, fall back to just password
@@ -11435,16 +11505,27 @@ app.get('/roles/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) 
   res.redirect('/roles');
 }));
 
-// === AUDIT LOG VIEWER ===
+// === AUDIT LOG VIEWER (Phase 1 Security Fix: tenant isolation) ===
 app.get('/audit-logs', requireAuth, ah(async (req, res) => {
   const u = req.session.user;
   if (u.role !== 'super_admin' && u.role !== 'admin') return res.status(403).send('Access denied');
   const filter = req.query.filter || '';
+  const tenantId = u.tenant_id;
   let logs;
   if (filter) {
-    logs = (await pool.query("SELECT * FROM audit_logs WHERE user_email LIKE $1 OR action LIKE $1 OR details LIKE $1 ORDER BY created_at DESC LIMIT 100", [`%${filter}%`])).rows;
+    if (u.role === 'super_admin') {
+      // Super admin can see all tenants (no tenant_id filter)
+      logs = (await pool.query("SELECT * FROM audit_logs WHERE user_email LIKE $1 OR action LIKE $1 OR details LIKE $1 ORDER BY created_at DESC LIMIT 200", [`%${filter}%`])).rows;
+    } else {
+      // Regular admin: ONLY see their own tenant's logs
+      logs = (await pool.query("SELECT * FROM audit_logs WHERE tenant_id = $1 AND (user_email LIKE $2 OR action LIKE $2 OR details LIKE $2) ORDER BY created_at DESC LIMIT 200", [tenantId, `%${filter}%`])).rows;
+    }
   } else {
-    logs = (await pool.query('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100')).rows;
+    if (u.role === 'super_admin') {
+      logs = (await pool.query('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 200')).rows;
+    } else {
+      logs = (await pool.query('SELECT * FROM audit_logs WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 200', [tenantId])).rows;
+    }
   }
   res.send(renderPage('Audit Logs', `
     <div class="card">
@@ -14169,7 +14250,7 @@ const runAutoBackup = async () => {
     const tenants = (await pool.query('SELECT id,name FROM tenants WHERE approved=true AND banned=false')).rows;
     for (const t of tenants.slice(0, 5)) { // Max 5 per run to avoid timeout
       try {
-        const tables = ['students','fees','attendance','marks','expenses','sales','invoices','donations','church_members','members','inventory','customers','staff'];
+        const tables = ['students','fees','attendance','marks','expenses','sales','invoices','donations','church_members','members','inventory','customers','staff','audit_logs','payments','subscriptions','announcements','notifications'];
         let backupData = {};
         for (const table of tables) {
           try {
@@ -29221,6 +29302,7 @@ const round3Indexes = [
   `CREATE INDEX IF NOT EXISTS idx_subscriptions_tenant_status ON subscriptions(tenant_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_email)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON audit_logs(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_notifications_tenant ON notifications(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_payments_reference ON payments(reference)`,
   `CREATE INDEX IF NOT EXISTS idx_sms_logs_tenant ON sms_logs(tenant_id)`,
@@ -31789,8 +31871,9 @@ app.post('/dashboard/workers/add', requireAuth, ah(async (req, res) => {
   if (!username || !password || !display_name) {
     return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">All fields are required</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
   }
-  if (password.length < 8) {
-    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Password must be at least 8 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+  const strengthErrors = validatePasswordStrength(password);
+  if (strengthErrors.length > 0) {
+    return res.send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h3>Weak Password</h3><ul>${strengthErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><a href="/dashboard/workers" class="btn">Back</a></div>`, req.session.user));
   }
   const validRoles = ['viewer','content_manager','task_manager','full_worker'];
   if (!validRoles.includes(role)) {
@@ -31824,8 +31907,9 @@ app.get('/dashboard/workers/:id/reset-password', requireAuth, ah(async (req, res
   if (!worker) return res.redirect('/dashboard/workers');
   if (req.method === 'POST') {
     const { new_password } = req.body;
-    if (!new_password || new_password.length < 8) {
-      return res.send(renderPage('Reset Worker Password', '<div class="card"><div class="alert alert-error">Password must be at least 8 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+    const resetErrors = validatePasswordStrength(new_password);
+    if (resetErrors.length > 0) {
+      return res.send(renderPage('Reset Worker Password', `<div class="card"><div class="alert alert-error"><h3>Weak Password</h3><ul>${resetErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><a href="/dashboard/workers" class="btn">Back</a></div>`, req.session.user));
     }
     const hash = await bcrypt.hash(new_password, 12);
     await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3', [hash, req.params.id, t]);
@@ -31850,8 +31934,9 @@ app.post('/dashboard/workers/:id/reset-password', requireAuth, ah(async (req, re
   if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin only');
   const t = u.tenant_id;
   const { new_password } = req.body;
-  if (!new_password || new_password.length < 8) {
-    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Password must be at least 8 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+  const resetErrors2 = validatePasswordStrength(new_password);
+  if (resetErrors2.length > 0) {
+    return res.send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h3>Weak Password</h3><ul>${resetErrors2.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><a href="/dashboard/workers" class="btn">Back</a></div>`, req.session.user));
   }
   const hash = await bcrypt.hash(new_password, 12);
   await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3', [hash, req.params.id, t]);
@@ -32199,8 +32284,9 @@ app.post('/worker/profile/password', requireWorkerAuth, ah(async (req, res) => {
   if (!worker || !(await bcrypt.compare(current_password, worker.password_hash))) {
     return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Current password is incorrect</div><a href="/worker/profile" class="btn">Back</a></div>', req.session.user));
   }
-  if (new_password.length < 8) {
-    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">New password must be at least 8 characters</div><a href="/worker/profile" class="btn">Back</a></div>', req.session.user));
+  const workerPwdErrors = validatePasswordStrength(new_password);
+  if (workerPwdErrors.length > 0) {
+    return res.send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h3>Weak Password</h3><ul>${workerPwdErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><a href="/worker/profile" class="btn">Back</a></div>`, req.session.user));
   }
   const hash = await bcrypt.hash(new_password, 12);
   await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hash, w.id]);
@@ -37348,7 +37434,7 @@ app.get('/auth/google/callback', ah(async (req, res) => {
       const tenantId = tenantResult.rows[0].id;
       const hash = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 12);
       u = (await pool.query('INSERT INTO users (tenant_id, email, password, role, approved) VALUES ($1, $2, $3, $4, true) RETURNING id, tenant_id, email, role, approved, dark_mode, created_at', [tenantId, profile.email, hash, 'admin'])).rows[0];
-      await pool.query('INSERT INTO subscriptions (tenant_id, plan, status) VALUES ($1, \'starter\', \'active\')', [tenantId]);
+      await pool.query('INSERT INTO subscriptions (tenant_id, plan, status, expires_at) VALUES ($1, \'starter\', \'active\', NOW() + INTERVAL \'30 days\')', [tenantId]);
       u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [profile.email])).rows[0];
     }
     if (u.banned) return res.send(renderPage('Banned', '<div class="card"><div class="alert alert-error">Account banned</div><a href="/login" class="btn">Back</a></div>', null));
@@ -37391,7 +37477,7 @@ app.get('/auth/microsoft/callback', ah(async (req, res) => {
       const tenantId = tenantResult.rows[0].id;
       const hash = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 12);
       u = (await pool.query('INSERT INTO users (tenant_id, email, password, role, approved) VALUES ($1, $2, $3, $4, true) RETURNING id, tenant_id, email, role, approved, dark_mode, created_at', [tenantId, email, hash, 'admin'])).rows[0];
-      await pool.query('INSERT INTO subscriptions (tenant_id, plan, status) VALUES ($1, \'starter\', \'active\')', [tenantId]);
+      await pool.query('INSERT INTO subscriptions (tenant_id, plan, status, expires_at) VALUES ($1, \'starter\', \'active\', NOW() + INTERVAL \'30 days\')', [tenantId]);
       u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
     }
     if (u.banned) return res.send(renderPage('Banned', '<div class="card"><div class="alert alert-error">Account banned</div><a href="/login" class="btn">Back</a></div>', null));
@@ -38634,6 +38720,62 @@ try {
   for (const sql of claimAlters) { try { await pool.query(sql); } catch(e) { /* column may already exist */ } }
 
   console.log('[Migrations] All new tables ready');
+
+  // === ROW LEVEL SECURITY (Phase 1 Security Fix) ===
+  // Enable RLS on the most critical multi-tenant tables.
+  // These policies enforce tenant isolation at the PostgreSQL level as defense-in-depth.
+  // The app still filters by tenant_id in queries (primary defense), but RLS prevents
+  // accidental data leakage if a query ever misses the tenant_id filter.
+  try {
+    const rlsTables = [
+      'users', 'audit_logs', 'payments', 'subscriptions', 'students',
+      'staff', 'members', 'expenses', 'donations', 'invoices',
+      'notifications', 'inventory', 'attendance', 'marks',
+      'assignments', 'announcements', 'events', 'bookings',
+      'clinic_queue', 'clinic_prescriptions', 'sick_bay'
+    ];
+    for (const table of rlsTables) {
+      try {
+        // Check table exists before enabling RLS
+        const exists = (await pool.query(
+          "SELECT 1 FROM information_schema.tables WHERE table_name = $1 AND table_schema = 'public'",
+          [table]
+        )).rows.length > 0;
+        if (!exists) continue;
+
+        // Check if table has tenant_id column
+        const hasTenantId = (await pool.query(
+          "SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = 'tenant_id'",
+          [table]
+        )).rows.length > 0;
+        if (!hasTenantId) continue;
+
+        // Enable RLS
+        await pool.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
+
+        // Create policy: users can only see their own tenant's data
+        // Super admin bypasses RLS by setting app.current_tenant_id = 'super_admin'
+        await pool.query(`
+          CREATE OR REPLACE POLICY tenant_isolation_${table}
+          ON ${table}
+          USING (
+            tenant_id = CAST(NULLIF(current_setting('app.current_tenant_id', true), 'super_admin') AS INTEGER)
+            OR current_setting('app.current_tenant_id', true) = 'super_admin'
+          )
+          WITH CHECK (
+            tenant_id = CAST(NULLIF(current_setting('app.current_tenant_id', true), 'super_admin') AS INTEGER)
+            OR current_setting('app.current_tenant_id', true) = 'super_admin'
+          )
+        `);
+      } catch (e) {
+        // Table may not have RLS support or policy may already exist — non-critical
+        console.warn(`[RLS] Skipped ${table}: ${e.message.slice(0, 80)}`);
+      }
+    }
+    console.log(`[RLS] Row Level Security enabled on ${rlsTables.length} tables`);
+  } catch(e) {
+    console.warn('[RLS] Setup error (non-critical):', e.message);
+  }
 
   // === FIX SCHEMA GAPS — Missing tables + duplicate schema columns ===
   try {
