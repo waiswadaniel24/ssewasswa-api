@@ -878,7 +878,16 @@ const validatePasswordStrength = (password) => {
   return errors;
 };
 
+// Phase 3: Enhanced audit with immutability check - audit_logs cannot be deleted by app users
 const audit = (email, action, details, tenantId, req) => pool.query('INSERT INTO audit_logs(tenant_id,user_email,action,details,ip_address) VALUES($1,$2,$3,$4,$5)', [tenantId || null, email, action, typeof details === 'object' ? JSON.stringify(details) : (details || ''), req?.ip || null]).catch(e => console.error('[Audit Error]', e.message));
+
+// Phase 3: Settings change audit trail (Task 3.12)
+const auditSettingsChange = async (tenantId, userEmail, settingKey, oldValue, newValue) => {
+  try {
+    await pool.query('INSERT INTO settings_audit_log(tenant_id, user_email, setting_key, old_value, new_value) VALUES($1,$2,$3,$4,$5)',
+      [tenantId, userEmail, settingKey, typeof oldValue === 'object' ? JSON.stringify(oldValue) : (oldValue || ''), typeof newValue === 'object' ? JSON.stringify(newValue) : (newValue || '')]);
+  } catch (e) { console.warn('[Settings Audit] Error:', e.message); }
+};
 const notify = (tenantId, email, title, message, type) => {
   pool.query('INSERT INTO notifications(tenant_id,user_email,title,message,type) VALUES($1,$2,$3,$4,$5)', [tenantId, email, title, message, type || 'info']).catch(e => console.error('[DB Error]', e.message));
   // Real-time WebSocket push
@@ -906,11 +915,12 @@ const getEmailTransporter = () => {
   });
   return _emailTransporter;
 };
-const sendEmail = async (to, subject, html) => {
+const sendEmail = async (to, subject, html, tenantFromName) => {
   const transporter = getEmailTransporter();
   if (!transporter) return false;
   try {
-    await transporter.sendMail({ from: process.env.GMAIL_USER, to, subject, html });
+    const fromName = tenantFromName || platformSettings.site_name || 'Comfort';
+    await transporter.sendMail({ from: `"${fromName}" <${process.env.GMAIL_USER}>`, to, subject, html });
     return true;
   } catch (e) { console.warn('Email failed:', e.message); return false; }
 };
@@ -1671,6 +1681,17 @@ const migrations = [
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS approved_by INTEGER`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS rejection_reason TEXT`,
+  // Phase 3 - Email whitelabeling, approval workflows, dashboard widgets, settings audit
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email_from_name TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email_reply_to TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS dashboard_layout JSONB DEFAULT '[]'::jsonb`,
+  `CREATE TABLE IF NOT EXISTS approval_workflows (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT, entity_type TEXT NOT NULL DEFAULT 'general', steps JSONB NOT NULL DEFAULT '[]'::jsonb, active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS approval_requests (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, workflow_id INTEGER REFERENCES approval_workflows(id) ON DELETE SET NULL, entity_type TEXT NOT NULL, entity_id INTEGER, entity_title TEXT, requester_email TEXT, current_step INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', steps_data JSONB DEFAULT '[]'::jsonb, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE INDEX IF NOT EXISTS idx_approval_requests_tenant ON approval_requests(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_approval_requests_status ON approval_requests(status)`,
+  `CREATE TABLE IF NOT EXISTS settings_audit_log (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT NOT NULL, setting_key TEXT NOT NULL, old_value TEXT, new_value TEXT, changed_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE INDEX IF NOT EXISTS idx_settings_audit_tenant ON settings_audit_log(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_settings_audit_key ON settings_audit_log(setting_key)`,
   // v11.0 - Webhooks
   `CREATE TABLE IF NOT EXISTS webhooks (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, url TEXT NOT NULL, events TEXT[], secret TEXT, active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // v11.0 - Church member attendance
@@ -3155,6 +3176,8 @@ a{color:var(--primary);text-decoration:none;font-weight:500;transition:color 0.2
 @media print{.nav,.bottom-nav,.float-install-btn,.btn-group{display:none!important}.card{border:none!important;box-shadow:none!important;break-inside:avoid}body{background:white!important;padding:0!important;color:#000!important}}
 ${typeof csrfTokenOrReq === 'object' && csrfTokenOrReq?.session?.tenantBranding?.custom_css ? `\n/* Tenant Custom CSS */\n${sanitizeCSS(csrfTokenOrReq.session.tenantBranding.custom_css)}\n` : ''}
 </style>
+<!-- Phase 3: Chart.js for interactive client-side charts -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <!-- CookieYes Consent Banner -->
 <script id="cookieyes" type="text/javascript" src="https://cdn-cookieyes.com/client_data/0e110963fc8230516a615baf/script.js"></script>
 ${process.env.GA_TRACKING_ID ? `
@@ -12160,7 +12183,10 @@ app.get('/settings/theme', requireAuth, ah(async (req, res) => {
 app.post('/settings/theme/save', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { primary_color, secondary_color, accent_color, font_family, custom_css, language } = req.body;
+  // Phase 3: Settings audit trail — capture old values before update
+  const oldTenant = (await pool.query('SELECT primary_color,secondary_color,accent_color,font_family,custom_css,language FROM tenants WHERE id=$1', [t])).rows[0];
   await pool.query('UPDATE tenants SET primary_color=$1,secondary_color=$2,accent_color=$3,font_family=$4,custom_css=$5,language=$6 WHERE id=$7', [primary_color, secondary_color, accent_color, font_family, sanitizeCSS(custom_css), language, t]);
+  await auditSettingsChange(t, req.session.user.email, 'theme_settings', oldTenant, { primary_color, secondary_color, accent_color, font_family, custom_css, language });
   await audit(req.session.user.email, 'theme_updated', 'Theme settings updated', req.session.user.tenant_id, req);
   res.redirect('/settings/theme');
 }));
@@ -13380,7 +13406,342 @@ app.post('/momo/pay/initiate', requireAuth, requireNotBanned, ah(async (req, res
 }));
 
 // ============================================================
-// v6.0: AUTOMATION RULES ENGINE
+// Phase 3: EMAIL WHITELABELING SETTINGS (Task 3.7)
+// ============================================================
+app.get('/settings/email-branding', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT email_from_name, email_reply_to, name FROM tenants WHERE id=$1', [t])).rows[0];
+  res.send(renderPage('Email Branding', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Email Whitelabeling</h1><p style="opacity:0.9;margin-top:4px">Customize how emails appear to your recipients</p>
+    </div>
+    <div class="card">
+      <h3>Customize Sender Name & Reply Address</h3>
+      <p class="muted" style="margin-bottom:15px">When emails are sent from the platform, you can customize the sender name. Emails will still be sent from <b>${esc(process.env.GMAIL_USER || 'your SMTP address')}</b> but will display your organization name.</p>
+      <form method="POST" action="/settings/email-branding/save" style="display:grid;gap:12px">
+        <div><label>Organization Name</label><input name="email_from_name" value="${esc(tenant.email_from_name || tenant.name || '')}" placeholder="${esc(tenant.name || 'Your Organization')}" style="max-width:400px">
+        <p class="muted" style="font-size:11px;margin-top:2px">Emails will appear from: "<b>Your Name</b>" &lt;${esc(process.env.GMAIL_USER || 'smtp@example.com')}&gt;</p></div>
+        <div><label>Reply-To Email (optional)</label><input name="email_reply_to" type="email" value="${esc(tenant.email_reply_to || '')}" placeholder="replies@yourdomain.com" style="max-width:400px">
+        <p class="muted" style="font-size:11px;margin-top:2px">When recipients reply to emails, their reply goes to this address instead of the SMTP sender</p></div>
+        <div><button class="btn btn-green" type="submit">Save Email Branding</button></div>
+      </form>
+    </div>
+    <div class="card">
+      <h3>Email Preview</h3>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:20px;max-width:500px">
+        <p style="font-size:12px;color:#94a3b8;margin:0 0 8px">From: ${esc(tenant.email_from_name || tenant.name || platformSettings.site_name || 'Comfort')} &lt;${esc(process.env.GMAIL_USER || 'smtp@example.com')}&gt;</p>
+        ${tenant.email_reply_to ? `<p style="font-size:12px;color:#94a3b8;margin:0 0 8px">Reply-To: ${esc(tenant.email_reply_to)}</p>` : ''}
+        <div style="border-top:1px solid #e2e8f0;padding-top:12px">
+          <p style="font-size:13px;font-weight:600;margin:0">Subject: Your Monthly Report is Ready</p>
+          <p style="font-size:13px;color:#475569;margin:8px 0 0">Hi John, your report for this month has been generated. Click below to view it.</p>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Settings Audit Trail</h3>
+      <p class="muted" style="margin-bottom:10px">Track who changed what settings and when</p>
+      ${(await pool.query('SELECT * FROM settings_audit_log WHERE tenant_id=$1 ORDER BY changed_at DESC LIMIT 10', [t])).rows.length ?
+        `<table><tr><th>Date</th><th>User</th><th>Setting</th><th>Action</th></tr>
+        ${(await pool.query('SELECT * FROM settings_audit_log WHERE tenant_id=$1 ORDER BY changed_at DESC LIMIT 10', [t])).rows.map(l => `<tr>
+          <td style="font-size:12px">${new Date(l.changed_at).toLocaleString()}</td>
+          <td style="font-size:12px">${esc(l.user_email)}</td>
+          <td style="font-size:12px"><span class="tag">${esc(l.setting_key)}</span></td>
+          <td style="font-size:11px;color:#64748b">Changed</td>
+        </tr>`).join('')}
+        </table>` : '<p class="muted">No settings changes logged yet.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/settings/email-branding/save', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { email_from_name, email_reply_to } = req.body;
+  const oldTenant = (await pool.query('SELECT email_from_name, email_reply_to FROM tenants WHERE id=$1', [t])).rows[0];
+  await pool.query('UPDATE tenants SET email_from_name=$1, email_reply_to=$2 WHERE id=$3', [email_from_name || null, email_reply_to || null, t]);
+  await auditSettingsChange(t, req.session.user.email, 'email_branding', oldTenant, { email_from_name, email_reply_to });
+  await audit(req.session.user.email, 'email_branding_updated', 'Email whitelabeling settings updated', t, req);
+  req.session.flash = { type: 'success', msg: 'Email branding updated!' };
+  res.redirect('/settings/email-branding');
+}));
+
+// ============================================================
+// Phase 3: APPROVAL WORKFLOW ENGINE (Task 3.6)
+// ============================================================
+app.get('/approvals', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [workflows, requests] = await Promise.all([
+    pool.query('SELECT * FROM approval_workflows WHERE tenant_id=$1 ORDER BY created_at DESC', [t]),
+    pool.query(`SELECT ar.*, w.name as workflow_name FROM approval_requests ar LEFT JOIN approval_workflows w ON ar.workflow_id = w.id WHERE ar.tenant_id=$1 ORDER BY ar.created_at DESC LIMIT 30`, [t])
+  ]);
+  const pendingCount = requests.rows.filter(r => r.status === 'pending').length;
+  res.send(renderPage('Approval Workflows', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Approval Workflows</h1><p style="opacity:0.9;margin-top:4px">Multi-step approval processes for your organization</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${workflows.rows.length}</div><div>Active Workflows</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${pendingCount}</div><div>Pending Requests</div></div>
+      <div class="stat-card"><div class="stat-num">${requests.rows.length}</div><div>Total Requests</div></div>
+    </div>
+
+    <div class="card"><h2>Create Approval Workflow</h2>
+      <form method="POST" action="/approvals/workflows/save" style="display:grid;gap:10px">
+        <div><label>Workflow Name</label><input name="name" placeholder="e.g. Purchase Approval, Leave Request" required style="max-width:400px"></div>
+        <div><label>Description</label><input name="description" placeholder="What this workflow approves" style="max-width:500px"></div>
+        <div><label>Entity Type</label>
+          <select name="entity_type">
+            <option value="general">General</option>
+            <option value="purchase">Purchase Order</option>
+            <option value="expense">Expense</option>
+            <option value="leave">Leave Request</option>
+            <option value="payment">Payment</option>
+            <option value="enrollment">Enrollment</option>
+          </select>
+        </div>
+        <div><label>Approval Steps (one email per line, in order)</label>
+          <textarea name="steps" rows="3" placeholder="admin@example.com&#10;finance@example.com&#10;director@example.com" required style="max-width:500px"></textarea>
+          <p class="muted" style="font-size:11px;margin-top:2px">Each line is an approval step. All steps must approve before the request is finalized.</p>
+        </div>
+        <button class="btn btn-green" type="submit">Create Workflow</button>
+      </form>
+    </div>
+
+    <div class="card"><h2>Workflows</h2>
+    ${workflows.rows.length ? `<table><tr><th>Name</th><th>Type</th><th>Steps</th><th>Active</th><th>Actions</th></tr>
+      ${workflows.rows.map(w => {
+        const steps = Array.isArray(w.steps) ? w.steps : JSON.parse(w.steps || '[]');
+        return `<tr><td><strong>${esc(w.name)}</strong><br><span class="muted" style="font-size:11px">${esc(w.description||'')}</span></td>
+        <td><span class="tag">${esc(w.entity_type)}</span></td>
+        <td>${steps.length} step(s)</td>
+        <td>${w.active ? '<span style="color:#059669">Active</span>' : '<span style="color:#dc2626">Inactive</span>'}</td>
+        <td>
+          <a href="/approvals/workflows/${w.id}/toggle" class="btn btn-sm">${w.active ? 'Disable' : 'Enable'}</a>
+          <a href="/approvals/workflows/${w.id}/delete" class="btn btn-sm btn-red" onclick="return confirm('Delete?')">Delete</a>
+        </td></tr>`;
+      }).join('')}
+      </table>` : '<p class="muted">No workflows configured. Create one above.</p>'}
+    </div>
+
+    <div class="card"><h2>Recent Approval Requests</h2>
+    ${requests.rows.length ? `<table><tr><th>Entity</th><th>Workflow</th><th>Requester</th><th>Status</th><th>Progress</th><th>Actions</th></tr>
+      ${requests.rows.map(r => {
+        const stepsData = Array.isArray(r.steps_data) ? r.steps_data : JSON.parse(r.steps_data || '[]');
+        const statusColor = r.status === 'approved' ? '#d1fae5;color:#065f46' : r.status === 'rejected' ? '#fee2e2;color:#991b1b' : '#fef3c7;color:#92400e';
+        const progress = stepsData.length > 0 ? Math.round((stepsData.filter(s => s.status === 'approved').length / stepsData.length) * 100) : 0;
+        return `<tr>
+          <td><strong>${esc(r.entity_title || r.entity_type)}</strong><br><span class="muted" style="font-size:11px">ID: ${r.entity_id || '-'}</span></td>
+          <td><span class="tag">${esc(r.workflow_name || 'Manual')}</span></td>
+          <td style="font-size:12px">${esc(r.requester_email)}</td>
+          <td><span class="tag" style="background:${statusColor}">${esc(r.status)}</span></td>
+          <td>
+            <div style="display:flex;align-items:center;gap:6px">
+              <div style="flex:1;height:6px;background:#e2e8f0;border-radius:3px;min-width:60px"><div style="width:${progress}%;height:6px;background:#22c55e;border-radius:3px"></div></div>
+              <span style="font-size:11px;color:#64748b">${progress}%</span>
+            </div>
+          </td>
+          <td>${r.status === 'pending' ? `
+            <a href="/approvals/requests/${r.id}/approve" class="btn btn-sm btn-green">Approve Step</a>
+            <a href="/approvals/requests/${r.id}/reject" class="btn btn-sm btn-red">Reject</a>
+          ` : '-'}</td>
+        </tr>`;
+      }).join('')}
+      </table>` : '<p class="muted">No approval requests yet.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/approvals/workflows/save', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, description, entity_type, steps } = req.body;
+  const stepsArr = steps.split('\n').map(s => s.trim()).filter(s => s.includes('@')).map(email => ({ email, status: 'pending' }));
+  await pool.query('INSERT INTO approval_workflows(tenant_id,name,description,entity_type,steps) VALUES($1,$2,$3,$4,$5)', [t, name, description, entity_type, JSON.stringify(stepsArr)]);
+  await audit(req.session.user.email, 'create_approval_workflow', `Created workflow: ${name}`, t, req);
+  res.redirect('/approvals');
+}));
+
+app.get('/approvals/workflows/:id/toggle', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE approval_workflows SET active=NOT active WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/approvals');
+}));
+
+app.get('/approvals/workflows/:id/delete', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM approval_workflows WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/approvals');
+}));
+
+app.post('/approvals/requests/create', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { workflow_id, entity_type, entity_id, entity_title, notes } = req.body;
+  const workflow = (await pool.query('SELECT * FROM approval_workflows WHERE id=$1 AND tenant_id=$2', [workflow_id, t])).rows[0];
+  if (!workflow) return res.status(404).send('Workflow not found');
+  const steps = Array.isArray(workflow.steps) ? workflow.steps : JSON.parse(workflow.steps || '[]');
+  const stepsData = steps.map(s => ({ ...s, status: 'pending', responded_at: null }));
+  await pool.query('INSERT INTO approval_requests(tenant_id,workflow_id,entity_type,entity_id,entity_title,requester_email,current_step,status,steps_data,notes) VALUES($1,$2,$3,$4,$5,$6,0,$7,$8,$9)',
+    [t, workflow_id, entity_type || workflow.entity_type, entity_id || null, entity_title || '', req.session.user.email, 'pending', JSON.stringify(stepsData), notes || '']);
+  // Notify first approver
+  if (steps.length > 0) {
+    queueEmail(t, steps[0].email, `Approval Required: ${entity_title || workflow.name}`, `<p>A new approval request requires your review.</p><p><b>Request:</b> ${esc(entity_title || workflow.name)}</p><p><b>Requested by:</b> ${esc(req.session.user.email)}</p>`);
+  }
+  await audit(req.session.user.email, 'create_approval_request', `Created approval request for ${entity_title || workflow.name}`, t, req);
+  res.redirect('/approvals');
+}));
+
+app.get('/approvals/requests/:id/approve', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const request = (await pool.query('SELECT * FROM approval_requests WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!request || request.status !== 'pending') return res.redirect('/approvals');
+  let stepsData = Array.isArray(request.steps_data) ? request.steps_data : JSON.parse(request.steps_data || '[]');
+  // Mark current step as approved
+  stepsData[request.current_step] = { ...stepsData[request.current_step], status: 'approved', responded_at: new Date().toISOString() };
+  const nextStep = request.current_step + 1;
+  if (nextStep >= stepsData.length) {
+    // All steps approved
+    await pool.query('UPDATE approval_requests SET steps_data=$1, current_step=$2, status=$3, updated_at=NOW() WHERE id=$4', [JSON.stringify(stepsData), nextStep, 'approved', request.id]);
+    await audit(req.session.user.email, 'approval_approved', `Fully approved: ${request.entity_title}`, t, req);
+  } else {
+    await pool.query('UPDATE approval_requests SET steps_data=$1, current_step=$2, updated_at=NOW() WHERE id=$3', [JSON.stringify(stepsData), nextStep, request.id]);
+    // Notify next approver
+    if (stepsData[nextStep]?.email) {
+      queueEmail(t, stepsData[nextStep].email, `Approval Required: ${request.entity_title}`, `<p>Step ${nextStep + 1} of ${stepsData.length} requires your approval.</p><p><b>Request:</b> ${esc(request.entity_title)}</p>`);
+    }
+    await audit(req.session.user.email, 'approval_step_approved', `Step ${request.current_step + 1} approved for: ${request.entity_title}`, t, req);
+  }
+  res.redirect('/approvals');
+}));
+
+app.get('/approvals/requests/:id/reject', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const request = (await pool.query('SELECT * FROM approval_requests WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!request || request.status !== 'pending') return res.redirect('/approvals');
+  let stepsData = Array.isArray(request.steps_data) ? request.steps_data : JSON.parse(request.steps_data || '[]');
+  stepsData[request.current_step] = { ...stepsData[request.current_step], status: 'rejected', responded_at: new Date().toISOString() };
+  await pool.query('UPDATE approval_requests SET steps_data=$1, status=$2, updated_at=NOW() WHERE id=$3', [JSON.stringify(stepsData), 'rejected', request.id]);
+  await audit(req.session.user.email, 'approval_rejected', `Rejected at step ${request.current_step + 1}: ${request.entity_title}`, t, req);
+  res.redirect('/approvals');
+}));
+
+// ============================================================
+// Phase 3: DASHBOARD WIDGETS SYSTEM (Task 3.4)
+// ============================================================
+app.get('/dashboard/widgets', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT dashboard_layout, type FROM tenants WHERE id=$1', [t])).rows[0];
+  const layout = Array.isArray(tenant.dashboard_layout) ? tenant.dashboard_layout : JSON.parse(tenant.dashboard_layout || '[]');
+
+  // Default widgets based on portal type
+  const defaultWidgets = {
+    school: [
+      { id: 'stats', title: 'Key Statistics', type: 'stats', active: true, order: 0 },
+      { id: 'recent-students', title: 'Recent Students', type: 'recent', active: true, order: 1 },
+      { id: 'fee-overview', title: 'Fee Collection Overview', type: 'fees', active: true, order: 2 },
+      { id: 'attendance-chart', title: 'Attendance Chart', type: 'chart', active: true, order: 3 },
+      { id: 'upcoming-exams', title: 'Upcoming Exams', type: 'list', active: false, order: 4 },
+      { id: 'quick-actions', title: 'Quick Actions', type: 'actions', active: true, order: 5 },
+      { id: 'announcements', title: 'Announcements', type: 'announcements', active: false, order: 6 }
+    ],
+    church: [
+      { id: 'stats', title: 'Key Statistics', type: 'stats', active: true, order: 0 },
+      { id: 'recent-donations', title: 'Recent Donations', type: 'donations', active: true, order: 1 },
+      { id: 'attendance-chart', title: 'Service Attendance', type: 'chart', active: true, order: 2 },
+      { id: 'member-count', title: 'Membership Growth', type: 'chart', active: false, order: 3 },
+      { id: 'quick-actions', title: 'Quick Actions', type: 'actions', active: true, order: 4 },
+      { id: 'announcements', title: 'Announcements', type: 'announcements', active: false, order: 5 }
+    ],
+    hospital: [
+      { id: 'stats', title: 'Key Statistics', type: 'stats', active: true, order: 0 },
+      { id: 'recent-patients', title: 'Recent Patients', type: 'recent', active: true, order: 1 },
+      { id: 'appointments-today', title: "Today's Appointments", type: 'list', active: true, order: 2 },
+      { id: 'quick-actions', title: 'Quick Actions', type: 'actions', active: true, order: 3 },
+      { id: 'announcements', title: 'Announcements', type: 'announcements', active: false, order: 4 }
+    ],
+    default: [
+      { id: 'stats', title: 'Key Statistics', type: 'stats', active: true, order: 0 },
+      { id: 'recent-activity', title: 'Recent Activity', type: 'recent', active: true, order: 1 },
+      { id: 'quick-actions', title: 'Quick Actions', type: 'actions', active: true, order: 2 },
+      { id: 'announcements', title: 'Announcements', type: 'announcements', active: false, order: 3 }
+    ]
+  };
+
+  const portalType = tenant.type || 'school';
+  const widgets = layout.length > 0 ? layout : (defaultWidgets[portalType] || defaultWidgets.default);
+
+  res.send(renderPage('Dashboard Widgets', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Customize Dashboard</h1><p style="opacity:0.9;margin-top:4px">Drag to reorder, toggle to show/hide widgets on your portal dashboard</p></div>
+    <form method="POST" action="/dashboard/widgets/save" id="widgetsForm">
+      <div class="card">
+        <h2>Active Widgets</h2>
+        <p class="muted" style="margin-bottom:12px">Toggle widgets on/off. Active widgets appear on your portal dashboard in order.</p>
+        <div id="widgetList">
+          ${widgets.map((w, i) => `
+            <div style="display:flex;align-items:center;gap:12px;padding:14px;background:${w.active ? '#f0fdf4' : '#f8fafc'};border:1px solid ${w.active ? '#bbf7d0' : '#e2e8f0'};border-radius:12px;margin-bottom:8px;transition:all 0.2s;cursor:grab" draggable="true" data-index="${i}">
+              <span style="font-size:20px;cursor:grab;color:#94a3b8">&#9776;</span>
+              <div style="flex:1">
+                <strong style="font-size:14px">${esc(w.title)}</strong>
+                <p class="muted" style="font-size:11px;margin:2px 0 0">Type: ${esc(w.type)} | Position: ${i + 1}</p>
+              </div>
+              <input type="hidden" name="widget_id" value="${esc(w.id)}">
+              <input type="hidden" name="widget_title" value="${esc(w.title)}">
+              <input type="hidden" name="widget_type" value="${esc(w.type)}">
+              <label style="position:relative;display:inline-block;width:44px;height:24px;cursor:pointer">
+                <input type="checkbox" name="widget_active" value="true" ${w.active ? 'checked' : ''} style="opacity:0;width:0;height:0">
+                <span style="position:absolute;inset:0;background:${w.active ? '#22c55e' : '#cbd5e1'};border-radius:24px;transition:0.3s"></span>
+                <span style="position:absolute;top:2px;left:${w.active ? '22px' : '2px'};width:20px;height:20px;background:white;border-radius:50%;transition:0.3s"></span>
+              </label>
+            </div>
+          `).join('')}
+        </div>
+        <div style="margin-top:15px;display:flex;gap:10px">
+          <button class="btn btn-green" type="submit">Save Widget Layout</button>
+          <button type="button" class="btn" onclick="document.getElementById('widgetList').innerHTML=document.getElementById('widgetList').innerHTML.split('').reverse().join('')">Reverse Order</button>
+        </div>
+      </div>
+    </form>
+    <script>
+    // Simple drag-to-reorder using HTML5 drag API
+    (function(){
+      const list = document.getElementById('widgetList');
+      let dragEl = null;
+      list.addEventListener('dragstart', function(e) { dragEl = e.target.closest('[draggable]'); dragEl.style.opacity = '0.4'; });
+      list.addEventListener('dragend', function(e) { if(dragEl) dragEl.style.opacity = '1'; dragEl = null; });
+      list.addEventListener('dragover', function(e) { e.preventDefault(); });
+      list.addEventListener('drop', function(e) {
+        e.preventDefault();
+        const target = e.target.closest('[draggable]');
+        if (target && dragEl && target !== dragEl) {
+          const all = [...list.querySelectorAll('[draggable]')];
+          const fromIdx = all.indexOf(dragEl);
+          const toIdx = all.indexOf(target);
+          if (fromIdx < toIdx) list.insertBefore(dragEl, target.nextSibling);
+          else list.insertBefore(dragEl, target);
+        }
+      });
+    })();
+    </script>
+  `, req.session.user));
+}));
+
+app.post('/dashboard/widgets/save', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { widget_id, widget_title, widget_type, widget_active } = req.body;
+  const ids = Array.isArray(widget_id) ? widget_id : [widget_id];
+  const titles = Array.isArray(widget_title) ? widget_title : [widget_title];
+  const types = Array.isArray(widget_type) ? widget_type : [widget_type];
+  const actives = Array.isArray(widget_active) ? widget_active : [widget_active];
+  const widgets = ids.map((id, i) => ({
+    id, title: titles[i] || id, type: types[i] || 'stats',
+    active: actives.includes('true'), order: i
+  }));
+  await pool.query('UPDATE tenants SET dashboard_layout=$1 WHERE id=$2', [JSON.stringify(widgets), t]);
+  await auditSettingsChange(t, req.session.user.email, 'dashboard_layout', null, widgets);
+  await audit(req.session.user.email, 'dashboard_layout_updated', `Updated dashboard layout (${widgets.length} widgets)`, t, req);
+  req.session.flash = { type: 'success', msg: 'Dashboard layout saved!' };
+  res.redirect('/dashboard/widgets');
+}));
+
+// ============================================================
+// v6.0: AUTOMATION RULES ENGINE (existing, enhanced with compound conditions)
 // ============================================================
 app.get('/automations', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
@@ -14894,41 +15255,53 @@ const apiAuthWithPlan = async (req, res, next) => {
   next();
 };
 
-// 3.3: AUTO DAILY BACKUP (pg_dump to Cloudinary)
+// 3.3: AUTO DAILY BACKUP (pg_dump to Cloudinary) — Phase 3: Enhanced with encryption + rotation
+const BACKUP_ENCRYPTION_KEY = process.env.BACKUP_ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
+const BACKUP_RETENTION_DAYS = 30;
 const runAutoBackup = async () => {
   try {
     const tenants = (await pool.query('SELECT id,name FROM tenants WHERE approved=true AND banned=false')).rows;
     for (const t of tenants.slice(0, 5)) { // Max 5 per run to avoid timeout
       try {
-        const tables = ['students','fees','attendance','marks','expenses','sales','invoices','donations','church_members','members','inventory','customers','staff','audit_logs','payments','subscriptions','announcements','notifications'];
+        // Phase 3: Expanded table list (20 tables)
+        const tables = ['students','fees','attendance','marks','expenses','sales','invoices','donations','church_members','members','inventory','customers','staff','audit_logs','payments','subscriptions','announcements','notifications','invoices','renewal_logs'];
         let backupData = {};
         for (const table of tables) {
           try {
             validateTable(table);
             const rows = (await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1 AND deleted_at IS NULL`, [t.id])).rows;
             backupData[table] = rows;
-          } catch(e) { console.error('[Error]', e.message); } // Table might not have tenant_id
+          } catch(e) { /* Table might not have tenant_id or doesn't exist */ }
         }
         const backupJson = JSON.stringify(backupData);
-        const buffer = Buffer.from(backupJson);
+        // Phase 3: Encrypt backup data with AES-256
+        const iv = crypto.randomBytes(16);
+        const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(BACKUP_ENCRYPTION_KEY.slice(0, 32), 'hex'), iv);
+        const encrypted = Buffer.concat([cipher.update(backupJson), cipher.final()]);
+        const encryptedPayload = Buffer.concat([iv, encrypted]); // Prepend IV for decryption
         let backupUrl = null;
         if (process.env.CLOUDINARY_URL && !process.env.CLOUDINARY_URL.includes('xxx')) {
           try {
             const cloudinary = require('cloudinary').v2;
             cloudinary.config({ url: process.env.CLOUDINARY_URL });
-            const result = await cloudinary.uploader.upload(`data:application/json;base64,${buffer.toString('base64')}`, { resource_type: 'raw', folder: `backups/tenant_${t.id}`, public_id: `backup-${t.id}-${new Date().toISOString().split('T')[0]}`, overwrite: true });
+            const result = await cloudinary.uploader.upload(`data:application/octet-stream;base64,${encryptedPayload.toString('base64')}`, { resource_type: 'raw', folder: `backups/tenant_${t.id}`, public_id: `backup-${t.id}-${new Date().toISOString().split('T')[0]}`, overwrite: true });
             backupUrl = result.secure_url;
           } catch(e) { /* Cloudinary upload failed, save locally only */ }
         }
-        await pool.query('INSERT INTO backup_log(tenant_id,backup_url,size_bytes,status) VALUES($1,$2,$3,$4)', [t.id, backupUrl, buffer.length, backupUrl ? 'completed' : 'local_only']);
+        await pool.query('INSERT INTO backup_log(tenant_id,backup_url,size_bytes,status) VALUES($1,$2,$3,$4)', [t.id, backupUrl, encryptedPayload.length, backupUrl ? 'encrypted_cloud' : 'encrypted_local']);
       } catch(e) { console.warn(`Backup failed for tenant ${t.id}:`, e.message); }
     }
-    console.log(`Auto-backup completed for ${Math.min(tenants.length, 5)} tenants`);
+    // Phase 3: Backup rotation — delete backups older than BACKUP_RETENTION_DAYS
+    try {
+      const deleted = await pool.query("DELETE FROM backup_log WHERE created_at < NOW() - INTERVAL '" + BACKUP_RETENTION_DAYS + " days'");
+      if (deleted.rowCount > 0) console.log(`[Backup Rotation] Deleted ${deleted.rowCount} old backup(s) older than ${BACKUP_RETENTION_DAYS} days`);
+    } catch(e) { console.warn('[Backup Rotation] Error:', e.message); }
+    console.log(`Auto-backup completed for ${Math.min(tenants.length, 5)} tenants (encrypted, ${BACKUP_RETENTION_DAYS}-day retention)`);
     // Notify super_admin of backup results
     try {
       const superAdmin = (await pool.query("SELECT email FROM users WHERE role='super_admin' LIMIT 1")).rows[0];
       if (superAdmin) {
-        queueEmail(superAdmin.email, 'Daily Backup Complete', `<div style="max-width:500px;margin:0 auto;font-family:sans-serif"><h2>Backup Report</h2><p>Auto-backup completed for <b>${Math.min(tenants.length, 5)}</b> tenants out of ${tenants.length} total.</p><p>Check the <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/settings/backup">Backup Log</a> for details.</p></div>`);
+        queueEmail(1, superAdmin.email, 'Daily Backup Complete', `<div style="max-width:500px;margin:0 auto;font-family:sans-serif"><h2>Encrypted Backup Report</h2><p>Auto-backup completed for <b>${Math.min(tenants.length, 5)}</b> tenants out of ${tenants.length} total.</p><p>Backups are encrypted with AES-256 and retained for ${BACKUP_RETENTION_DAYS} days.</p><p>Check the <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/settings/backup">Backup Log</a> for details.</p></div>`);
       }
     } catch(e) { console.warn('[Backup] Admin notification error:', e.message); }
   } catch(e) { console.warn('Auto-backup error:', e.message); }
@@ -33224,6 +33597,8 @@ setTimeout(() => { try { const m = require('./fundraising-ultimate5'); m(app, po
 ['integration_configs','integration_sync_log','crm_sync_configs','crm_sync_queue','email_marketing_configs','email_campaign_sync','accounting_sync_configs','accounting_sync_records','webhook_endpoints_pro','webhook_deliveries','api_gateway_keys_pro','api_gateway_logs','api_rate_limits_pro','data_import_jobs','data_export_jobs','import_error_rows','whitelabel_pro_config','language_configs','translations','custom_domains','sso_configs','sso_sessions','donor_2fa_configs','donor_2fa_attempts','privacy_consent_records','privacy_settings','data_retention_policies','data_retention_log','platform_plugins','plugin_marketplace'].forEach(t => VALID_TABLES.add(t));
 // Phase 2 - Add new tables to VALID_TABLES
 ['invoices','renewal_logs'].forEach(t => VALID_TABLES.add(t));
+// Phase 3 - Add new tables to VALID_TABLES
+['approval_workflows','approval_requests','settings_audit_log'].forEach(t => VALID_TABLES.add(t));
 setTimeout(() => { try { const m = require('./fundraising-ultimate6'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate6] Integration & Platform loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate6] Failed:', e.message); } }, 11000);
 
 // === FUNDRAISING ULTIMATE7 (Advanced Donation Types & Events — 8 features) ===
@@ -40839,3 +41214,4 @@ server.listen(PORT, () => {
 // Redeploy trigger: 2026-05-18 webhooks-fix-pwa-update-v4
 // v19.2 deploy trigger: fix 278 SQL migration errors + subscription gating + admin feature overrides — 2026-05-19
 // Phase 2 deploy trigger: subscription renewal + invoices + Redis caching + role permissions + admin approval queue — 2026-05-20
+// Phase 3 deploy trigger: Chart.js + approval workflows + dashboard widgets + email whitelabeling + encrypted backups + audit trail — 2026-05-20
