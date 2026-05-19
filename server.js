@@ -3453,6 +3453,7 @@ ${user && user._trial_days && user._trial_days > 0 ? `<div id="trial-banner" sty
         </div>
       </div>
       <a href="/dashboard">${esc(uiT('nav.dashboard'))}</a>
+      <a href="/admin/overview" style="font-size:12px;font-weight:600;color:var(--accent)">&#9878; Admin KPI</a>
       <div class="dd" id="ddModules">
         <button class="dd-btn" onclick="toggleDD('ddModules')">${esc(uiT('nav.modules'))} <span class="dd-arrow">▾</span></button>
         <div class="dd-menu">
@@ -42551,6 +42552,760 @@ if (READ_REPLICA_POOL) {
 } else {
   console.log('[DB] No read replica configured — all queries go to primary');
 }
+
+// ============================================================
+// FEATURE: Unified Tenant Admin KPI Dashboard + Onboarding Wizard
+// Task ID: p4 — Built 2026-05-20
+// ============================================================
+
+// === FEATURE 1: GET /admin/overview — Tenant Admin KPI Command Center ===
+app.get('/admin/overview', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id;
+  if (!tid) return res.redirect('/dashboard');
+
+  // Load tenant branding
+  const tenantRow = await pool.query('SELECT primary_color, name, tenant_type, logo_url FROM tenants WHERE id=$1', [tid]);
+  const tenant = tenantRow.rows[0] || {};
+  const primaryColor = tenant.primary_color || '#6366f1';
+  const tenantName = tenant.name || 'Organization';
+  const tenantType = tenant.tenant_type || 'school';
+
+  // --- Subscription Status ---
+  const subRow = await pool.query(
+    'SELECT plan, status, started_at, trial_end, trial_expired FROM subscriptions WHERE tenant_id=$1 AND status=$2 ORDER BY started_at DESC LIMIT 1',
+    [tid, 'active']
+  );
+  const sub = subRow.rows[0] || { plan: 'free', status: 'active', started_at: null, trial_end: null, trial_expired: false };
+  const planName = (sub.plan || 'free').charAt(0).toUpperCase() + (sub.plan || 'free').slice(1);
+  const planBadgeColor = sub.plan === 'enterprise' ? '#7c3aed' : sub.plan === 'pro' ? '#059669' : sub.plan === 'basic' ? '#0891b2' : '#64748b';
+  let trialDaysLeft = null;
+  if (sub.trial_end) {
+    const diff = new Date(sub.trial_end) - new Date();
+    trialDaysLeft = diff > 0 ? Math.ceil(diff / (1000 * 60 * 60 * 24)) : 0;
+  }
+
+  // --- Row 1: KPI Cards ---
+  // Users count
+  const userCountRow = await pool.query('SELECT COUNT(*) as cnt FROM users WHERE tenant_id=$1', [tid]);
+  const userCount = parseInt(userCountRow.rows[0]?.cnt || 0);
+
+  // Storage estimate
+  const storageRow = await pool.query(`
+    SELECT
+      COALESCE((SELECT COUNT(*) FROM students WHERE tenant_id=$1), 0) as students,
+      COALESCE((SELECT COUNT(*) FROM members WHERE tenant_id=$1), 0) as members,
+      COALESCE((SELECT COUNT(*) FROM patients WHERE tenant_id=$1), 0) as patients,
+      COALESCE((SELECT COUNT(*) FROM documents WHERE tenant_id=$1), 0) as documents,
+      COALESCE((SELECT COUNT(*) FROM invoices WHERE tenant_id=$1), 0) as invoices
+  `, [tid]);
+  const sr = storageRow.rows[0] || {};
+  const storageKB = (sr.students || 0) * 0.5 + (sr.members || 0) * 0.5 + (sr.patients || 0) * 0.5 + (sr.documents || 0) * 100 + (sr.invoices || 0) * 2;
+  const storageDisplay = storageKB >= 1024 ? (storageKB / 1024).toFixed(1) + ' MB' : storageKB.toFixed(1) + ' KB';
+
+  // Health Score
+  const healthRow = await pool.query(`
+    SELECT
+      (SELECT COUNT(*) FROM users WHERE tenant_id=$1 AND last_login > NOW() - INTERVAL '7 days') as active_users,
+      (SELECT COUNT(*) FROM invoices WHERE tenant_id=$1 AND status='unpaid' AND due_date < NOW()) as expired_invoices,
+      (SELECT COUNT(*) FROM notifications WHERE tenant_id=$1 AND read=false) as unread_notifs
+  `, [tid]);
+  const hr = healthRow.rows[0] || {};
+  const activeUsers = parseInt(hr.active_users || 0);
+  const expiredInvoices = parseInt(hr.expired_invoices || 0);
+  const unreadNotifs = parseInt(hr.unread_notifs || 0);
+  let healthScore = 100 - (expiredInvoices * 5) - (unreadNotifs * 2) + (activeUsers * 3);
+  healthScore = Math.max(0, Math.min(100, healthScore));
+  const healthColor = healthScore >= 80 ? '#059669' : healthScore >= 50 ? '#d97706' : '#ef4444';
+
+  // Activity this week
+  const actRow = await pool.query(
+    "SELECT COUNT(*) as cnt FROM audit_logs WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '7 days'",
+    [tid]
+  );
+  const activityCount = parseInt(actRow.rows[0]?.cnt || 0);
+
+  // --- Row 2: Financial Snapshot ---
+  // Total Revenue
+  const revRow = await pool.query(
+    'SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE tenant_id=$1', [tid]
+  );
+  const totalRevenue = parseFloat(revRow.rows[0]?.total || 0);
+
+  // Outstanding invoices
+  const outRow = await pool.query(
+    "SELECT COUNT(*) as cnt, COALESCE(SUM(amount), 0) as total FROM invoices WHERE tenant_id=$1 AND status IN ('unpaid','pending')",
+    [tid]
+  );
+  const outstandingCount = parseInt(outRow.rows[0]?.cnt || 0);
+  const outstandingTotal = parseFloat(outRow.rows[0]?.total || 0);
+
+  // Wallet balance
+  const walletRow = await pool.query(
+    'SELECT balance FROM tenant_wallets WHERE tenant_id=$1', [tid]
+  );
+  const walletBalance = parseFloat(walletRow.rows[0]?.balance || 0);
+
+  // Recent payments
+  const recentPayRow = await pool.query(
+    'SELECT amount, payer_name, created_at, method FROM payments WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 5', [tid]
+  );
+  const recentPayments = recentPayRow.rows || [];
+
+  // --- Row 3: Team & Quick Actions ---
+  const teamRow = await pool.query(
+    'SELECT email, role, banned, last_login FROM users WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 5', [tid]
+  );
+  const teamMembers = teamRow.rows || [];
+
+  // --- Row 4: Recent Activity Feed ---
+  const auditRow = await pool.query(
+    'SELECT user_email, action, details, created_at FROM audit_logs WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 15', [tid]
+  );
+  const auditEntries = auditRow.rows || [];
+
+  // Format UGX
+  const ugx = (n) => 'UGX ' + Number(n).toLocaleString('en-US');
+
+  // Action color mapping for audit feed
+  const actionColor = (action) => {
+    const a = (action || '').toLowerCase();
+    if (a.includes('create') || a.includes('add') || a.includes('insert')) return '#059669';
+    if (a.includes('update') || a.includes('edit') || a.includes('modify')) return '#3b82f6';
+    if (a.includes('delete') || a.includes('remove')) return '#ef4444';
+    if (a.includes('login') || a.includes('auth')) return '#64748b';
+    return '#8b5cf6';
+  };
+
+  // Build quick actions based on portal type
+  const quickActions = {
+    school: [
+      { label: 'Invite User', href: '/settings/users?action=invite', icon: '👥' },
+      { label: 'Create Invoice', href: '/billing/invoices?action=create', icon: '🧾' },
+      { label: 'Add Student', href: '/school/students?action=add', icon: '🎓' },
+      { label: 'View Reports', href: '/reports', icon: '📊' },
+      { label: 'Settings', href: '/settings', icon: '⚙️' },
+    ],
+    church: [
+      { label: 'Invite User', href: '/settings/users?action=invite', icon: '👥' },
+      { label: 'Create Invoice', href: '/billing/invoices?action=create', icon: '🧾' },
+      { label: 'Add Member', href: '/church/members?action=add', icon: '🙏' },
+      { label: 'View Reports', href: '/reports', icon: '📊' },
+      { label: 'Settings', href: '/settings', icon: '⚙️' },
+    ],
+    health: [
+      { label: 'Invite User', href: '/settings/users?action=invite', icon: '👥' },
+      { label: 'Create Invoice', href: '/billing/invoices?action=create', icon: '🧾' },
+      { label: 'Add Patient', href: '/health/patients?action=add', icon: '🏥' },
+      { label: 'View Reports', href: '/reports', icon: '📊' },
+      { label: 'Settings', href: '/settings', icon: '⚙️' },
+    ],
+    business: [
+      { label: 'Invite User', href: '/settings/users?action=invite', icon: '👥' },
+      { label: 'Create Invoice', href: '/billing/invoices?action=create', icon: '🧾' },
+      { label: 'Add Customer', href: '/business/customers?action=add', icon: '🤝' },
+      { label: 'View Reports', href: '/reports', icon: '📊' },
+      { label: 'Settings', href: '/settings', icon: '⚙️' },
+    ],
+    organization: [
+      { label: 'Invite User', href: '/settings/users?action=invite', icon: '👥' },
+      { label: 'Create Invoice', href: '/billing/invoices?action=create', icon: '🧾' },
+      { label: 'Add Member', href: '/org/members?action=add', icon: '🤝' },
+      { label: 'View Reports', href: '/reports', icon: '📊' },
+      { label: 'Settings', href: '/settings', icon: '⚙️' },
+    ],
+    individual: [
+      { label: 'Set Goals', href: '/individual/goals', icon: '🎯' },
+      { label: 'Budget', href: '/individual/budget', icon: '💰' },
+      { label: 'Notes', href: '/individual/notes', icon: '📝' },
+      { label: 'Settings', href: '/settings', icon: '⚙️' },
+    ],
+    public: [
+      { label: 'Invite User', href: '/settings/users?action=invite', icon: '👥' },
+      { label: 'View Reports', href: '/reports', icon: '📊' },
+      { label: 'Settings', href: '/settings', icon: '⚙️' },
+    ],
+  };
+  const actions = quickActions[tenantType] || quickActions.school;
+
+  const dark = u?.dark_mode || false;
+
+  res.send(renderPage('Admin KPI Dashboard', `
+    <style>
+      :root{--kpi-primary:${primaryColor}}
+      .kpi-back{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:10px;font-size:13px;font-weight:600;color:var(--text-muted);text-decoration:none;margin-bottom:16px;transition:all .2s}
+      .kpi-back:hover{background:var(--bg-card);color:var(--primary)}
+      .kpi-sub-bar{background:${dark ? 'rgba(30,41,59,0.9)' : 'rgba(255,255,255,0.95)'};backdrop-filter:blur(12px);border:1px solid ${dark ? '#1e2d4a' : '#e0e7ff'};border-radius:16px;padding:20px 24px;margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+      .kpi-sub-plan{display:inline-flex;align-items:center;gap:10px}
+      .kpi-plan-badge{background:${planBadgeColor};color:white;padding:5px 14px;border-radius:20px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
+      .kpi-plan-name{font-size:20px;font-weight:800;letter-spacing:-0.02em}
+      .kpi-trial{background:#fef3c7;color:#92400e;padding:6px 14px;border-radius:10px;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+      .kpi-upgrade{background:linear-gradient(135deg,${primaryColor},${primaryColor}dd);color:white;padding:8px 20px;border-radius:10px;text-decoration:none;font-size:13px;font-weight:700;transition:all .2s;box-shadow:0 2px 8px ${primaryColor}44}
+      .kpi-upgrade:hover{transform:translateY(-1px);box-shadow:0 6px 20px ${primaryColor}55}
+      .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px}
+      .kpi-card{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:20px;position:relative;overflow:hidden;transition:all .3s cubic-bezier(.16,1,.3,1)}
+      .kpi-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg)}
+      .kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:${primaryColor};opacity:.7}
+      .kpi-card-icon{font-size:28px;margin-bottom:8px}
+      .kpi-card-value{font-size:28px;font-weight:800;letter-spacing:-0.03em;font-family:'Plus Jakarta Sans','Inter',sans-serif}
+      .kpi-card-label{font-size:12px;color:var(--text-muted);font-weight:500;margin-top:2px;text-transform:uppercase;letter-spacing:0.5px}
+      .kpi-card-action{margin-top:10px;display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:${primaryColor};text-decoration:none;transition:all .2s}
+      .kpi-card-action:hover{text-decoration:underline}
+      .kpi-section{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:20px 24px;margin-bottom:20px}
+      .kpi-section h3{font-size:15px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;letter-spacing:-0.01em}
+      .kpi-fin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:16px}
+      .kpi-fin-card{background:${dark ? '#1a2540' : '#f8fafc'};border:1px solid ${dark ? '#253352' : '#e2e8f0'};border-radius:12px;padding:16px;text-align:center}
+      .kpi-fin-value{font-size:22px;font-weight:800;color:${primaryColor};letter-spacing:-0.02em}
+      .kpi-fin-label{font-size:11px;color:var(--text-muted);margin-top:4px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600}
+      .kpi-table{width:100%;border-collapse:collapse;font-size:13px}
+      .kpi-table th{text-align:left;padding:8px 10px;font-weight:600;border-bottom:2px solid var(--border);color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px}
+      .kpi-table td{padding:8px 10px;border-bottom:1px solid ${dark ? '#1e2d4a' : '#f1f5f9'}}
+      .kpi-table tr:hover td{background:${dark ? '#1a2540' : '#f8fafc'}}
+      .kpi-team-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:16px}
+      .kpi-team-card{background:${dark ? '#1a2540' : '#f8fafc'};border:1px solid ${dark ? '#253352' : '#e2e8f0'};border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:10px}
+      .kpi-team-avatar{width:36px;height:36px;border-radius:50%;background:${primaryColor}22;color:${primaryColor};display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0}
+      .kpi-team-info{flex:1;min-width:0}
+      .kpi-team-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .kpi-team-role{font-size:11px;color:var(--text-muted)}
+      .kpi-team-status{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+      .kpi-actions-grid{display:flex;flex-wrap:wrap;gap:8px}
+      .kpi-action-btn{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border-radius:10px;font-size:13px;font-weight:600;text-decoration:none;background:${dark ? '#1a2540' : '#f8fafc'};border:1px solid ${dark ? '#253352' : '#e2e8f0'};color:var(--text);transition:all .2s}
+      .kpi-action-btn:hover{border-color:${primaryColor};color:${primaryColor};transform:translateY(-1px);box-shadow:0 4px 12px ${primaryColor}22}
+      .kpi-feed-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid ${dark ? '#1e2d4a' : '#f1f5f9'}}
+      .kpi-feed-item:last-child{border-bottom:none}
+      .kpi-feed-dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0}
+      .kpi-feed-text{font-size:13px;flex:1;line-height:1.5}
+      .kpi-feed-text strong{font-weight:600}
+      .kpi-feed-time{font-size:11px;color:var(--text-dim);white-space:nowrap;margin-top:2px}
+      .kpi-health-ring{position:relative;width:64px;height:64px;margin:0 auto 8px}
+      .kpi-health-ring svg{transform:rotate(-90deg)}
+      .kpi-health-val{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:16px;font-weight:800;color:${healthColor}}
+      @media(max-width:600px){
+        .kpi-sub-bar{flex-direction:column;align-items:flex-start}
+        .kpi-grid{grid-template-columns:1fr 1fr}
+        .kpi-fin-grid{grid-template-columns:1fr 1fr}
+        .kpi-team-grid{grid-template-columns:1fr}
+      }
+      @media(max-width:400px){.kpi-grid{grid-template-columns:1fr}}
+    </style>
+
+    <a href="/dashboard" class="kpi-back">&#8592; Back to Portal</a>
+
+    <!-- Top Bar: Subscription Status -->
+    <div class="kpi-sub-bar">
+      <div class="kpi-sub-plan">
+        <span class="kpi-plan-badge">${esc(planName)}</span>
+        <span class="kpi-plan-name">${esc(tenantName)}</span>
+        ${trialDaysLeft !== null && trialDaysLeft > 0 ? `<span class="kpi-trial">&#9202; Trial: ${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} left</span>` : ''}
+        ${sub.started_at ? `<span style="font-size:12px;color:var(--text-muted)">Since ${new Date(sub.started_at).toLocaleDateString()}</span>` : ''}
+      </div>
+      ${sub.plan !== 'enterprise' ? `<a href="/billing" class="kpi-upgrade">&#9889; Upgrade</a>` : ''}
+    </div>
+
+    <!-- Row 1: KPI Cards -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-card-icon">&#128101;</div>
+        <div class="kpi-card-value">${userCount}</div>
+        <div class="kpi-card-label">Users</div>
+        <a href="/settings/users?action=invite" class="kpi-card-action">+ Invite &rarr;</a>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-card-icon">&#128190;</div>
+        <div class="kpi-card-value">${esc(storageDisplay)}</div>
+        <div class="kpi-card-label">Storage Used</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-card-icon">&#9829;</div>
+        <div class="kpi-health-ring">
+          <svg width="64" height="64" viewBox="0 0 64 64">
+            <circle cx="32" cy="32" r="28" fill="none" stroke="${dark ? '#1e2d4a' : '#e2e8f0'}" stroke-width="5"/>
+            <circle cx="32" cy="32" r="28" fill="none" stroke="${healthColor}" stroke-width="5" stroke-dasharray="${(healthScore / 100) * 176} 176" stroke-linecap="round"/>
+          </svg>
+          <span class="kpi-health-val">${healthScore}</span>
+        </div>
+        <div class="kpi-card-label" style="text-align:center">Health Score</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-card-icon">&#9889;</div>
+        <div class="kpi-card-value">${activityCount}</div>
+        <div class="kpi-card-label">Actions This Week</div>
+        <a href="/audit-logs" class="kpi-card-action">View Logs &rarr;</a>
+      </div>
+    </div>
+
+    <!-- Row 2: Financial Snapshot -->
+    <div class="kpi-section">
+      <h3>&#128176; Financial Snapshot</h3>
+      <div class="kpi-fin-grid">
+        <div class="kpi-fin-card">
+          <div class="kpi-fin-value">${ugx(totalRevenue)}</div>
+          <div class="kpi-fin-label">Total Revenue</div>
+        </div>
+        <div class="kpi-fin-card">
+          <div class="kpi-fin-value" style="color:#ef4444">${outstandingCount} invoices</div>
+          <div class="kpi-fin-label">Outstanding (${ugx(outstandingTotal)})</div>
+        </div>
+        <div class="kpi-fin-card">
+          <div class="kpi-fin-value" style="color:#059669">${ugx(walletBalance)}</div>
+          <div class="kpi-fin-label">Wallet Balance</div>
+        </div>
+      </div>
+      ${recentPayments.length ? `
+      <table class="kpi-table">
+        <thead><tr><th>Date</th><th>Payer</th><th>Method</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>${recentPayments.map(p => `<tr>
+          <td>${p.created_at ? new Date(p.created_at).toLocaleDateString() : '-'}</td>
+          <td>${esc(p.payer_name || '-')}</td>
+          <td>${esc(p.method || '-')}</td>
+          <td style="text-align:right;font-weight:600">${ugx(p.amount)}</td>
+        </tr>`).join('')}</tbody>
+      </table>` : '<p style="color:var(--text-muted);font-size:13px;padding:8px 0">No recent payments</p>'}
+    </div>
+
+    <!-- Row 3: Team & Quick Actions -->
+    <div class="kpi-section">
+      <h3>&#128101; Team Members</h3>
+      ${teamMembers.length ? `
+      <div class="kpi-team-grid">
+        ${teamMembers.map(m => `
+        <div class="kpi-team-card">
+          <div class="kpi-team-avatar">${esc((m.email || '?')[0].toUpperCase())}</div>
+          <div class="kpi-team-info">
+            <div class="kpi-team-name">${esc(m.email?.split('@')[0] || 'Unknown')}</div>
+            <div class="kpi-team-role">${esc(m.role || 'member')}</div>
+          </div>
+          <div class="kpi-team-status" style="background:${m.banned ? '#ef4444' : m.last_login ? '#059669' : '#d97706'}" title="${m.banned ? 'Banned' : m.last_login ? 'Active' : 'Inactive'}"></div>
+        </div>`).join('')}
+      </div>` : '<p style="color:var(--text-muted);font-size:13px">No team members found</p>'}
+      <h3 style="margin-top:16px">&#9889; Quick Actions</h3>
+      <div class="kpi-actions-grid">
+        ${actions.map(a => `<a href="${esc(a.href)}" class="kpi-action-btn">${a.icon} ${esc(a.label)}</a>`).join('')}
+      </div>
+    </div>
+
+    <!-- Row 4: Recent Activity Feed -->
+    <div class="kpi-section">
+      <h3>&#128340; Recent Activity</h3>
+      ${auditEntries.length ? auditEntries.map(e => {
+        const color = actionColor(e.action);
+        const timeAgo = e.created_at ? new Date(e.created_at).toLocaleString() : '';
+        let detailStr = '';
+        try { detailStr = e.details ? (typeof e.details === 'object' ? JSON.stringify(e.details) : String(e.details)).substring(0, 60) : ''; } catch { detailStr = ''; }
+        return `<div class="kpi-feed-item">
+          <div class="kpi-feed-dot" style="background:${color}"></div>
+          <div class="kpi-feed-text"><strong>${esc(e.user_email?.split('@')[0] || 'System')}</strong> ${esc(e.action || 'acted')}${detailStr ? ' — ' + esc(detailStr) : ''}</div>
+          <div class="kpi-feed-time">${timeAgo}</div>
+        </div>`;
+      }).join('') : '<p style="color:var(--text-muted);font-size:13px">No recent activity</p>'}
+    </div>
+  `, req.session.user, req));
+}));
+
+// === FEATURE 2: Onboarding Wizard ===
+
+// GET /onboarding — Show the onboarding wizard
+app.get('/onboarding', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id;
+  if (!tid) return res.redirect('/dashboard');
+
+  // Check current onboarding step
+  const tenantRow = await pool.query('SELECT onboarding_step, onboarding_completed, name, primary_color, tenant_type, logo_url FROM tenants WHERE id=$1', [tid]);
+  const tenant = tenantRow.rows[0] || {};
+  if (tenant.onboarding_completed) return res.redirect('/onboarding/complete');
+
+  const currentStep = tenant.onboarding_step || 0;
+  const primaryColor = tenant.primary_color || '#6366f1';
+  const tenantName = tenant.name || 'Organization';
+  const tenantType = tenant.tenant_type || 'school';
+  const dark = u?.dark_mode || false;
+
+  // Determine step to show (if 0, show step 1)
+  const showStep = currentStep === 0 ? 1 : Math.min(currentStep, 4);
+  // Completed steps
+  const completedSteps = [];
+  for (let i = 1; i < showStep; i++) completedSteps.push(i);
+
+  // Load any saved data for this step
+  let stepData = {};
+  try {
+    const savedRow = await pool.query('SELECT data FROM onboarding_data WHERE tenant_id=$1 AND step=$2', [tid, showStep]);
+    stepData = savedRow.rows[0]?.data || {};
+  } catch { stepData = {}; }
+
+  // Portal-specific features for Step 3
+  const portalFeatures = {
+    school: [
+      { id: 'students', label: 'Students', icon: '🎓', desc: 'Student management & enrollment' },
+      { id: 'fees', label: 'Fees', icon: '💰', desc: 'Fee collection & invoicing' },
+      { id: 'exams', label: 'Exams', icon: '📝', desc: 'Exam scheduling & results' },
+      { id: 'attendance', label: 'Attendance', icon: '📋', desc: 'Daily attendance tracking' },
+      { id: 'reports', label: 'Reports', icon: '📊', desc: 'Report cards & analytics' },
+      { id: 'library', label: 'Library', icon: '📚', desc: 'Library management' },
+      { id: 'transport', label: 'Transport', icon: '🚌', desc: 'Bus routes & tracking' },
+      { id: 'timetable', label: 'Timetable', icon: '📅', desc: 'Class scheduling' },
+    ],
+    church: [
+      { id: 'members', label: 'Members', icon: '🙏', desc: 'Member directory & groups' },
+      { id: 'tithes', label: 'Tithes', icon: '💰', desc: 'Tithe tracking & reports' },
+      { id: 'sermons', label: 'Sermons', icon: '📖', desc: 'Sermon archive & notes' },
+      { id: 'events', label: 'Events', icon: '📅', desc: 'Church events calendar' },
+      { id: 'fundraising', label: 'Fundraising', icon: '🎯', desc: 'Campaign & donation mgmt' },
+      { id: 'attendance', label: 'Attendance', icon: '📋', desc: 'Service attendance' },
+    ],
+    organization: [
+      { id: 'members', label: 'Members', icon: '🤝', desc: 'Member management' },
+      { id: 'projects', label: 'Projects', icon: '📁', desc: 'Project tracking' },
+      { id: 'documents', label: 'Documents', icon: '📄', desc: 'Document management' },
+      { id: 'events', label: 'Events', icon: '📅', desc: 'Event planning' },
+      { id: 'tasks', label: 'Tasks', icon: '✅', desc: 'Task management boards' },
+    ],
+    health: [
+      { id: 'patients', label: 'Patients', icon: '🏥', desc: 'Patient records & history' },
+      { id: 'appointments', label: 'Appointments', icon: '📅', desc: 'Appointment scheduling' },
+      { id: 'departments', label: 'Departments', icon: '🏢', desc: 'Department management' },
+      { id: 'billing', label: 'Billing', icon: '💰', desc: 'Patient billing & invoices' },
+      { id: 'pharmacy', label: 'Pharmacy', icon: '💊', desc: 'Pharmacy management' },
+      { id: 'lab', label: 'Lab', icon: '🔬', desc: 'Lab results & tests' },
+    ],
+    business: [
+      { id: 'pos', label: 'POS', icon: '🛒', desc: 'Point of sale system' },
+      { id: 'inventory', label: 'Inventory', icon: '📦', desc: 'Stock management' },
+      { id: 'invoices', label: 'Invoices', icon: '🧾', desc: 'Invoice creation & tracking' },
+      { id: 'customers', label: 'Customers', icon: '🤝', desc: 'Customer CRM' },
+      { id: 'payroll', label: 'Payroll', icon: '💰', desc: 'Employee payroll' },
+      { id: 'expenses', label: 'Expenses', icon: '📉', desc: 'Expense tracking' },
+    ],
+    individual: [
+      { id: 'goals', label: 'Goals', icon: '🎯', desc: 'Personal goal tracking' },
+      { id: 'tasks', label: 'Tasks', icon: '✅', desc: 'Task management' },
+      { id: 'budget', label: 'Budget', icon: '💰', desc: 'Personal budgeting' },
+      { id: 'notes', label: 'Notes', icon: '📝', desc: 'Digital notebook' },
+      { id: 'learning', label: 'Learning', icon: '📚', desc: 'Learning & courses' },
+    ],
+    public: [
+      { id: 'blog', label: 'Blog', icon: '📰', desc: 'Blog & content publishing' },
+      { id: 'events', label: 'Events', icon: '📅', desc: 'Community events' },
+      { id: 'fundraising', label: 'Fundraising', icon: '🎯', desc: 'Campaign management' },
+      { id: 'entertainment', label: 'Entertainment', icon: '🎬', desc: 'Entertainment content' },
+    ],
+  };
+  const features = portalFeatures[tenantType] || portalFeatures.school;
+
+  // Generate step content
+  let stepContent = '';
+  const totalSteps = 4;
+  const pct = Math.round((completedSteps.length / totalSteps) * 100);
+
+  const progressBar = `
+    <div class="onb-progress-wrap" style="margin-bottom:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:14px;font-weight:700">Step ${showStep} of ${totalSteps}</span>
+        <span style="font-size:13px;color:var(--text-muted);font-weight:600">${pct}% complete</span>
+      </div>
+      <div style="background:${dark ? '#1e2d4a' : '#e2e8f0'};border-radius:6px;height:8px;overflow:hidden">
+        <div style="height:100%;background:linear-gradient(90deg,${primaryColor},${primaryColor}cc);border-radius:6px;width:${pct}%;transition:width .4s"></div>
+      </div>
+      <div style="display:flex;gap:4px;margin-top:10px">
+        ${[1,2,3,4].map(s => `
+          <div style="flex:1;text-align:center;padding:6px;border-radius:8px;background:${completedSteps.includes(s) ? primaryColor + '22' : showStep === s ? primaryColor + '15' : 'transparent'};border:1px solid ${completedSteps.includes(s) ? primaryColor : showStep === s ? primaryColor + '55' : dark ? '#1e2d4a' : '#e2e8f0'}">
+            <div style="font-size:10px;font-weight:700;color:${completedSteps.includes(s) ? primaryColor : showStep === s ? primaryColor : 'var(--text-dim)'}">${completedSteps.includes(s) ? '&#10003;' : 'Step ' + s}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
+  if (showStep === 1) {
+    stepContent = `
+      ${progressBar}
+      <div class="onb-card">
+        <h2 style="margin:0 0 4px;font-size:20px;font-weight:800">&#127881; Welcome, ${esc(tenantName)}!</h2>
+        <p style="color:var(--text-muted);margin-bottom:20px;font-size:14px">Let's set up your organization. This will only take a minute.</p>
+        <form method="POST" action="/onboarding/step">
+          <input type="hidden" name="step" value="1">
+          <div style="margin-bottom:16px">
+            <label style="display:block;font-weight:600;font-size:13px;margin-bottom:4px">Organization Name</label>
+            <input name="org_name" value="${esc(stepData.org_name || tenantName)}" placeholder="Your organization name" style="width:100%;padding:10px 14px;border:1px solid ${dark ? '#253352' : '#d1d5db'};border-radius:10px;font-size:14px;background:${dark ? '#111827' : '#fff'};color:var(--text)">
+          </div>
+          <div style="margin-bottom:16px">
+            <label style="display:block;font-weight:600;font-size:13px;margin-bottom:4px">Logo URL</label>
+            <input name="logo_url" value="${esc(stepData.logo_url || tenant.logo_url || '')}" placeholder="https://example.com/logo.png" style="width:100%;padding:10px 14px;border:1px solid ${dark ? '#253352' : '#d1d5db'};border-radius:10px;font-size:14px;background:${dark ? '#111827' : '#fff'};color:var(--text)">
+          </div>
+          <div style="margin-bottom:16px">
+            <label style="display:block;font-weight:600;font-size:13px;margin-bottom:4px">Primary Color</label>
+            <div style="display:flex;gap:10px;align-items:center">
+              <input type="color" name="primary_color" value="${esc(stepData.primary_color || primaryColor)}" style="width:48px;height:40px;border:1px solid ${dark ? '#253352' : '#d1d5db'};border-radius:8px;cursor:pointer;background:transparent">
+              <input name="primary_color_text" value="${esc(stepData.primary_color || primaryColor)}" placeholder="#6366f1" style="flex:1;padding:10px 14px;border:1px solid ${dark ? '#253352' : '#d1d5db'};border-radius:10px;font-size:14px;background:${dark ? '#111827' : '#fff'};color:var(--text)">
+            </div>
+          </div>
+          <div style="margin-bottom:16px">
+            <label style="display:block;font-weight:600;font-size:13px;margin-bottom:4px">Brief Description</label>
+            <textarea name="description" rows="3" placeholder="Tell us about your organization..." style="width:100%;padding:10px 14px;border:1px solid ${dark ? '#253352' : '#d1d5db'};border-radius:10px;font-size:14px;background:${dark ? '#111827' : '#fff'};color:var(--text);resize:vertical">${esc(stepData.description || '')}</textarea>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid ${dark ? '#1e2d4a' : '#e2e8f0'}">
+            <a href="/dashboard" style="font-size:13px;color:var(--text-muted);text-decoration:none">Skip for now</a>
+            <button type="submit" style="background:linear-gradient(135deg,${primaryColor},${primaryColor}dd);color:white;padding:10px 24px;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px ${primaryColor}44">Save &amp; Continue &rarr;</button>
+          </div>
+        </form>
+      </div>
+    `;
+  } else if (showStep === 2) {
+    stepContent = `
+      ${progressBar}
+      <div class="onb-card">
+        <h2 style="margin:0 0 4px;font-size:20px;font-weight:800">&#128101; Invite Team Members</h2>
+        <p style="color:var(--text-muted);margin-bottom:20px;font-size:14px">Add colleagues to your organization. You can always invite more later.</p>
+        <form method="POST" action="/onboarding/step" id="onbStep2Form">
+          <input type="hidden" name="step" value="2">
+          ${[1,2,3].map(i => `
+          <div style="display:grid;grid-template-columns:1fr 140px;gap:10px;margin-bottom:12px;align-items:end">
+            <div>
+              <label style="display:block;font-weight:600;font-size:12px;margin-bottom:3px;color:var(--text-muted)">Email Address ${i}</label>
+              <input name="email_${i}" type="email" value="${esc(stepData['email_' + i] || '')}" placeholder="colleague@example.com" style="width:100%;padding:9px 12px;border:1px solid ${dark ? '#253352' : '#d1d5db'};border-radius:8px;font-size:13px;background:${dark ? '#111827' : '#fff'};color:var(--text)">
+            </div>
+            <div>
+              <label style="display:block;font-weight:600;font-size:12px;margin-bottom:3px;color:var(--text-muted)">Role</label>
+              <select name="role_${i}" style="width:100%;padding:9px 12px;border:1px solid ${dark ? '#253352' : '#d1d5db'};border-radius:8px;font-size:13px;background:${dark ? '#111827' : '#fff'};color:var(--text)">
+                <option value="staff" ${(stepData['role_' + i] || '') === 'staff' ? 'selected' : ''}>Staff</option>
+                <option value="admin" ${(stepData['role_' + i] || '') === 'admin' ? 'selected' : ''}>Admin</option>
+                <option value="viewer" ${(stepData['role_' + i] || '') === 'viewer' ? 'selected' : ''}>Viewer</option>
+              </select>
+            </div>
+          </div>`).join('')}
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid ${dark ? '#1e2d4a' : '#e2e8f0'}">
+            <a href="/onboarding?step=back" style="font-size:13px;color:var(--text-muted);text-decoration:none">&larr; Back</a>
+            <div style="display:flex;gap:8px">
+              <button type="submit" name="skip" value="1" style="background:transparent;border:1px solid ${dark ? '#253352' : '#d1d5db'};color:var(--text-muted);padding:10px 18px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">Skip for now</button>
+              <button type="submit" style="background:linear-gradient(135deg,${primaryColor},${primaryColor}dd);color:white;padding:10px 24px;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px ${primaryColor}44">Save &amp; Continue &rarr;</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    `;
+  } else if (showStep === 3) {
+    const interestedFeatures = stepData.interested_features || [];
+    stepContent = `
+      ${progressBar}
+      <div class="onb-card">
+        <h2 style="margin:0 0 4px;font-size:20px;font-weight:800">&#128640; Explore Features</h2>
+        <p style="color:var(--text-muted);margin-bottom:20px;font-size:14px">Select the features you're interested in. You can enable/disable them anytime.</p>
+        <form method="POST" action="/onboarding/step" id="onbStep3Form">
+          <input type="hidden" name="step" value="3">
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
+            ${features.map(f => `
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:14px;border-radius:12px;border:1px solid ${dark ? '#253352' : '#e2e8f0'};cursor:pointer;transition:all .2s;background:${interestedFeatures.includes(f.id) ? primaryColor + '10' : 'transparent'}" onmouseover="this.style.borderColor='${primaryColor}'" onmouseout="this.style.borderColor='${dark ? '#253352' : '#e2e8f0'}'">
+              <input type="checkbox" name="features" value="${esc(f.id)}" ${interestedFeatures.includes(f.id) ? 'checked' : ''} style="margin-top:2px;accent-color:${primaryColor};width:16px;height:16px">
+              <div>
+                <div style="font-size:13px;font-weight:700">${f.icon} ${esc(f.label)}</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(f.desc)}</div>
+              </div>
+            </label>`).join('')}
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid ${dark ? '#1e2d4a' : '#e2e8f0'}">
+            <a href="/onboarding?step=back" style="font-size:13px;color:var(--text-muted);text-decoration:none">&larr; Back</a>
+            <button type="submit" style="background:linear-gradient(135deg,${primaryColor},${primaryColor}dd);color:white;padding:10px 24px;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px ${primaryColor}44">Save &amp; Continue &rarr;</button>
+          </div>
+        </form>
+      </div>
+    `;
+  } else if (showStep === 4) {
+    stepContent = `
+      ${progressBar}
+      <div class="onb-card" style="text-align:center;padding:40px 32px">
+        <div style="font-size:64px;margin-bottom:12px">&#127881;</div>
+        <h2 style="margin:0 0 8px;font-size:24px;font-weight:800">You're All Set!</h2>
+        <p style="color:var(--text-muted);margin-bottom:24px;font-size:15px;max-width:420px;margin-left:auto;margin-right:auto">Your ${esc(tenantName)} workspace is ready. Let's get started!</p>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+          <form method="POST" action="/onboarding/step" style="display:inline">
+            <input type="hidden" name="step" value="4">
+            <button type="submit" style="background:linear-gradient(135deg,${primaryColor},${primaryColor}dd);color:white;padding:12px 32px;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 4px 16px ${primaryColor}44;transition:all .2s">&#128640; Go to Dashboard</button>
+          </form>
+          <a href="/settings/branding" style="display:inline-flex;align-items:center;gap:6px;padding:12px 24px;border-radius:12px;border:1px solid ${dark ? '#253352' : '#e2e8f0'};font-size:14px;font-weight:600;color:var(--text-muted);text-decoration:none;transition:all .2s">&#127912; Customize Theme</a>
+        </div>
+      </div>
+    `;
+  }
+
+  res.send(renderPage('Onboarding', `
+    <style>
+      .onb-card{background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:28px 32px;box-shadow:var(--shadow-sm)}
+      .onb-card h2{font-family:'Plus Jakarta Sans','Inter',sans-serif}
+    </style>
+    <div style="max-width:700px;margin:0 auto">
+      ${stepContent}
+    </div>
+  `, req.session.user, req));
+}));
+
+// POST /onboarding/step — Save step progress
+app.post('/onboarding/step', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id;
+  if (!tid) return res.redirect('/dashboard');
+
+  const step = parseInt(req.body.step || 1);
+  const isSkip = req.body.skip === '1';
+
+  // Save step data to onboarding_data table
+  const stepData = {};
+  if (step === 1) {
+    stepData.org_name = req.body.org_name || '';
+    stepData.logo_url = req.body.logo_url || '';
+    stepData.primary_color = req.body.primary_color || req.body.primary_color_text || '';
+    stepData.description = req.body.description || '';
+
+    // Update tenant directly with org setup data
+    if (stepData.org_name) {
+      await pool.query('UPDATE tenants SET name=$1, logo_url=$2, primary_color=$3 WHERE id=$4',
+        [stepData.org_name, stepData.logo_url, stepData.primary_color, tid]).catch(() => {});
+    }
+  } else if (step === 2) {
+    for (let i = 1; i <= 3; i++) {
+      const email = req.body['email_' + i];
+      const role = req.body['role_' + i];
+      if (email) {
+        stepData['email_' + i] = email;
+        stepData['role_' + i] = role || 'staff';
+
+        // Create user record for invited team member
+        if (!isSkip && email) {
+          try {
+            const existingUser = await pool.query('SELECT id FROM users WHERE email=$1 AND tenant_id=$2', [email, tid]);
+            if (existingUser.rows.length === 0) {
+              const tempPass = await bcrypt.hash('ChangeMe' + Date.now(), 10);
+              await pool.query(
+                'INSERT INTO users (email, password, role, tenant_id, banned) VALUES ($1, $2, $3, $4, false)',
+                [email, tempPass, role || 'staff', tid]
+              );
+              // Queue invitation email
+              try {
+                await pool.query(
+                  "INSERT INTO email_queue (tenant_id, to_email, subject, body, status) VALUES ($1, $2, $3, $4, 'pending')",
+                  [tid, email, 'You are invited to join ' + (u.tenant_name || 'our organization'), 'You have been invited to join our organization on Comfort Platform. Please log in to get started.']
+                );
+              } catch {}
+            }
+          } catch (e) { /* skip duplicate users */ }
+        }
+      }
+    }
+  } else if (step === 3) {
+    const selectedFeatures = Array.isArray(req.body.features) ? req.body.features : (req.body.features ? [req.body.features] : []);
+    stepData.interested_features = selectedFeatures;
+  } else if (step === 4) {
+    // Mark onboarding as complete
+    await pool.query('UPDATE tenants SET onboarding_completed=true, onboarding_step=4 WHERE id=$1', [tid]);
+    audit(u.email, 'onboarding_completed', { step: 4 }, tid, req);
+    return res.redirect('/onboarding/complete');
+  }
+
+  // Save step data
+  try {
+    await pool.query(`
+      INSERT INTO onboarding_data (tenant_id, step, data)
+      VALUES ($1, $2, $3::jsonb)
+      ON CONFLICT (tenant_id, step) DO UPDATE SET data=$3::jsonb, updated_at=NOW()
+    `, [tid, step, JSON.stringify(stepData)]);
+  } catch {}
+
+  // Advance to next step
+  const nextStep = Math.min(step + 1, 4);
+  await pool.query('UPDATE tenants SET onboarding_step=$1 WHERE id=$2', [nextStep, tid]);
+
+  audit(u.email, 'onboarding_step_' + step, stepData, tid, req);
+
+  // Redirect based on step
+  if (nextStep > 4) {
+    return res.redirect('/onboarding/complete');
+  }
+  res.redirect('/onboarding');
+}));
+
+// GET /onboarding/complete — Mark onboarding as complete / show completion page
+app.get('/onboarding/complete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id;
+  if (!tid) return res.redirect('/dashboard');
+
+  // Ensure onboarding is marked complete
+  await pool.query('UPDATE tenants SET onboarding_completed=true, onboarding_step=4 WHERE id=$1 AND onboarding_completed=false', [tid]).catch(() => {});
+
+  const tenantRow = await pool.query('SELECT name, primary_color FROM tenants WHERE id=$1', [tid]);
+  const tenant = tenantRow.rows[0] || {};
+  const primaryColor = tenant.primary_color || '#6366f1';
+  const tenantName = tenant.name || 'Organization';
+  const dark = u?.dark_mode || false;
+
+  res.send(renderPage('Setup Complete!', `
+    <style>
+      .onb-card{background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:40px 32px;box-shadow:var(--shadow-sm);text-align:center}
+    </style>
+    <div style="max-width:560px;margin:0 auto">
+      <div class="onb-card">
+        <div style="font-size:72px;margin-bottom:16px">&#127881;</div>
+        <h2 style="margin:0 0 8px;font-size:26px;font-weight:800;font-family:'Plus Jakarta Sans','Inter',sans-serif">Welcome, ${esc(tenantName)}!</h2>
+        <p style="color:var(--text-muted);font-size:15px;margin-bottom:28px">Your workspace has been set up successfully. Here's what you can do next:</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;text-align:left;margin-bottom:28px">
+          <a href="/dashboard" style="display:flex;align-items:center;gap:10px;padding:14px;border-radius:12px;border:1px solid ${dark ? '#253352' : '#e2e8f0'};text-decoration:none;color:var(--text);transition:all .2s" onmouseover="this.style.borderColor='${primaryColor}'" onmouseout="this.style.borderColor='${dark ? '#253352' : '#e2e8f0'}'">
+            <span style="font-size:24px">&#128200;</span>
+            <div><div style="font-weight:700;font-size:13px">Dashboard</div><div style="font-size:11px;color:var(--text-muted)">View your overview</div></div>
+          </a>
+          <a href="/admin/overview" style="display:flex;align-items:center;gap:10px;padding:14px;border-radius:12px;border:1px solid ${dark ? '#253352' : '#e2e8f0'};text-decoration:none;color:var(--text);transition:all .2s" onmouseover="this.style.borderColor='${primaryColor}'" onmouseout="this.style.borderColor='${dark ? '#253352' : '#e2e8f0'}'">
+            <span style="font-size:24px">&#9878;</span>
+            <div><div style="font-weight:700;font-size:13px">Admin KPI</div><div style="font-size:11px;color:var(--text-muted)">Check your health score</div></div>
+          </a>
+          <a href="/settings/branding" style="display:flex;align-items:center;gap:10px;padding:14px;border-radius:12px;border:1px solid ${dark ? '#253352' : '#e2e8f0'};text-decoration:none;color:var(--text);transition:all .2s" onmouseover="this.style.borderColor='${primaryColor}'" onmouseout="this.style.borderColor='${dark ? '#253352' : '#e2e8f0'}'">
+            <span style="font-size:24px">&#127912;</span>
+            <div><div style="font-weight:700;font-size:13px">Customize Theme</div><div style="font-size:11px;color:var(--text-muted)">Colors, logo & brand</div></div>
+          </a>
+          <a href="/settings/users" style="display:flex;align-items:center;gap:10px;padding:14px;border-radius:12px;border:1px solid ${dark ? '#253352' : '#e2e8f0'};text-decoration:none;color:var(--text);transition:all .2s" onmouseover="this.style.borderColor='${primaryColor}'" onmouseout="this.style.borderColor='${dark ? '#253352' : '#e2e8f0'}'">
+            <span style="font-size:24px">&#128101;</span>
+            <div><div style="font-weight:700;font-size:13px">Manage Team</div><div style="font-size:11px;color:var(--text-muted)">Invite & roles</div></div>
+          </a>
+        </div>
+        <a href="/dashboard" style="display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,${primaryColor},${primaryColor}dd);color:white;padding:12px 32px;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none;box-shadow:0 4px 16px ${primaryColor}44;transition:all .2s">&#128640; Go to Dashboard</a>
+      </div>
+    </div>
+  `, req.session.user, req));
+}));
+
+// === Auto-redirect to /onboarding for new tenants ===
+// This middleware checks if the tenant has completed onboarding.
+// If not, and the user is not already on an onboarding or billing route, redirect.
+app.use((req, res, next) => {
+  if (!req.session?.user || req.session.user.role === 'super_admin') return next();
+  const path = req.path;
+  // Skip for onboarding routes, billing, settings, static files, API, auth routes
+  const skipPaths = ['/onboarding', '/billing', '/settings', '/login', '/register', '/logout', '/ping', '/api/', '/dev/', '/toggle-dark', '/switch-portal', '/go-portal'];
+  if (skipPaths.some(p => path.startsWith(p))) return next();
+  if (path.match(/\.(css|js|png|jpg|ico|svg|woff|woff2|ttf|map)$/)) return next();
+
+  // Check onboarding_completed in session cache (refresh every 5 min via branding preloader)
+  const tenantBranding = req.session.tenantBranding;
+  // We store the onboarding_completed flag in the session branding cache
+  // If not loaded yet, load it
+  if (!req.session._onboardingChecked || (Date.now() - (req.session._onboardingCheckedAt || 0)) > 5 * 60 * 1000) {
+    pool.query('SELECT onboarding_completed FROM tenants WHERE id=$1', [req.session.user.tenant_id])
+      .then(r => {
+        const completed = r.rows[0]?.onboarding_completed;
+        req.session._onboardingCompleted = completed;
+        req.session._onboardingCheckedAt = Date.now();
+        req.session._onboardingChecked = true;
+        if (completed === false) {
+          return res.redirect('/onboarding');
+        }
+        next();
+      })
+      .catch(() => next());
+  } else {
+    if (req.session._onboardingCompleted === false) {
+      return res.redirect('/onboarding');
+    }
+    next();
+  }
+});
 
 // ============================================================
 // PHASE 4 COMPLETE: All remaining gap analysis tasks implemented

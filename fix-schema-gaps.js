@@ -115,6 +115,28 @@ module.exports = async function (pool) {
       revenue NUMERIC DEFAULT 0,
       clicked_at TIMESTAMPTZ DEFAULT NOW()
     )`,
+
+    // --- onboarding_data ---
+    // Queried by /onboarding wizard routes (POST /onboarding/step, GET /onboarding).
+    // Also created by user-onboarding.js but included here for safety.
+    `CREATE TABLE IF NOT EXISTS onboarding_data (
+      id SERIAL PRIMARY KEY,
+      tenant_id INT NOT NULL,
+      step INT NOT NULL,
+      data JSONB DEFAULT '{}',
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(tenant_id, step)
+    )`,
+
+    // --- tenant_wallets ---
+    // Queried by /admin/overview KPI dashboard for wallet balance.
+    `CREATE TABLE IF NOT EXISTS tenant_wallets (
+      id SERIAL PRIMARY KEY,
+      tenant_id INT UNIQUE NOT NULL,
+      balance NUMERIC DEFAULT 0,
+      currency TEXT DEFAULT 'UGX',
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
   ];
 
   for (const sql of missingTables) {
@@ -238,6 +260,15 @@ module.exports = async function (pool) {
     //   revenue-quickstart.js references affiliate_links(id) as FK
     //   from affiliate_revenue table — no missing columns.
     // ----------------------------------------------------------
+
+    // ----------------------------------------------------------
+    // tenants — Onboarding wizard tracking columns
+    //   Used by /onboarding wizard to track progress per tenant.
+    //   onboarding_step: current step (0=not started, 1-4 = steps)
+    //   onboarding_completed: whether the wizard was finished
+    // ----------------------------------------------------------
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS onboarding_step INTEGER DEFAULT 0`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT false`,
   ];
 
   for (const sql of alterStatements) {
