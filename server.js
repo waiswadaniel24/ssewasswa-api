@@ -3224,7 +3224,6 @@ app.get('/home', ah(async (req, res) => {
 }));
 
 app.get('/login', (req, res) => {
-<<<<<<< HEAD
   res.send(renderPage('Login', `
     <style>
       @keyframes authFloat1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(12px,-18px) scale(1.08)}}
