@@ -10418,7 +10418,9 @@ app.get('/billing', requireAuth, ah(async (req, res) => {
       <div class="stats">
         <div class="stat-card"><div class="stat-num" style="font-size:20px">${planNames[plan] || plan}</div><div>Active Plan</div></div>
         <div class="stat-card"><div class="stat-num">${sub.rows[0]?.status || 'active'}</div><div>Status</div></div>
+        ${sub.rows[0]?.expires_at ? '<div class="stat-card"><div class="stat-num" style="font-size:16px">' + new Date(sub.rows[0].expires_at).toLocaleDateString() + '</div><div>Expires</div></div>' : ''}
       </div>
+      ${plan !== 'free' ? '<div style="margin-top:12px;padding:12px;background:#fef3c7;border-radius:8px;border:1px solid #fbbf24"><form method="POST" action="/billing/cancel" style="display:flex;align-items:center;justify-content:space-between"><div><strong>Want to cancel?</strong><br><span class="muted" style="font-size:13px">You will be downgraded to the Free plan immediately.</span></div><button type="submit" class="btn btn-red" style="font-size:13px" onclick="return confirm(\'Are you sure you want to cancel your subscription?\')">Cancel Subscription</button></form></div>' : ''}
       <h3 style="margin-top:20px">Change Plan</h3>
       <div class="grid" style="margin-top:10px">
         <div class="card" style="border:2px solid ${plan==='free'?'#4f46e5':'#e2e8f0'}">
@@ -10463,6 +10465,26 @@ app.get('/billing/subscribe/:plan', requireAuth, ah(async (req, res) => {
   }
   if (amount > 0) await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,plan) VALUES($1,$2,$3,$4,$5,$6)', [t, amount, 'manual', 'pending', `${plan} plan subscription`, plan]);
   await audit(req.session.user.email, 'subscription_change', `Changed to ${plan} plan (manual)`, req.session.user.tenant_id, req);
+  res.redirect('/billing');
+}));
+
+// === CANCEL SUBSCRIPTION ===
+app.post('/billing/cancel', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const currentSub = (await pool.query("SELECT * FROM subscriptions WHERE tenant_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1", [t])).rows[0];
+  if (!currentSub) return res.redirect('/billing');
+  if (currentSub.plan === 'free') return res.send(renderPage('Billing', '<div class="card"><div class="alert alert-error">You are already on the Free plan. No cancellation needed.</div><a href="/billing" class="btn">Back to Billing</a></div>', req.session.user, req));
+  // Mark current paid subscription as cancelled
+  await pool.query("UPDATE subscriptions SET status='cancelled' WHERE id=$1", [currentSub.id]);
+  // Create a new free-tier subscription
+  const freeExpires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+  await pool.query("INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,'free',0,'active',$2) ON CONFLICT DO NOTHING", [t, freeExpires]);
+  // Notify admin
+  await notify(t, req.session.user.email, 'Subscription Cancelled', `Your ${currentSub.plan} subscription has been cancelled. You are now on the Free plan.`, 'info');
+  try {
+    queueEmail(req.session.user.email, 'Subscription Cancelled', `<div style="max-width:500px;margin:0 auto;font-family:sans-serif"><h2>Subscription Cancelled</h2><p>Your <b>${currentSub.plan}</b> subscription has been cancelled as requested.</p><p>You are now on the <b>Free</b> plan. You can upgrade anytime from the <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing" style="color:#1c7796">Billing page</a>.</p><p>Thank you for using Comfort Zone.</p></div>`);
+  } catch(e) { console.warn('[CancelSub] Email error:', e.message); }
+  await audit(req.session.user.email, 'subscription_cancelled', `Cancelled ${currentSub.plan} subscription`, t, req);
   res.redirect('/billing');
 }));
 
