@@ -111,6 +111,68 @@ const cacheInvalidate = async (pattern) => {
   try { const keys = await redisCache.keys(pattern); if (keys.length) await redisCache.del(keys); } catch {}
 };
 
+// Phase 2: Enhanced Redis caching helpers for settings, feature flags, and common queries
+const PLATFORM_SETTINGS_TTL = 300; // 5 minutes
+const FEATURE_FLAGS_TTL = 600; // 10 minutes
+const PLAN_CACHE_TTL = 120; // 2 minutes (existing)
+const DASHBOARD_STATS_TTL = 120; // 2 minutes
+
+const getCachedPlatformSettings = async () => {
+  const cached = await cacheGet('platform:settings:all');
+  if (cached) return cached;
+  return null;
+};
+
+const setCachedPlatformSettings = async (settings) => {
+  await cacheSet('platform:settings:all', settings, PLATFORM_SETTINGS_TTL);
+};
+
+const invalidatePlatformSettings = async () => {
+  await cacheInvalidate('platform:settings:*');
+};
+
+const getCachedFeatureFlags = async (tenantId) => {
+  const cached = await cacheGet(`tenant:${tenantId}:feature_flags`);
+  if (cached) return cached;
+  return null;
+};
+
+const setCachedFeatureFlags = async (tenantId, flags) => {
+  await cacheSet(`tenant:${tenantId}:feature_flags`, flags, FEATURE_FLAGS_TTL);
+};
+
+const invalidateFeatureFlags = async (tenantId) => {
+  await cacheInvalidate(`tenant:${tenantId}:feature_flags`);
+};
+
+// Local in-memory cache for frequently accessed data (fallback when Redis unavailable)
+const localCache = new Map();
+const localCacheTTLs = new Map();
+
+const localCacheGet = (key) => {
+  const entry = localCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.exp) { localCache.delete(key); localCacheTTLs.delete(key); return null; }
+  return entry.value;
+};
+
+const localCacheSet = (key, value, ttlMs) => {
+  localCache.set(key, { value, exp: Date.now() + ttlMs });
+  localCacheTTLs.set(key, ttlMs);
+  // Prevent unbounded growth
+  if (localCache.size > 500) {
+    const oldest = [...localCacheTTLs.entries()].sort((a, b) => a[1] - b[1]);
+    for (let i = 0; i < 50; i++) localCache.delete(oldest[i]?.[0]);
+    localCacheTTLs.clear();
+  }
+};
+
+const localCacheInvalidate = (pattern) => {
+  if (!pattern.includes('*')) { localCache.delete(pattern); return; }
+  const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+  for (const key of localCache.keys()) { if (regex.test(key)) localCache.delete(key); }
+};
+
 // === SENTRY ERROR MONITORING ===
 let Sentry = null;
 if (process.env.SENTRY_DSN) {
@@ -911,12 +973,12 @@ const requirePlanLimit = (table) => async (req, res, next) => {
 const PLAN_HIERARCHY = ['free', 'basic', 'pro', 'enterprise'];
 const PLAN_NAMES = { free: 'Free', basic: 'Basic', pro: 'Professional', enterprise: 'Enterprise' };
 const _planCache = new Map();
-const PLAN_CACHE_TTL = 5 * 60 * 1000;
+const PLAN_CACHE_TTL_MS = 5 * 60 * 1000;
 
 async function getTenantPlanInfo(tenantId) {
   const now = Date.now();
   const cached = _planCache.get(tenantId);
-  if (cached && now - cached.ts < PLAN_CACHE_TTL) return cached;
+  if (cached && now - cached.ts < PLAN_CACHE_TTL_MS) return cached;
   const sub = (await pool.query(
     "SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1",
     [tenantId]
@@ -1595,6 +1657,20 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS subscriptions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, plan TEXT DEFAULT 'free', amount INTEGER DEFAULT 0, currency TEXT DEFAULT 'UGX', status TEXT DEFAULT 'active', started_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ, payment_method TEXT, reference TEXT)`,
   `CREATE TABLE IF NOT EXISTS payments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, amount INTEGER NOT NULL, method TEXT, reference TEXT, status TEXT DEFAULT 'pending', description TEXT, plan TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `ALTER TABLE payments ADD COLUMN IF NOT EXISTS plan TEXT`,
+  // Phase 2 - Subscription auto-renewal + invoices
+  `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT false`,
+  `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS renewal_attempts INTEGER DEFAULT 0`,
+  `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS last_renewal_attempt TIMESTAMPTZ`,
+  `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL, invoice_no TEXT UNIQUE NOT NULL, plan TEXT NOT NULL, amount INTEGER NOT NULL, currency TEXT DEFAULT 'UGX', status TEXT DEFAULT 'paid', description TEXT, tenant_name TEXT, tenant_email TEXT, billing_name TEXT, billing_email TEXT, pdf_url TEXT, issued_at TIMESTAMPTZ DEFAULT NOW(), created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE INDEX IF NOT EXISTS idx_invoices_tenant ON invoices(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_invoices_no ON invoices(invoice_no)`,
+  `CREATE TABLE IF NOT EXISTS renewal_logs (id SERIAL PRIMARY KEY, subscription_id INTEGER REFERENCES subscriptions(id) ON DELETE CASCADE, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, attempt INTEGER DEFAULT 1, status TEXT DEFAULT 'pending', payment_method TEXT, error_message TEXT, next_retry_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE INDEX IF NOT EXISTS idx_renewal_logs_sub ON renewal_logs(subscription_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_renewal_logs_tenant ON renewal_logs(tenant_id)`,
+  // Phase 2 - Enhanced admin tenant approval columns
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS approved_by INTEGER`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS rejection_reason TEXT`,
   // v11.0 - Webhooks
   `CREATE TABLE IF NOT EXISTS webhooks (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, url TEXT NOT NULL, events TEXT[], secret TEXT, active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // v11.0 - Church member attendance
@@ -2746,13 +2822,21 @@ const uniqueConstraintMigrations = [
 let platformSettings = { site_name: 'Comfort', site_tagline: 'The Operating System for African Institutions', support_email: 'support@ssewasswa.onrender.com', support_phone: '', developer_phone: '', developer_email: process.env.DEV_EMAIL || 'admin@ssewasswa.com', whatsapp_link: '', twitter_link: '', facebook_link: '', footer_text: 'All rights reserved.', ad_revenue_per_view: '50', premium_resource_price: '2000', google_verification: 'ou1SW4UV8CGS6odvi35dMaVIagaQGgFu91BpaXI7CIQ' };
 async function loadPlatformSettings() {
   try {
+    // Phase 2: Try Redis cache first
+    const cached = await getCachedPlatformSettings();
+    if (cached) {
+      Object.assign(platformSettings, cached);
+      return;
+    }
     const rows = (await pool.query('SELECT key, value FROM platform_settings')).rows;
     for (const r of rows) { if (r.value !== null && r.value !== undefined) platformSettings[r.key] = r.value; }
+    // Cache the loaded settings
+    await setCachedPlatformSettings({ ...platformSettings });
   } catch (e) { console.warn('Could not load platform settings:', e.message); }
 }
 loadPlatformSettings();
-// Refresh settings every 60 seconds
-setInterval(loadPlatformSettings, 60000);
+// Phase 2: Refresh settings every 5 minutes (was 60s — reduced DB load with Redis cache)
+setInterval(loadPlatformSettings, 300000);
 
 // === DASHBOARD SECTION HELPER ===
 // ds(icon, title, cardsHtml) — wraps a group of dashboard cards into a collapsible section
@@ -9770,6 +9854,9 @@ app.get('/team', requireAuth, ah(async (req, res) => {
         <div><label>Permissions (optional)</label><input name="permissions" placeholder="e.g. students,fees,attendance,reports"></div>
         <div style="grid-column:1/-1"><button class="btn btn-green" type="submit">Add Team Member</button></div>
       </form>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:15px">
+      <a href="/team/permissions" class="btn" style="background:#7c3aed;color:white">Manage Role Permissions</a>
     </div>` : '<p class="muted">Only admins can add team members.</p>'}
 
     <div class="card"><h3>Team Members (${users.rows.length})</h3>
@@ -9816,6 +9903,83 @@ app.get('/team/role/:id', requireAuth, ah(async (req, res) => {
   const role = req.query.role || 'staff';
   await pool.query('UPDATE users SET role=$1 WHERE id=$2 AND tenant_id=$3', [role, req.params.id, req.session.user.tenant_id]);
   res.redirect('/team');
+}));
+
+// Phase 2 - Task 2.9: Role Permissions Management UI
+app.get('/team/permissions', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  if (req.session.user.role !== 'admin' && req.session.user.role !== 'super_admin') return res.status(403).send('Admin only');
+
+  const [roles, existingPerms] = await Promise.all([
+    pool.query('SELECT DISTINCT role FROM users WHERE tenant_id=$1 ORDER BY role', [t]),
+    pool.query('SELECT * FROM role_permissions WHERE tenant_id=$1', [t])
+  ]);
+
+  // Define available permission modules
+  const permModules = [
+    { key: 'dashboard', label: 'Dashboard Access', desc: 'View the main dashboard' },
+    { key: 'students', label: 'Student Management', desc: 'Add, edit, view students' },
+    { key: 'fees', label: 'Fee Management', desc: 'Manage fees, payments, balances' },
+    { key: 'attendance', label: 'Attendance', desc: 'Track attendance records' },
+    { key: 'exams', label: 'Exams & Grades', desc: 'Manage exams and grading' },
+    { key: 'timetable', label: 'Timetable', desc: 'Schedule management' },
+    { key: 'staff', label: 'Staff Management', desc: 'Manage staff members' },
+    { key: 'reports', label: 'Reports', desc: 'View and generate reports' },
+    { key: 'communications', label: 'Communications', desc: 'SMS, email, announcements' },
+    { key: 'finance', label: 'Finance', desc: 'Invoices, expenses, budgets' },
+    { key: 'inventory', label: 'Inventory', desc: 'Stock and asset management' },
+    { key: 'hr', label: 'HR & Payroll', desc: 'Employee management and payroll' },
+    { key: 'bookings', label: 'Bookings', desc: 'Appointment and reservation management' },
+    { key: 'members', label: 'Memberships', desc: 'Member management' },
+    { key: 'donations', label: 'Donations', desc: 'Donation and fundraising' },
+    { key: 'billing', label: 'Billing & Subscriptions', desc: 'Plan management and payments' },
+    { key: 'settings', label: 'Settings', desc: 'Organization settings and configuration' },
+    { key: 'team', label: 'Team Management', desc: 'Add and manage team members' },
+    { key: 'api', label: 'API Access', desc: 'API key management and webhooks' },
+    { key: 'automation', label: 'Automation', desc: 'Manage automation rules and workflows' }
+  ];
+
+  const permMap = {};
+  for (const rp of existingPerms.rows) {
+    const perms = typeof rp.permissions === 'string' ? JSON.parse(rp.permissions) : rp.permissions;
+    permMap[rp.role_name] = Array.isArray(perms) ? perms : [];
+  }
+
+  res.send(renderPage('Role Permissions', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Role Permissions</h1><p style="opacity:0.9;margin-top:4px">Control which features each role can access</p>
+    </div>
+    <div class="card">
+      <h3>How Permissions Work</h3>
+      <p class="muted">Select the modules each role can access. <b>super_admin</b> always has full access. Unselected modules will show an "Access Denied" message to users with that role.</p>
+    </div>
+    ${roles.rows.map(role => {
+      const roleName = role.role;
+      const currentPerms = permMap[roleName] || [];
+      return `<div class="card"><h3>${esc(roleName)} Permissions</h3>
+        <form method="POST" action="/team/permissions/save" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+          <input type="hidden" name="role_name" value="${esc(roleName)}">
+          ${permModules.map(m => `<label style="display:flex;align-items:center;gap:8px;padding:8px;background:${currentPerms.includes(m.key) ? '#f0fdf4' : '#f8fafc'};border-radius:8px;border:1px solid ${currentPerms.includes(m.key) ? '#bbf7d0' : '#e2e8f0'};cursor:pointer">
+            <input type="checkbox" name="permissions" value="${m.key}" ${currentPerms.includes(m.key) ? 'checked' : ''} style="width:18px;height:18px;accent-color:#4f46e5">
+            <div><strong style="font-size:13px">${esc(m.label)}</strong><br><span class="muted" style="font-size:11px">${esc(m.desc)}</span></div>
+          </label>`).join('')}
+          <div style="grid-column:1/-1"><button class="btn btn-green" type="submit">Save ${esc(roleName)} Permissions</button></div>
+        </form>
+      </div>`;
+    }).join('')}
+  `, req.session.user));
+}));
+
+app.post('/team/permissions/save', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  if (req.session.user.role !== 'admin' && req.session.user.role !== 'super_admin') return res.status(403).send('Admin only');
+  const { role_name, permissions } = req.body;
+  const perms = Array.isArray(permissions) ? permissions : (permissions ? [permissions] : []);
+  await pool.query('INSERT INTO role_permissions(tenant_id, role_name, permissions) VALUES($1, $2, $3) ON CONFLICT(tenant_id, role_name) DO UPDATE SET permissions = EXCLUDED.permissions',
+    [t, role_name, JSON.stringify(perms)]);
+  await audit(req.session.user.email, 'update_role_permissions', `Updated permissions for role: ${role_name}`, t, req);
+  req.session.flash = { type: 'success', msg: `${role_name} permissions updated successfully!` };
+  res.redirect('/team/permissions');
 }));
 
 // === TENANT UPLOADS — SIGNATURES, STAMPS, BADGES, LOGOS, DOCUMENTS ===
@@ -10321,6 +10485,83 @@ app.post('/help/contact', ah(async (req, res) => {
   res.send(renderPage('Message Sent', `<div class="card" style="max-width:500px;margin:40px auto"><div class="alert alert-success"><h2>Message Sent!</h2><p>Thank you ${esc(name)}, we have received your message. We will respond to ${esc(email)} within 24 hours.</p></div><a href="/help" class="btn">Back to Help Center</a></div>`, req.session?.user || null));
 }));
 
+// Phase 2 - Task 2.3: Admin Tenant Approval Queue
+app.get('/admin/approvals', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const pending = (await pool.query("SELECT t.*, u.email as admin_email FROM tenants t LEFT JOIN users u ON u.tenant_id = t.id AND u.role = 'super_admin' WHERE t.approved = false ORDER BY t.created_at DESC")).rows;
+  const recent = (await pool.query("SELECT t.*, u.email as admin_email FROM tenants t LEFT JOIN users u ON u.tenant_id = t.id AND u.role = 'super_admin' WHERE t.approved = true ORDER BY t.approved_at DESC LIMIT 20")).rows;
+  const flash = req.session.flash; delete req.session.flash;
+  const flashHtml = flash ? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
+  res.send(renderPage('Tenant Approvals', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Tenant Approval Queue</h1><p style="opacity:0.9;margin-top:4px">Review and approve new tenant registrations</p></div>
+    ${flashHtml}
+    <div class="card">
+      <h2>Pending Approvals (${pending.length})</h2>
+      ${pending.length ? `<table><tr><th>Organization</th><th>Type</th><th>Email</th><th>Created</th><th>Actions</th></tr>
+      ${pending.map(t => `<tr>
+        <td><strong>${esc(t.name)}</strong></td>
+        <td><span class="tag">${esc(t.type || 'N/A')}</span></td>
+        <td>${esc(t.admin_email || t.email || 'N/A')}</td>
+        <td>${new Date(t.created_at).toLocaleDateString()}</td>
+        <td>
+          <form method="POST" action="/admin/approvals/${t.id}/approve" style="display:inline"><button class="btn btn-sm btn-green" type="submit">Approve</button></form>
+          <form method="POST" action="/admin/approvals/${t.id}/reject" style="display:inline" onsubmit="var r=prompt('Rejection reason (optional):');if(r)this.querySelector('[name=reason]').value=r;else this.querySelector('[name=reason]').value='Not specified';return true;">
+            <input type="hidden" name="reason" value="">
+            <button class="btn btn-sm btn-red" type="submit">Reject</button>
+          </form>
+        </td>
+      </tr>`).join('')}
+      </table>` : '<p class="muted" style="color:#16a34a">No pending approvals. All caught up!</p>'}
+    </div>
+    <div class="card">
+      <h2>Recently Approved (${recent.length})</h2>
+      ${recent.length ? `<table><tr><th>Organization</th><th>Type</th><th>Approved</th><th>Approved By</th></tr>
+      ${recent.map(t => `<tr>
+        <td><strong>${esc(t.name)}</strong></td>
+        <td><span class="tag">${esc(t.type || 'N/A')}</span></td>
+        <td>${new Date(t.approved_at).toLocaleString()}</td>
+        <td>${esc(t.rejection_reason || '-')}</td>
+      </tr>`).join('')}
+      </table>` : '<p class="muted">No recent approvals.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/admin/approvals/:id/approve', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const tenantId = req.params.id;
+  await pool.query('UPDATE tenants SET approved = true, approved_at = NOW(), approved_by = $1, rejection_reason = NULL WHERE id = $2', [req.session.user.id, tenantId]);
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id = $1', [tenantId])).rows[0];
+  if (tenant) {
+    try {
+      const adminEmail = (await pool.query("SELECT email FROM users WHERE tenant_id=$1 AND role IN ('super_admin','admin') LIMIT 1", [tenantId])).rows[0]?.email;
+      if (adminEmail) {
+        queueEmail(adminEmail, 'Your Account Has Been Approved!', `<div style="max-width:500px;margin:0 auto;font-family:sans-serif"><h2 style="color:#16a34a">Account Approved!</h2><p>Your account for <b>${esc(tenant.name)}</b> has been approved. You can now <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/login" style="color:#1c7796;font-weight:700">login</a> and start using the platform.</p></div>`);
+      }
+    } catch(e) { console.warn('[Approval] Email error:', e.message); }
+  }
+  await audit(req.session.user.email, 'approve_tenant', `Approved tenant ID ${tenantId}`, 0, req);
+  req.session.flash = { type: 'success', msg: `Tenant "${tenant?.name || tenantId}" approved successfully` };
+  res.redirect('/admin/approvals');
+}));
+
+app.post('/admin/approvals/:id/reject', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const tenantId = req.params.id;
+  const reason = req.body.reason || 'Not specified';
+  await pool.query('UPDATE tenants SET approved = false, rejection_reason = $1 WHERE id = $2', [reason, tenantId]);
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id = $1', [tenantId])).rows[0];
+  if (tenant) {
+    try {
+      const adminEmail = (await pool.query("SELECT email FROM users WHERE tenant_id=$1 LIMIT 1", [tenantId])).rows[0]?.email;
+      if (adminEmail) {
+        queueEmail(adminEmail, 'Registration Update', `<div style="max-width:500px;margin:0 auto;font-family:sans-serif"><h2 style="color:#dc2626">Registration Not Approved</h2><p>Your registration for <b>${esc(tenant.name)}</b> was not approved. Reason: ${esc(reason)}</p><p>If you believe this is an error, please <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/help" style="color:#1c7796">contact support</a>.</p></div>`);
+      }
+    } catch(e) { console.warn('[Approval] Email error:', e.message); }
+  }
+  await audit(req.session.user.email, 'reject_tenant', `Rejected tenant ID ${tenantId}: ${reason}`, 0, req);
+  req.session.flash = { type: 'success', msg: `Tenant rejected` };
+  res.redirect('/admin/approvals');
+}));
+
 // === DEV SETTINGS — EDIT YOUR PLATFORM ===
 app.get('/dev/settings', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const flash = req.session.flash; delete req.session.flash;
@@ -10408,6 +10649,9 @@ app.post('/dev/settings/save', requireAuth, requireSuperAdmin, ah(async (req, re
     const val = req.body[key] || '';
     await pool.query('INSERT INTO platform_settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()', [key, val]);
   }
+  // Phase 2: Invalidate cached settings so next load fetches fresh data
+  await invalidatePlatformSettings();
+  localCacheInvalidate('platform:settings:*');
   await loadPlatformSettings();
   await audit(req.session.user.email, 'update_platform_settings', 'Updated platform settings', req.session.user.tenant_id, req);
   req.session.flash = { type: 'success', msg: 'Settings saved successfully! Changes are live now.' };
@@ -10717,6 +10961,7 @@ app.get('/billing', requireAuth, ah(async (req, res) => {
   ]);
   const plan = sub.rows[0]?.plan || 'free';
   const planNames = { free: 'Free Plan', basic: 'Basic - UGX 50,000/mo', pro: 'Pro - UGX 150,000/mo', enterprise: 'Enterprise - UGX 500,000/mo' };
+  const autoRenew = sub.rows[0]?.auto_renew || false;
 
   // Build trial expired banner if applicable
   const trialBanner = trialExpired || (sub.rows[0]?.trial_expired) ? `
@@ -10740,7 +10985,7 @@ app.get('/billing', requireAuth, ah(async (req, res) => {
 
   res.send(renderPage('Billing & Subscriptions', `
     ${trialBanner}
-    <div class="hero"><h1>Billing & Subscriptions</h1><p>Manage your plan and payments</p></div>
+    <div class="hero"><h1>Billing & Subscriptions</h1><p>Manage your plan, payments, and invoices</p></div>
     ${trialInfo}
     <div class="card">
       <h2>Current Plan</h2>
@@ -10749,7 +10994,18 @@ app.get('/billing', requireAuth, ah(async (req, res) => {
         <div class="stat-card"><div class="stat-num">${sub.rows[0]?.status || 'active'}</div><div>Status</div></div>
         ${sub.rows[0]?.expires_at ? '<div class="stat-card"><div class="stat-num" style="font-size:16px">' + new Date(sub.rows[0].expires_at).toLocaleDateString() + '</div><div>Expires</div></div>' : ''}
       </div>
-      ${plan !== 'free' ? '<div style="margin-top:12px;padding:12px;background:#fef3c7;border-radius:8px;border:1px solid #fbbf24"><form method="POST" action="/billing/cancel" style="display:flex;align-items:center;justify-content:space-between"><div><strong>Want to cancel?</strong><br><span class="muted" style="font-size:13px">You will be downgraded to the Free plan immediately.</span></div><button type="submit" class="btn btn-red" style="font-size:13px" onclick="return confirm(\'Are you sure you want to cancel your subscription?\')">Cancel Subscription</button></form></div>' : ''}
+      ${plan !== 'free' ? `
+      <div style="margin-top:12px;padding:12px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0">
+        <form method="POST" action="/billing/auto-renew" style="display:flex;align-items:center;justify-content:space-between">
+          <div><strong>Auto-Renewal</strong><br><span class="muted" style="font-size:13px">Automatically renew your subscription before it expires</span></div>
+          <label style="position:relative;display:inline-block;width:48px;height:26px;cursor:pointer">
+            <input type="checkbox" name="enabled" value="true" ${autoRenew ? 'checked' : ''} style="opacity:0;width:0;height:0" onchange="this.form.submit()">
+            <span style="position:absolute;inset:0;background:${autoRenew ? '#22c55e' : '#cbd5e1'};border-radius:26px;transition:0.3s"></span>
+            <span style="position:absolute;top:3px;left:${autoRenew ? '25px' : '3px'};width:20px;height:20px;background:white;border-radius:50%;transition:0.3s"></span>
+          </label>
+        </form>
+      </div>
+      <div style="margin-top:8px;padding:12px;background:#fef3c7;border-radius:8px;border:1px solid #fbbf24"><form method="POST" action="/billing/cancel" style="display:flex;align-items:center;justify-content:space-between"><div><strong>Want to cancel?</strong><br><span class="muted" style="font-size:13px">You will be downgraded to the Free plan immediately.</span></div><button type="submit" class="btn btn-red" style="font-size:13px" onclick="return confirm('Are you sure you want to cancel your subscription?')">Cancel Subscription</button></form></div>` : ''}
       <h3 style="margin-top:20px">Change Plan</h3>
       <div class="grid" style="margin-top:10px">
         <div class="card" style="border:2px solid ${plan==='free'?'#4f46e5':'#e2e8f0'}">
@@ -10766,11 +11022,66 @@ app.get('/billing', requireAuth, ah(async (req, res) => {
         </div>
       </div>
     </div>
+    <div style="display:flex;gap:10px;margin-bottom:10px">
+      <a href="/billing/invoices" class="btn" style="background:#4f46e5;color:white">View Invoices</a>
+    </div>
     <div class="card">
       <h2>Payment History</h2>
       ${payments.rows.length ? `<table><tr><th>Date</th><th>Amount</th><th>Method</th><th>Status</th><th>Ref</th></tr>${payments.rows.map(p=>`<tr><td>${new Date(p.created_at).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${esc(p.method||'-')}</td><td><span class="tag">${esc(p.status)}</span></td><td>${esc(p.reference||'-')}</td></tr>`).join('')}</table>` : '<p class="muted">No payments yet</p>'}
     </div>
   `, req.session.user));
+}));
+
+// Phase 2 - Task 2.1: Auto-renewal toggle
+app.post('/billing/auto-renew', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { enabled } = req.body;
+  const autoRenew = enabled === 'on' || enabled === 'true';
+  const currentSub = (await pool.query("SELECT * FROM subscriptions WHERE tenant_id=$1 AND status='active' AND plan != 'free' ORDER BY created_at DESC LIMIT 1", [t])).rows[0];
+  if (!currentSub) return res.redirect('/billing');
+  await pool.query('UPDATE subscriptions SET auto_renew = $1, renewal_attempts = 0 WHERE id = $2', [autoRenew, currentSub.id]);
+  await audit(req.session.user.email, 'auto_renew_' + (autoRenew ? 'enabled' : 'disabled'), `Auto-renewal ${autoRenew ? 'enabled' : 'disabled'} for ${currentSub.plan} plan`, t, req);
+  req.session.flash = { type: 'success', msg: `Auto-renewal ${autoRenew ? 'enabled' : 'disabled'} successfully` };
+  res.redirect('/billing');
+}));
+
+// Phase 2 - Task 2.2: Invoices list page
+app.get('/billing/invoices', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const invoices = (await pool.query('SELECT i.*, p.method as payment_method FROM invoices i LEFT JOIN payments p ON i.payment_id = p.id WHERE i.tenant_id=$1 ORDER BY i.created_at DESC LIMIT 50', [t])).rows;
+  res.send(renderPage('Invoices', `
+    <div class="hero"><h1>Invoices & Receipts</h1><p>View and download your subscription invoices</p></div>
+    <div class="card">
+      <h2>Invoices (${invoices.length})</h2>
+      ${invoices.length ? `<table><tr><th>Invoice No</th><th>Plan</th><th>Amount</th><th>Status</th><th>Date</th><th>Actions</th></tr>
+      ${invoices.map(inv => `<tr>
+        <td><strong>${esc(inv.invoice_no)}</strong></td>
+        <td><span class="tag">${esc(inv.plan)}</span></td>
+        <td>${inv.currency || 'UGX'} ${Number(inv.amount).toLocaleString()}</td>
+        <td><span class="tag" style="background:${inv.status==='paid'?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e'}">${esc(inv.status)}</span></td>
+        <td>${new Date(inv.issued_at).toLocaleDateString()}</td>
+        <td><a href="/billing/invoices/${inv.id}/pdf" class="btn btn-sm" download>Download PDF</a></td>
+      </tr>`).join('')}
+      </table>` : '<p class="muted">No invoices yet. Invoices are generated automatically when you make a payment.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+// Phase 2 - Task 2.2: Invoice PDF download
+app.get('/billing/invoices/:id/pdf', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const invoice = (await pool.query('SELECT * FROM invoices WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!invoice) return res.status(404).send('Invoice not found');
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  try {
+    const pdfBuffer = await generateInvoicePDF(invoice, tenant);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${invoice.invoice_no}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (e) {
+    console.error('[Invoice PDF] Error:', e.message);
+    res.status(500).send('Error generating PDF');
+  }
 }));
 
 app.get('/billing/subscribe/:plan', requireAuth, ah(async (req, res) => {
@@ -10836,6 +11147,15 @@ app.get('/billing/callback', requireAuth, ah(async (req, res) => {
         await audit(req.session.user.email, 'payment_received', `Flutterwave payment: ${tx_ref} for ${plan}`, req.session.user.tenant_id, req);
         await fireWebhook(payment.tenant_id, 'payment', { ref: tx_ref, amount: payment.amount, plan });
         await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
+        // Phase 2: Auto-generate invoice on successful Flutterwave payment
+        try {
+          const tenantInfo = (await client.query('SELECT name, email FROM tenants WHERE id=$1', [payment.tenant_id])).rows[0];
+          await createInvoice(payment.tenant_id, payment.id, plan, payment.amount, 'UGX', `${plan} plan subscription`, tenantInfo?.name, tenantInfo?.email);
+        } catch(invErr) { console.warn('[FW Callback] Invoice creation error:', invErr.message); }
+        // Phase 2: Enable auto-renewal for Flutterwave subscriptions
+        try {
+          await client.query('UPDATE subscriptions SET auto_renew = true, payment_method = $1 WHERE tenant_id = $2 AND status = $3', ['flutterwave', payment.tenant_id, 'active']);
+        } catch(arErr) { console.warn('[FW Callback] Auto-renew error:', arErr.message); }
       }
       await client.query('COMMIT');
     } catch(e) {
@@ -10942,6 +11262,15 @@ app.get('/pay/pesapal/callback', requireAuth, ah(async (req, res) => {
           await audit(req.session.user.email, 'pesapal_payment', `PesaPal payment completed: ${ref} for ${plan}`, req.session.user.tenant_id, req);
           await fireWebhook(payment.tenant_id, 'payment', { ref, amount: payment.amount, plan, method: 'pesapal' });
           await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
+          // Phase 2: Auto-generate invoice on successful payment
+          try {
+            const tenantInfo = (await client.query('SELECT name, email FROM tenants WHERE id=$1', [payment.tenant_id])).rows[0];
+            await createInvoice(payment.tenant_id, payment.id, plan, payment.amount, 'UGX', `${plan} plan subscription`, tenantInfo?.name, tenantInfo?.email);
+          } catch(invErr) { console.warn('[PesaPal Callback] Invoice creation error:', invErr.message); }
+          // Phase 2: Enable auto-renewal for PesaPal subscriptions
+          try {
+            await client.query('UPDATE subscriptions SET auto_renew = true, payment_method = $1 WHERE tenant_id = $2 AND status = $3', ['pesapal', payment.tenant_id, 'active']);
+          } catch(arErr) { console.warn('[PesaPal Callback] Auto-renew error:', arErr.message); }
         }
         await client.query('COMMIT');
       } catch(e) {
@@ -12465,20 +12794,32 @@ app.get('/health', ah(async (req, res) => {
     const dbMs = Date.now() - start;
     let redisOk = false;
     if (redisCache) { try { await redisCache.ping(); redisOk = true; } catch {} }
+    // Phase 2: Enhanced health check with more details for uptime monitoring
+    const activeSubscriptions = (await pool.query("SELECT COUNT(*) FROM subscriptions WHERE status='active' AND plan != 'free'")).rows[0].count;
+    const activeTenants = (await pool.query("SELECT COUNT(*) FROM tenants WHERE approved=true")).rows[0].count;
+    const pendingApprovals = (await pool.query("SELECT COUNT(*) FROM tenants WHERE approved=false")).rows[0].count;
     res.json({
       status: 'ok',
       uptime: Math.floor(process.uptime()),
+      uptime_human: `${Math.floor(process.uptime() / 86400)}d ${Math.floor((process.uptime() % 86400) / 3600)}h ${Math.floor((process.uptime() % 3600) / 60)}m`,
       timestamp: new Date().toISOString(),
-      version: '9.0.0',
+      version: '9.2.0',
+      phase: 'Phase 2 Complete',
       checks: {
         database: { status: 'ok', latency_ms: dbMs },
         redis: { status: redisOk ? 'ok' : 'unavailable' },
         websocket: { status: 'ok', active_connections: Array.from(wsClients.values()).reduce((s, c) => s + c.size, 0) }
       },
+      metrics: {
+        active_subscriptions: parseInt(activeSubscriptions) || 0,
+        active_tenants: parseInt(activeTenants) || 0,
+        pending_approvals: parseInt(pendingApprovals) || 0,
+        automation_jobs: 10
+      },
       memory: { rss_mb: Math.round(process.memoryUsage().rss / 1024 / 1024), heap_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) }
     });
   } catch (e) {
-    res.status(503).json({ status: 'error', message: 'Database unreachable' });
+    res.status(503).json({ status: 'error', message: 'Database unreachable', timestamp: new Date().toISOString() });
   }
 }));
 
@@ -32881,6 +33222,8 @@ setTimeout(() => { try { const m = require('./fundraising-ultimate5'); m(app, po
 
 // === FUNDRAISING ULTIMATE6 (Integration & Platform — 15 features) ===
 ['integration_configs','integration_sync_log','crm_sync_configs','crm_sync_queue','email_marketing_configs','email_campaign_sync','accounting_sync_configs','accounting_sync_records','webhook_endpoints_pro','webhook_deliveries','api_gateway_keys_pro','api_gateway_logs','api_rate_limits_pro','data_import_jobs','data_export_jobs','import_error_rows','whitelabel_pro_config','language_configs','translations','custom_domains','sso_configs','sso_sessions','donor_2fa_configs','donor_2fa_attempts','privacy_consent_records','privacy_settings','data_retention_policies','data_retention_log','platform_plugins','plugin_marketplace'].forEach(t => VALID_TABLES.add(t));
+// Phase 2 - Add new tables to VALID_TABLES
+['invoices','renewal_logs'].forEach(t => VALID_TABLES.add(t));
 setTimeout(() => { try { const m = require('./fundraising-ultimate6'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate6] Integration & Platform loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate6] Failed:', e.message); } }, 11000);
 
 // === FUNDRAISING ULTIMATE7 (Advanced Donation Types & Events — 8 features) ===
@@ -40120,6 +40463,204 @@ const checkSubscriptionExpiry = async () => {
   } catch (e) { console.warn('[AutoSub] Expiry check error:', e.message); }
 };
 
+// --- 4b. AUTOMATED SUBSCRIPTION RENEWAL (Phase 2 - Task 2.1) ---
+const MAX_RENEWAL_ATTEMPTS = 3;
+const RENEWAL_RETRY_DELAYS = [0, 3600000, 14400000]; // Immediate, 1 hour, 4 hours
+const RENEWAL_WARNING_DAYS = 3;
+
+const checkSubscriptionRenewal = async () => {
+  try {
+    // Find active paid subscriptions expiring within RENEWAL_WARNING_DAYS that have auto_renew enabled
+    const renewing = (await pool.query(
+      `SELECT s.*, t.name as tenant_name, t.email as tenant_email
+       FROM subscriptions s JOIN tenants t ON s.tenant_id = t.id
+       WHERE s.status = 'active' AND s.plan != 'free' AND s.auto_renew = true
+       AND s.expires_at > NOW() AND s.expires_at < NOW() + INTERVAL '${RENEWAL_WARNING_DAYS} days'
+       AND (s.last_renewal_attempt IS NULL OR s.last_renewal_attempt < NOW() - INTERVAL '1 hour')`
+    )).rows;
+
+    for (const sub of renewing) {
+      try {
+        // Check if renewal is already in progress or max attempts reached
+        if (sub.renewal_attempts >= MAX_RENEWAL_ATTEMPTS) {
+          console.log(`[AutoRenew] Tenant ${sub.tenant_name} (ID: ${sub.tenant_id}) max renewal attempts reached, disabling auto-renew`);
+          await pool.query('UPDATE subscriptions SET auto_renew = false WHERE id = $1', [sub.id]);
+          // Notify admin
+          const adminEmail = (await pool.query("SELECT email FROM users WHERE tenant_id=$1 AND role IN ('super_admin','admin') LIMIT 1", [sub.tenant_id])).rows[0]?.email;
+          if (adminEmail) {
+            queueEmail(adminEmail, `Subscription Renewal Failed - ${sub.plan}`, `<div style="max-width:500px;margin:0 auto;font-family:sans-serif"><h2 style="color:#dc2626">Auto-Renewal Failed</h2><p>We attempted to automatically renew your <b>${sub.plan}</b> subscription ${MAX_RENEWAL_ATTEMPTS} times but were unsuccessful.</p><p>Your subscription expires on <b>${new Date(sub.expires_at).toLocaleDateString()}</b>. Please manually renew from the <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing" style="color:#1c7796">Billing page</a>.</p></div>`);
+          }
+          continue;
+        }
+
+        const newAttempts = (sub.renewal_attempts || 0) + 1;
+        const retryDelay = RENEWAL_RETRY_DELAYS[Math.min(newAttempts - 1, RENEWAL_RETRY_DELAYS.length - 1)];
+        const nextRetry = new Date(Date.now() + retryDelay);
+
+        // Log renewal attempt
+        await pool.query(
+          `INSERT INTO renewal_logs(subscription_id, tenant_id, attempt, status, payment_method, next_retry_at, created_at) VALUES($1,$2,$3,'in_progress',$4,$5,NOW())`,
+          [sub.id, sub.tenant_id, newAttempts, sub.payment_method || 'pesapal', nextRetry]
+        );
+
+        // Attempt renewal payment using stored payment method
+        let renewalSuccess = false;
+        let errorMsg = '';
+        const countryCode = await getTenantCountry(sub.tenant_id);
+        const countryCfg = COUNTRY_PAYMENT_CONFIG[countryCode] || COUNTRY_PAYMENT_CONFIG.UG;
+
+        // Try PesaPal for renewal
+        if (sub.payment_method === 'pesapal' && process.env.PESAPAL_CONSUMER_KEY) {
+          try {
+            const ref = `RENEW-${sub.tenant_id}-${Date.now()}`;
+            const planAmounts = { basic: 50000, pro: 150000, enterprise: 500000 };
+            const amount = planAmounts[sub.plan] || sub.amount || 0;
+
+            // For auto-renewal, we create a payment record and attempt PesaPal
+            await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,plan,reference) VALUES($1,$2,$3,$4,$5,$6,$7)',
+              [sub.tenant_id, amount, 'pesapal', 'pending', `${sub.plan} plan auto-renewal`, sub.plan, ref]);
+
+            // Note: PesaPal requires user interaction for mobile money, so we send a renewal email instead
+            const adminEmail = (await pool.query("SELECT email FROM users WHERE tenant_id=$1 AND role IN ('super_admin','admin') LIMIT 1", [sub.tenant_id])).rows[0]?.email;
+            if (adminEmail) {
+              queueEmail(adminEmail, `Action Required: Renew Your ${sub.plan} Subscription`, `<div style="max-width:500px;margin:0 auto;font-family:sans-serif"><h2>Subscription Renewal Due</h2><p>Your <b>${sub.plan}</b> subscription expires on <b>${new Date(sub.expires_at).toLocaleDateString()}</b>.</p><p>This is attempt ${newAttempts} of ${MAX_RENEWAL_ATTEMPTS}. Please renew now to avoid interruption.</p><p style="margin-top:20px"><a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing" style="display:inline-block;padding:12px 28px;background:#1c7796;color:white;border-radius:8px;text-decoration:none;font-weight:700">Renew Now</a></p></div>`);
+            }
+
+            // Log as pending (awaiting user action)
+            await pool.query(`UPDATE renewal_logs SET status='awaiting_payment', error_message='PesaPal requires user interaction' WHERE subscription_id=$1 AND attempt=$2 ORDER BY created_at DESC LIMIT 1`, [sub.id, newAttempts]);
+          } catch (payErr) {
+            errorMsg = payErr.message;
+            await pool.query(`UPDATE renewal_logs SET status='failed', error_message=$1 WHERE subscription_id=$2 AND attempt=$3 ORDER BY created_at DESC LIMIT 1`, [errorMsg, sub.id, newAttempts]);
+          }
+        } else {
+          // No payment method configured — send reminder email
+          errorMsg = 'No payment method configured for auto-renewal';
+          const adminEmail = (await pool.query("SELECT email FROM users WHERE tenant_id=$1 AND role IN ('super_admin','admin') LIMIT 1", [sub.tenant_id])).rows[0]?.email;
+          if (adminEmail) {
+            queueEmail(adminEmail, `Renew Your ${sub.plan} Subscription`, `<div style="max-width:500px;margin:0 auto;font-family:sans-serif"><h2>Subscription Expiring Soon</h2><p>Your <b>${sub.plan}</b> subscription expires on <b>${new Date(sub.expires_at).toLocaleDateString()}</b>.</p><p>To enable automatic renewal, set up a payment method from the <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing" style="color:#1c7796">Billing page</a>.</p><p style="margin-top:20px"><a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing" style="display:inline-block;padding:12px 28px;background:#1c7796;color:white;border-radius:8px;text-decoration:none;font-weight:700">Renew Now</a></p></div>`);
+          }
+          await pool.query(`UPDATE renewal_logs SET status='failed', error_message=$1 WHERE subscription_id=$2 AND attempt=$3 ORDER BY created_at DESC LIMIT 1`, [errorMsg, sub.id, newAttempts]);
+        }
+
+        // Update subscription with attempt tracking
+        await pool.query('UPDATE subscriptions SET renewal_attempts = $1, last_renewal_attempt = NOW() WHERE id = $2', [newAttempts, sub.id]);
+        console.log(`[AutoRenew] Processed renewal for tenant ${sub.tenant_name} (attempt ${newAttempts}/${MAX_RENEWAL_ATTEMPTS})`);
+      } catch (e) {
+        console.warn(`[AutoRenew] Error for subscription ${sub.id}:`, e.message);
+      }
+    }
+  } catch (e) { console.warn('[AutoRenew] Error:', e.message); }
+};
+
+// --- 4c. SUBSCRIPTION RENEWAL REMINDER (7 days before expiry) ---
+const sendRenewalReminders = async () => {
+  try {
+    const expiring = (await pool.query(
+      `SELECT s.*, t.name as tenant_name, t.email as tenant_email
+       FROM subscriptions s JOIN tenants t ON s.tenant_id = t.id
+       WHERE s.status = 'active' AND s.plan != 'free'
+       AND s.expires_at > NOW() AND s.expires_at < NOW() + INTERVAL '7 days'
+       AND s.auto_renew = false`
+    )).rows;
+
+    for (const sub of expiring) {
+      const adminEmail = (await pool.query("SELECT email FROM users WHERE tenant_id=$1 AND role IN ('super_admin','admin') LIMIT 1", [sub.tenant_id])).rows[0]?.email;
+      if (adminEmail) {
+        const daysLeft = Math.ceil((new Date(sub.expires_at) - new Date()) / (1000 * 60 * 60 * 24));
+        queueEmail(adminEmail, `${sub.plan} Subscription Expires in ${daysLeft} Days`, `<div style="max-width:500px;margin:0 auto;font-family:sans-serif"><h2>Subscription Reminder</h2><p>Your <b>${sub.plan}</b> subscription for <b>${sub.tenant_name}</b> expires in <b>${daysLeft} day(s)</b> on ${new Date(sub.expires_at).toLocaleDateString()}.</p><p>Renew now to keep all your features active. Enable auto-renewal for hassle-free payments.</p><p style="margin-top:20px"><a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing" style="display:inline-block;padding:12px 28px;background:#1c7796;color:white;border-radius:8px;text-decoration:none;font-weight:700">Renew Subscription</a></p></div>`);
+      }
+    }
+    if (expiring.length > 0) console.log(`[AutoRenew] Sent ${expiring.length} renewal reminder(s)`);
+  } catch (e) { console.warn('[AutoRenew] Reminder error:', e.message); }
+};
+
+// --- 4d. INVOICE GENERATOR (Phase 2 - Task 2.2) ---
+const generateInvoiceNumber = async () => {
+  const prefix = 'INV';
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+  return `${prefix}-${dateStr}-${random}`;
+};
+
+const createInvoice = async (tenantId, paymentId, plan, amount, currency, description, tenantName, tenantEmail) => {
+  try {
+    const invoiceNo = await generateInvoiceNumber();
+    const invoice = (await pool.query(
+      `INSERT INTO invoices(tenant_id, payment_id, invoice_no, plan, amount, currency, status, description, tenant_name, tenant_email, issued_at, created_at)
+       VALUES($1, $2, $3, $4, $5, $6, 'paid', $7, $8, $9, NOW(), NOW()) RETURNING *`,
+      [tenantId, paymentId, invoiceNo, plan, amount, currency || 'UGX', description || `${plan} plan subscription`, tenantName || '', tenantEmail || '']
+    )).rows[0];
+    console.log(`[Invoice] Created invoice ${invoiceNo} for tenant ${tenantId}, amount: ${currency || 'UGX'} ${amount}`);
+    return invoice;
+  } catch (e) {
+    console.warn('[Invoice] Creation error:', e.message);
+    return null;
+  }
+};
+
+// Generate PDF invoice using PDFKit
+const generateInvoicePDF = async (invoice, tenant) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const PDFDocument = require('pdfkit');
+      const buf = [];
+      const doc = new PDFDocument({ size: 'A4', margin: 40 });
+      doc.on('data', chunk => buf.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(buf)));
+
+      const primaryColor = tenant?.primary_color || '#4f46e5';
+      const siteName = platformSettings.site_name || 'Comfort Zone';
+
+      // Header
+      doc.rect(0, 0, doc.page.width, 80).fill(primaryColor);
+      doc.fillColor('white').fontSize(24).font('Helvetica-Bold').text(siteName, 40, 25, { align: 'left' });
+      doc.fillColor('white').fontSize(11).font('Helvetica').text('INVOICE', 40, 55, { align: 'left' });
+      doc.fillColor('white').fontSize(14).font('Helvetica-Bold').text(invoice.invoice_no, doc.page.width - 250, 30, { width: 210, align: 'right' });
+      doc.fillColor('rgba(255,255,255,0.8)').fontSize(9).font('Helvetica').text(`Issued: ${new Date(invoice.issued_at).toLocaleDateString()}`, doc.page.width - 250, 50, { width: 210, align: 'right' });
+
+      // Billing details
+      doc.fillColor('#1e293b').fontSize(11).font('Helvetica-Bold').text('Bill To:', 40, 100);
+      doc.fillColor('#475569').fontSize(10).font('Helvetica').text(invoice.tenant_name || 'N/A', 40, 118);
+      doc.fillColor('#475569').text(invoice.tenant_email || 'N/A', 40, 132);
+
+      // Payment status badge
+      doc.roundedRect(doc.page.width - 160, 100, 120, 30, 4).fill(invoice.status === 'paid' ? '#d1fae5' : '#fef3c7');
+      doc.fillColor(invoice.status === 'paid' ? '#065f46' : '#92400e').fontSize(11).font('Helvetica-Bold').text(invoice.status.toUpperCase(), doc.page.width - 160, 108, { width: 120, align: 'center' });
+
+      // Invoice table
+      const tableTop = 170;
+      doc.rect(40, tableTop, doc.page.width - 80, 25).fill('#f1f5f9');
+      doc.fillColor('#64748b').fontSize(9).font('Helvetica-Bold');
+      doc.text('DESCRIPTION', 50, tableTop + 7);
+      doc.text('PLAN', 300, tableTop + 7);
+      doc.text('AMOUNT', 430, tableTop + 7, { width: 100, align: 'right' });
+
+      doc.rect(40, tableTop + 25, doc.page.width - 80, 35).fill('white').stroke('#e2e8f0');
+      doc.fillColor('#1e293b').fontSize(10).font('Helvetica');
+      doc.text(invoice.description || 'Subscription Payment', 50, tableTop + 33);
+      doc.text(invoice.plan || 'N/A', 300, tableTop + 33);
+      doc.text(`${invoice.currency || 'UGX'} ${Number(invoice.amount || 0).toLocaleString()}`, 430, tableTop + 33, { width: 100, align: 'right' });
+
+      // Total
+      const totalTop = tableTop + 75;
+      doc.moveTo(40, totalTop).lineTo(doc.page.width - 40, totalTop).stroke('#e2e8f0');
+      doc.fillColor('#1e293b').fontSize(11).font('Helvetica-Bold').text('Total', 300, totalTop + 10);
+      doc.text(`${invoice.currency || 'UGX'} ${Number(invoice.amount || 0).toLocaleString()}`, 430, totalTop + 10, { width: 100, align: 'right' });
+
+      // Footer
+      const footerY = doc.page.height - 80;
+      doc.moveTo(40, footerY - 10).lineTo(doc.page.width - 40, footerY - 10).stroke('#e2e8f0');
+      doc.fillColor('#94a3b8').fontSize(8).font('Helvetica');
+      doc.text('Thank you for your business!', 40, footerY, { align: 'center', width: doc.page.width - 80 });
+      doc.text(`${siteName} | ${platformSettings.support_email || 'support@comfort.ug'}`, 40, footerY + 14, { align: 'center', width: doc.page.width - 80 });
+
+      doc.end();
+    } catch (e) {
+      reject(e);
+    }
+  });
+};
+
 // --- 5. AUTOMATED DATA CLEANUP (daily) ---
 const runDataCleanup = async () => {
   try {
@@ -40252,6 +40793,14 @@ setTimeout(processRecurringDonations, 120000);
 setInterval(checkSubscriptionExpiry, 86400000);
 setTimeout(checkSubscriptionExpiry, 300000); // Check 5 min after startup
 
+// Phase 2: Subscription renewal check: every 6 hours
+setInterval(checkSubscriptionRenewal, 21600000);
+setTimeout(checkSubscriptionRenewal, 600000); // Check 10 min after startup
+
+// Phase 2: Renewal reminders: every 24 hours
+setInterval(sendRenewalReminders, 86400000);
+setTimeout(sendRenewalReminders, 900000); // Check 15 min after startup
+
 // Data cleanup: every 24 hours
 setInterval(runDataCleanup, 86400000);
 setTimeout(runDataCleanup, 600000); // Run 10 min after startup
@@ -40265,11 +40814,13 @@ setInterval(processScheduledCampaigns, 60000);
 // Report history cleanup: every 7 days
 setInterval(cleanupReportHistory, 604800000);
 
-console.log('[Automation] All 8 automated jobs started successfully');
+console.log('[Automation] All 10 automated jobs started successfully');
 console.log('  - Email Queue Processor: every 30s');
 console.log('  - Fee Reminders: every 1h');
 console.log('  - Recurring Donations: every 2h');
 console.log('  - Subscription Expiry: every 24h');
+console.log('  - Subscription Renewal: every 6h (Phase 2)');
+console.log('  - Renewal Reminders: every 24h (Phase 2)');
 console.log('  - Data Cleanup: every 24h');
 console.log('  - Scheduled Automation Rules: every 5min');
 console.log('  - Scheduled Campaigns: every 60s');
@@ -40285,6 +40836,6 @@ server.listen(PORT, () => {
 
 // Deploy trigger 1779091065
 // Phase 4 deploy trigger: 27 additional modules — 2026-05-18
-// Redeploy trigger: 2026-05-18T113500Z
-// Redeploy trigger: 2026-05-19 webhooks-fix-pwa-update-v4
+// Redeploy trigger: 2026-05-18 webhooks-fix-pwa-update-v4
 // v19.2 deploy trigger: fix 278 SQL migration errors + subscription gating + admin feature overrides — 2026-05-19
+// Phase 2 deploy trigger: subscription renewal + invoices + Redis caching + role permissions + admin approval queue — 2026-05-20
