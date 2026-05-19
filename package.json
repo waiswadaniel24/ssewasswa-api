@@ -8,7 +8,10 @@
     "dev": "nodemon server.js",
     "worker": "node worker.js",
     "migrate": "node migrate.js",
-    "test": "node test/server.test.js"
+    "test": "node test/server.test.js",
+    "lint": "eslint server.js --quiet || true",
+    "syntax": "node -c server.js",
+    "ci": "npm run syntax && npm test"
   },
   "engines": {
     "node": ">=18.0.0"

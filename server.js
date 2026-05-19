@@ -34,9 +34,9 @@ const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 
 // === CONSTANTS ===
-const SESSION_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
+const SESSION_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days — See PLATFORM_CONFIG.sessionMaxAge
 const LOGIN_LOCKOUT_WINDOW = 15 * 60 * 1000; // 15 minutes
-const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_MAX_ATTEMPTS = 5; // See PLATFORM_CONFIG.loginMaxAttempts
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
 const REQUEST_TIMEOUT_MS = 30 * 1000; // 30 seconds
@@ -44,6 +44,55 @@ const SUBSCRIPTION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days
 const crypto = require('crypto');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+
+// ============================================================
+// CENTRALIZED PLATFORM CONFIGURATION
+// ============================================================
+const PLATFORM_CONFIG = {
+  // Display
+  appName: process.env.APP_NAME || 'Comfort Zone',
+  baseUrl: process.env.BASE_URL || 'https://ssewasswa.onrender.com',
+  defaultCurrency: process.env.DEFAULT_CURRENCY || 'UGX',
+  currencySymbol: process.env.CURRENCY_SYMBOL || 'UGX',
+  countryName: process.env.COUNTRY_NAME || 'Uganda',
+  phonePrefix: process.env.PHONE_PREFIX || '+256',
+
+  // Session
+  sessionMaxAge: parseInt(process.env.SESSION_MAX_AGE) || 7 * 24 * 60 * 60 * 1000,
+
+  // Security
+  loginMaxAttempts: parseInt(process.env.LOGIN_MAX_ATTEMPTS) || 5,
+  lockoutDurationMs: parseInt(process.env.LOCKOUT_DURATION) || 30 * 60 * 1000,
+  passwordMinLength: parseInt(process.env.PASSWORD_MIN_LENGTH) || 8,
+  bcryptRounds: parseInt(process.env.BCRYPT_ROUNDS) || 12,
+
+  // Rate Limits
+  loginRateLimit: parseInt(process.env.LOGIN_RATE_LIMIT) || 50,
+  loginRateWindow: 15 * 60 * 1000,
+  registerRateLimit: parseInt(process.env.REGISTER_RATE_LIMIT) || 5,
+  registerRateWindow: 60 * 60 * 1000,
+  apiRateLimit: parseInt(process.env.API_RATE_LIMIT) || 100,
+  apiRateWindow: 60 * 1000,
+
+  // Pagination
+  defaultPageSize: parseInt(process.env.DEFAULT_PAGE_SIZE) || 50,
+  maxPageSize: parseInt(process.env.MAX_PAGE_SIZE) || 200,
+
+  // Email
+  emailFromName: process.env.EMAIL_FROM_NAME || 'Comfort Zone',
+  supportEmail: process.env.SUPPORT_EMAIL || 'support@comfortzone.co.ug',
+
+  // Backup
+  backupRetentionDays: parseInt(process.env.BACKUP_RETENTION_DAYS) || 30,
+
+  // Webhook
+  webhookMaxRetries: parseInt(process.env.WEBHOOK_MAX_RETRIES) || 5,
+  webhookTimeoutMs: parseInt(process.env.WEBHOOK_TIMEOUT_MS) || 15000,
+
+  // Audit
+  auditRetentionDays: parseInt(process.env.AUDIT_RETENTION_DAYS) || 90,
+};
+
 const compression = require('compression');
 const { authenticator } = require('otplib');
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle } = require('docx');
@@ -548,9 +597,9 @@ app.use('/', (req, res, next) => {
   }
   next();
 });
-app.use('/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 50, standardHeaders: true }));
-app.use('/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true }));
-app.use('/api/', rateLimit({ windowMs: 60 * 1000, max: 100, standardHeaders: true }));
+app.use('/login', rateLimit({ windowMs: PLATFORM_CONFIG.loginRateWindow, max: PLATFORM_CONFIG.loginRateLimit, standardHeaders: true })); // See PLATFORM_CONFIG.loginRateLimit / loginRateWindow
+app.use('/register', rateLimit({ windowMs: PLATFORM_CONFIG.registerRateWindow, max: PLATFORM_CONFIG.registerRateLimit, standardHeaders: true })); // See PLATFORM_CONFIG.registerRateLimit / registerRateWindow
+app.use('/api/', rateLimit({ windowMs: PLATFORM_CONFIG.apiRateWindow, max: PLATFORM_CONFIG.apiRateLimit, standardHeaders: true })); // See PLATFORM_CONFIG.apiRateLimit / apiRateWindow
 app.use('/dev/', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true }));
 app.use('/billing', rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true }));
 app.use('/pay/', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true }));
@@ -1022,6 +1071,18 @@ const sendEmail = async (to, subject, html, tenantFromName) => {
 };
 const queueEmail = (tenantId, to, subject, body, isHtml = true) => pool.query('INSERT INTO email_queue(tenant_id,to_email,subject,body,html) VALUES($1,$2,$3,$4,$5)', [tenantId, to, subject, body, isHtml]).catch(e => console.error('[DB Error]', e.message));
 
+// === UNIFIED EMAIL TEMPLATE SYSTEM ===
+// Helper to escape HTML entities for safe email content
+const escHtml = (str) => String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+
+// Wraps any HTML email body in a branded, responsive template
+// Usage: sendEmail(to, subject, renderEmailTemplate(subject, bodyHtml, tenantName, primaryColor), fromName)
+const renderEmailTemplate = (subject, bodyHtml, tenantName, primaryColor) => {
+  const brand = tenantName || 'Comfort Zone';
+  const color = primaryColor || '#4f46e5';
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f1f5f9}.container{max-width:560px;margin:40px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)}.header{background:linear-gradient(135deg,${color},#7c3aed);padding:32px 40px;color:white}.header h1{margin:0;font-size:22px;font-weight:700}.header p{margin:6px 0 0;font-size:14px;opacity:0.9}.body{padding:32px 40px;color:#334155;line-height:1.7;font-size:15px}.body a{color:${color};text-decoration:none;font-weight:600}.body a:hover{text-decoration:underline}.footer{padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;font-size:12px;color:#94a3b8}.footer a{color:#6366f1}.btn{display:inline-block;padding:12px 28px;background:${color};color:white!important;border-radius:8px;font-weight:600;text-decoration:none;margin:16px 0}@media(max-width:600px){.container{margin:20px 10px}.header,.body,.footer{padding:24px 20px}}</style></head><body><div class="container"><div class="header"><p>${escHtml(brand)}</p><h1>${escHtml(subject)}</h1></div><div class="body">${bodyHtml}</div><div class="footer"><p>Sent by ${escHtml(brand)} &middot; <a href="https://ssewasswa.onrender.com">Comfort Zone Platform</a></p><p style="margin-top:4px">If you didn't expect this email, you can safely ignore it.</p></div></div></body></html>`;
+};
+
 // SMS helper
 const sendSMS = async (phone, message) => {
   if (!process.env.AT_API_KEY || !process.env.AT_USERNAME) return false;
@@ -1151,8 +1212,9 @@ const loadTranslations = async () => {
   } catch (e) { console.warn('[Caught]', e.message); }
 };
 const t = (key, lang) => (translations[lang || 'en'] && translations[lang || 'en'][key]) || key;
+// Currencies sourced from PLATFORM_CONFIG.defaultCurrency — extend as needed for multi-currency tenants
 const CURRENCY_SYMBOLS = { UGX: 'UGX', KES: 'KES', TZS: 'TZS', RWF: 'RWF', USD: '$' };
-const formatCurrency = (amount, currency) => `${CURRENCY_SYMBOLS[currency || 'UGX'] || currency || 'UGX'} ${Number(amount).toLocaleString()}`;
+const formatCurrency = (amount, currency) => `${CURRENCY_SYMBOLS[currency || PLATFORM_CONFIG.defaultCurrency] || currency || PLATFORM_CONFIG.defaultCurrency} ${Number(amount).toLocaleString()}`;
 
 // Flutterwave helper (v1.0) - kept for Nigeria/Ghana/Kenya users
 const createFlutterwaveCheckout = async (tenantId, amount, email, plan, reference) => {
@@ -2856,7 +2918,7 @@ const uniqueConstraintMigrations = [
         ['staff_appraisal_v2', 'basic'],
       ];
       for (const [key, plan] of planDefaults) {
-        try { await pool.query('UPDATE feature_flags SET min_plan=$1 WHERE feature_key=$2 AND min_plan IS NULL', [plan, key]); } catch(e) {}
+        try { await pool.query('UPDATE feature_flags SET min_plan=$1 WHERE feature_key=$2 AND min_plan IS NULL', [plan, key]); } catch(e) { console.error('[Migration] Feature flag seed failed:', e.message); }
       }
       const devEmail = process.env.DEV_EMAIL || 'admin@ssewasswa.com';
       const devPass = process.env.DEV_PASSWORD || 'Admin123';
@@ -2881,7 +2943,7 @@ const uniqueConstraintMigrations = [
       console.log('[SETUP] Default admin email:', devEmail, '| Default password:', devPass);
       }
       // Clear any lockout for the admin email on every startup
-      try { await pool.query('DELETE FROM login_attempts WHERE email=$1', [devEmail]); } catch(e) {}
+      try { await pool.query('DELETE FROM login_attempts WHERE email=$1', [devEmail]); } catch(e) { console.error('[AuthSetup] Failed to clear admin lockout:', e.message); }
 
       // === Owner Admin Account ===
       const ownerEmail = 'waiswadaniel24@gmail.com';
@@ -2902,7 +2964,7 @@ const uniqueConstraintMigrations = [
         console.log('[SETUP] Owner admin:', ownerCheck.rows[0]?.email, 'role:', ownerCheck.rows[0]?.role, 'approved:', ownerCheck.rows[0]?.approved);
       }
       // Clear lockout for owner
-      try { await pool.query('DELETE FROM login_attempts WHERE email=$1', [ownerEmail]); } catch(e) {}
+      try { await pool.query('DELETE FROM login_attempts WHERE email=$1', [ownerEmail]); } catch(e) { console.error('[AuthSetup] Failed to clear owner lockout:', e.message); }
       await loadTranslations();
       // Seed subscription plans
       const planSeeds = [
@@ -4902,7 +4964,7 @@ app.post('/school/fees/pay/save', requireAuth, requireNotBanned, ah(async (req, 
     if (fee) {
       const balance = parseInt(fee.amount) - parseInt(fee.paid) - parseInt(amount);
       if (fee.guardian_phone) await sendSMS(fee.guardian_phone, `Payment UGX ${parseInt(amount).toLocaleString()} received for ${fee.student_name}. Balance: UGX ${balance.toLocaleString()}`);
-      if (fee.parent_email) await sendEmail(fee.parent_email, `Fee Payment - ${fee.student_name}`, `<p>Payment of UGX ${parseInt(amount).toLocaleString()} received. Balance: UGX ${balance.toLocaleString()}</p>`);
+      if (fee.parent_email) await sendEmail(fee.parent_email, `Fee Payment - ${fee.student_name}`, renderEmailTemplate(`Fee Payment - ${fee.student_name}`, `<p>Payment of <strong>UGX ${parseInt(amount).toLocaleString()}</strong> received for <strong>${escHtml(fee.student_name)}</strong>.</p><p>Outstanding Balance: <strong>UGX ${balance.toLocaleString()}</strong></p><p>Thank you for your payment.</p>`));
       await fireWebhook(t, 'payment', { fee_id, amount, student: fee.student_name, balance });
     }
   } catch(e) { console.warn('Fee notification error:', e.message); }
@@ -8818,15 +8880,85 @@ app.get('/individual/notes/:id/delete', requireAuth, requireNotBanned, ah(async 
   res.redirect('/individual/notes');
 }));
 
-// === INDIVIDUAL: DOCS (placeholder) ===
-app.get('/individual/docs', requireAuth, requireNotBanned, (req, res) => {
+// === INDIVIDUAL: DOCS (Document Manager) ===
+app.get('/individual/docs', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const docs = (await pool.query('SELECT * FROM documents WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
   res.send(renderPage('My Documents', `
-    <div class="card"><h3>My Documents</h3>
-      <p class="muted">Document storage coming soon. Use Notes for now to store text-based documents.</p>
-      <a href="/individual/notes" class="btn btn-sm">Go to Notes</a>
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)"><h1>My Documents</h1><p>Manage your personal documents</p></div>
+    <div style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap">
+      <a href="/individual/docs/new" class="btn btn-green">+ New Document</a>
+    </div>
+    ${docs.length > 0 ? `
+      <div class="card"><div style="overflow-x:auto"><table>
+        <tr><th>Title</th><th>Category</th><th>Type</th><th>Uploaded</th><th>Actions</th></tr>
+        ${docs.map(d => `<tr>
+          <td><strong>${esc(d.title)}</strong>${d.description ? `<br><span class="muted">${esc(d.description).substring(0,60)}</span>` : ''}</td>
+          <td><span class="tag">${esc(d.category || 'General')}</span></td>
+          <td>${esc(d.file_type || '-')}</td>
+          <td style="font-size:12px">${new Date(d.created_at).toLocaleDateString()}</td>
+          <td>
+            ${d.file_url ? `<a href="${esc(d.file_url)}" target="_blank" class="btn btn-sm">View</a> ` : ''}
+            <a href="/individual/docs/${d.id}/delete" class="btn btn-sm btn-red" onclick="return confirm('Delete this document?')">Delete</a>
+          </td>
+        </tr>`).join('')}
+      </table></div></div>
+    ` : '<div class="card" style="text-align:center;padding:40px"><h3>No documents yet</h3><p class="muted">Upload your first document to get started.</p></div>'}
+  `, req.session.user));
+}));
+
+app.get('/individual/docs/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Document', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h3>Upload Document</h3>
+      <form method="POST" action="/individual/docs/save" enctype="multipart/form-data">
+        <input name="title" placeholder="Document Title" required>
+        <textarea name="description" rows="3" placeholder="Description (optional)"></textarea>
+        <input name="file" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.csv,.txt">
+        <select name="category">
+          <option value="General">General</option>
+          <option value="ID">ID / Identification</option>
+          <option value="Certificate">Certificate</option>
+          <option value="Financial">Financial</option>
+          <option value="Medical">Medical</option>
+          <option value="Legal">Legal</option>
+          <option value="Academic">Academic</option>
+          <option value="Other">Other</option>
+        </select>
+        <button class="btn btn-green" style="width:100%">Upload Document</button>
+      </form>
+      <a href="/individual/docs" class="btn btn-sm" style="margin-top:10px">&larr; Back to Documents</a>
     </div>
   `, req.session.user));
 });
+
+app.post('/individual/docs/save', requireAuth, requireNotBanned, upload.single('file'), ah(async (req, res) => {
+  const { title, description, category } = req.body;
+  const t = req.session.user.tenant_id;
+  let fileUrl = '';
+  let fileType = '';
+  if (req.file) {
+    fileType = req.file.mimetype || '';
+    try {
+      if (process.env.CLOUDINARY_URL) {
+        const cloudinary = require('cloudinary').v2;
+        cloudinary.config({ cloudinary_url: process.env.CLOUDINARY_URL });
+        const result = await cloudinary.uploader.upload(`data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`, { resource_type: 'auto', folder: `tenant_${t}/documents` });
+        fileUrl = result.secure_url;
+      } else {
+        fileUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64').substring(0, 50)}...`;
+      }
+    } catch (e) { console.error('[DocUpload] Upload failed:', e.message); }
+  }
+  await pool.query('INSERT INTO documents(tenant_id,title,description,file_url,file_type,category,uploaded_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, title, description, fileUrl, fileType, category || 'General', req.session.user.email]);
+  await audit(req.session.user.email, 'document_upload', `Uploaded document: ${title}`, t, req);
+  res.redirect('/individual/docs');
+}));
+
+app.get('/individual/docs/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM documents WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/individual/docs');
+}));
 
 // === PARENT PORTAL ===
 app.get('/parent/login', (req, res) => {
@@ -13020,25 +13152,680 @@ app.get('/api/v1/openapi.json', (req, res) => {
     components: {
       securitySchemes: { BearerAuth: { type: 'http', scheme: 'bearer', description: 'API Key from dashboard Settings' } },
       schemas: {
-        Student: { type: 'object', properties: { id: { type: 'integer' }, admission_no: { type: 'string' }, name: { type: 'string' }, class: { type: 'string' }, stream: { type: 'string' }, gender: { type: 'string' } } },
-        Fee: { type: 'object', properties: { id: { type: 'integer' }, student_id: { type: 'integer' }, student_name: { type: 'string' }, amount: { type: 'number' }, paid: { type: 'number' }, balance: { type: 'number' } } },
+        // --- Core Domain Models ---
+        Student: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer', example: 1 },
+            admission_no: { type: 'string', example: 'ADM-2024-001' },
+            name: { type: 'string', example: 'John Mukasa' },
+            class: { type: 'string', example: 'P.6' },
+            stream: { type: 'string', example: 'East' },
+            gender: { type: 'string', enum: ['Male', 'Female', 'Other'] },
+            guardian_phone: { type: 'string', example: '+256700000001' },
+            parent_email: { type: 'string', example: 'parent@example.com' },
+            date_of_birth: { type: 'string', format: 'date' },
+            status: { type: 'string', enum: ['active', 'inactive', 'graduated', 'transferred'] },
+            tenant_id: { type: 'integer' },
+            created_at: { type: 'string', format: 'date-time' },
+            updated_at: { type: 'string', format: 'date-time' }
+          }
+        },
+        Fee: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer', example: 1 },
+            student_id: { type: 'integer', example: 1 },
+            student_name: { type: 'string', example: 'John Mukasa' },
+            term: { type: 'string', example: 'Term 1 2024' },
+            amount: { type: 'number', example: 1500000 },
+            paid: { type: 'number', example: 500000 },
+            balance: { type: 'number', example: 1000000 },
+            currency: { type: 'string', example: 'UGX' },
+            status: { type: 'string', enum: ['paid', 'partial', 'unpaid', 'overdue'] },
+            tenant_id: { type: 'integer' },
+            created_at: { type: 'string', format: 'date-time' }
+          }
+        },
+        Member: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer', example: 1 },
+            name: { type: 'string', example: 'Mary Nakamya' },
+            email: { type: 'string', example: 'mary@example.com' },
+            phone: { type: 'string', example: '+256700000002' },
+            membership_type: { type: 'string', example: 'Regular' },
+            status: { type: 'string', enum: ['active', 'inactive'] },
+            joined_at: { type: 'string', format: 'date' },
+            tenant_id: { type: 'integer' },
+            created_at: { type: 'string', format: 'date-time' }
+          }
+        },
+        Donation: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer', example: 1 },
+            donor_name: { type: 'string', example: 'Anonymous Donor' },
+            donor_email: { type: 'string', example: 'donor@example.com' },
+            amount: { type: 'number', example: 200000 },
+            currency: { type: 'string', example: 'UGX' },
+            method: { type: 'string', enum: ['mobile_money', 'card', 'bank_transfer', 'cash'] },
+            purpose: { type: 'string', example: 'Building Fund' },
+            status: { type: 'string', enum: ['completed', 'pending', 'failed'] },
+            tenant_id: { type: 'integer' },
+            created_at: { type: 'string', format: 'date-time' }
+          }
+        },
+        Inventory: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer', example: 1 },
+            name: { type: 'string', example: 'Exercise Books (96 pages)' },
+            category: { type: 'string', example: 'Stationery' },
+            quantity: { type: 'integer', example: 500 },
+            unit_price: { type: 'number', example: 3000 },
+            selling_price: { type: 'number', example: 4500 },
+            low_stock_alert: { type: 'integer', example: 50 },
+            description: { type: 'string' },
+            tenant_id: { type: 'integer' },
+            created_at: { type: 'string', format: 'date-time' },
+            updated_at: { type: 'string', format: 'date-time' }
+          }
+        },
+        Sale: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer', example: 1 },
+            item_id: { type: 'integer', example: 1 },
+            item_name: { type: 'string', example: 'Exercise Books' },
+            quantity: { type: 'integer', example: 10 },
+            unit_price: { type: 'number', example: 4500 },
+            total: { type: 'number', example: 45000 },
+            sold_by: { type: 'string', example: 'admin@school.com' },
+            customer_name: { type: 'string' },
+            payment_method: { type: 'string', enum: ['cash', 'mobile_money', 'card'] },
+            tenant_id: { type: 'integer' },
+            created_at: { type: 'string', format: 'date-time' }
+          }
+        },
+        Invoice: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer', example: 1 },
+            invoice_no: { type: 'string', example: 'INV-2024-001' },
+            student_name: { type: 'string', example: 'John Mukasa' },
+            amount: { type: 'number', example: 1500000 },
+            paid: { type: 'number', example: 500000 },
+            balance: { type: 'number', example: 1000000 },
+            status: { type: 'string', enum: ['paid', 'partial', 'unpaid', 'cancelled'] },
+            due_date: { type: 'string', format: 'date' },
+            tenant_id: { type: 'integer' },
+            created_at: { type: 'string', format: 'date-time' }
+          }
+        },
+        Event: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer', example: 1 },
+            title: { type: 'string', example: 'Inter-House Sports Day' },
+            description: { type: 'string' },
+            start_date: { type: 'string', format: 'date-time' },
+            end_date: { type: 'string', format: 'date-time' },
+            location: { type: 'string', example: 'Main Playground' },
+            status: { type: 'string', enum: ['upcoming', 'ongoing', 'completed', 'cancelled'] },
+            organizer: { type: 'string' },
+            tenant_id: { type: 'integer' },
+            created_at: { type: 'string', format: 'date-time' }
+          }
+        },
+        Subscription: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer', example: 1 },
+            tenant_id: { type: 'integer' },
+            plan: { type: 'string', enum: ['free', 'starter', 'professional', 'enterprise'], example: 'professional' },
+            status: { type: 'string', enum: ['active', 'inactive', 'cancelled', 'past_due'], example: 'active' },
+            amount: { type: 'number', example: 150000 },
+            currency: { type: 'string', example: 'UGX' },
+            billing_cycle: { type: 'string', enum: ['monthly', 'yearly'], example: 'monthly' },
+            starts_at: { type: 'string', format: 'date-time' },
+            expires_at: { type: 'string', format: 'date-time' },
+            created_at: { type: 'string', format: 'date-time' }
+          }
+        },
+        Webhook: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer', example: 1 },
+            url: { type: 'string', format: 'uri', example: 'https://example.com/webhook' },
+            events: { type: 'array', items: { type: 'string' }, example: ['payment.received', 'student.created'] },
+            active: { type: 'boolean', example: true },
+            secret: { type: 'string' },
+            last_triggered_at: { type: 'string', format: 'date-time' },
+            tenant_id: { type: 'integer' },
+            created_at: { type: 'string', format: 'date-time' }
+          }
+        },
+        AutomationRule: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer', example: 1 },
+            name: { type: 'string', example: 'Fee Overdue SMS' },
+            trigger: { type: 'string', example: 'fee_overdue' },
+            condition: { type: 'string', example: 'balance > 0 AND days_overdue > 7' },
+            action: { type: 'string', example: 'send_sms' },
+            active: { type: 'boolean', example: true },
+            last_run_at: { type: 'string', format: 'date-time' },
+            tenant_id: { type: 'integer' },
+            created_at: { type: 'string', format: 'date-time' }
+          }
+        },
+        // --- Reusable Wrappers ---
+        PaginatedResponse: {
+          type: 'object',
+          properties: {
+            data: { type: 'array', items: {} },
+            total: { type: 'integer', example: 150 },
+            page: { type: 'integer', example: 1 },
+            limit: { type: 'integer', example: 50 },
+            pages: { type: 'integer', example: 3 }
+          },
+          description: 'Standard paginated response wrapper. The `data` array items vary by endpoint.'
+        },
+        ApiError: {
+          type: 'object',
+          properties: {
+            error: { type: 'string', example: 'Resource not found' },
+            message: { type: 'string', example: 'The requested student ID does not exist.' },
+            status: { type: 'integer', example: 404 }
+          }
+        },
+        HealthResponse: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['ok', 'error'], example: 'ok' },
+            uptime: { type: 'integer', example: 86400, description: 'Server uptime in seconds' },
+            uptime_human: { type: 'string', example: '1d 0h 0m' },
+            timestamp: { type: 'string', format: 'date-time' },
+            version: { type: 'string', example: '9.2.0' },
+            checks: {
+              type: 'object',
+              properties: {
+                database: { type: 'object', properties: { status: { type: 'string' }, latency_ms: { type: 'integer' } } },
+                redis: { type: 'object', properties: { status: { type: 'string' } } },
+                websocket: { type: 'object', properties: { status: { type: 'string' }, active_connections: { type: 'integer' } } }
+              }
+            },
+            memory: { type: 'object', properties: { rss_mb: { type: 'integer' }, heap_mb: { type: 'integer' } } }
+          }
+        },
         Error: { type: 'object', properties: { error: { type: 'string' }, status: { type: 'integer' } } }
       }
     },
     paths: {
-      '/api/v1/students': { get: { summary: 'List students', parameters: [{ name: 'page', in: 'query', schema: { type: 'integer', default: 1 } }, { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } }], responses: { 200: { description: 'OK' } } }, post: { summary: 'Create student', responses: { 201: { description: 'Created' } } } },
-      '/api/v1/students/export': { get: { summary: 'Export students CSV', responses: { 200: { description: 'CSV file' } } } },
-      '/api/v1/students/import': { post: { summary: 'Import students CSV', responses: { 200: { description: 'Import results' } } } },
-      '/api/v1/fees': { get: { summary: 'List fees', responses: { 200: { description: 'OK' } } } },
-      '/api/v1/fees/pay': { post: { summary: 'Record payment', responses: { 200: { description: 'OK' } } } },
-      '/api/v1/inventory': { get: { summary: 'List inventory', responses: { 200: { description: 'OK' } } } },
-      '/api/v1/inventory/export': { get: { summary: 'Export inventory CSV', responses: { 200: { description: 'CSV file' } } } },
-      '/api/v1/sales': { post: { summary: 'Create sale', responses: { 200: { description: 'OK' } } } },
-      '/api/v1/members': { get: { summary: 'List members', responses: { 200: { description: 'OK' } } } },
-      '/api/v1/members/export': { get: { summary: 'Export members CSV', responses: { 200: { description: 'CSV file' } } } },
-      '/api/v1/donations': { post: { summary: 'Record donation', responses: { 200: { description: 'OK' } } } },
-      '/api/v1/invoices': { get: { summary: 'List invoices', responses: { 200: { description: 'OK' } } } },
-      '/api/v1/campaigns': { post: { summary: 'Create campaign', responses: { 200: { description: 'OK' } } } }
+      // ── Students ──────────────────────────────────────────────
+      '/api/v1/students': {
+        get: {
+          summary: 'List all students with pagination and search',
+          operationId: 'listStudents',
+          tags: ['Students'],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 }, description: 'Page number' },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 }, description: 'Items per page (max 200)' },
+            { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Search by name or admission number' },
+            { name: 'class', in: 'query', schema: { type: 'string' }, description: 'Filter by class' },
+            { name: 'status', in: 'query', schema: { type: 'string', enum: ['active', 'inactive', 'graduated', 'transferred'] }, description: 'Filter by status' }
+          ],
+          responses: {
+            200: { description: 'Paginated list of students', content: { 'application/json': { schema: { allOf: [{ $ref: '#/components/schemas/PaginatedResponse' }, { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/Student' } } } }] } } } },
+            401: { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        },
+        post: {
+          summary: 'Create a new student',
+          operationId: 'createStudent',
+          tags: ['Students'],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name', 'class', 'gender'], properties: { admission_no: { type: 'string' }, name: { type: 'string' }, class: { type: 'string' }, stream: { type: 'string' }, gender: { type: 'string', enum: ['Male', 'Female', 'Other'] }, guardian_phone: { type: 'string' }, parent_email: { type: 'string', format: 'email' }, date_of_birth: { type: 'string', format: 'date' } } } }  }},
+          responses: {
+            201: { description: 'Student created', content: { 'application/json': { schema: { $ref: '#/components/schemas/Student' } } } },
+            400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
+            401: { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+      '/api/v1/students/{id}': {
+        put: {
+          summary: 'Update an existing student',
+          operationId: 'updateStudent',
+          tags: ['Students'],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' }, description: 'Student ID' }],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' }, class: { type: 'string' }, stream: { type: 'string' }, gender: { type: 'string' }, guardian_phone: { type: 'string' }, parent_email: { type: 'string', format: 'email' }, status: { type: 'string' } } } }  }},
+          responses: {
+            200: { description: 'Student updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/Student' } } } },
+            404: { description: 'Student not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        },
+        delete: {
+          summary: 'Delete a student',
+          operationId: 'deleteStudent',
+          tags: ['Students'],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' }, description: 'Student ID' }],
+          responses: {
+            200: { description: 'Student deleted', content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string', example: 'Student deleted successfully' } } } }  }},
+            404: { description: 'Student not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+      '/api/v1/students/export': { get: { summary: 'Export students CSV', operationId: 'exportStudents', tags: ['Students'], responses: { 200: { description: 'CSV file' } } } },
+      '/api/v1/students/import': { post: { summary: 'Import students CSV', operationId: 'importStudents', tags: ['Students'], responses: { 200: { description: 'Import results' } } } },
+
+      // ── Fees ──────────────────────────────────────────────────
+      '/api/v1/fees': {
+        get: {
+          summary: 'List all fee records with pagination and filters',
+          operationId: 'listFees',
+          tags: ['Fees'],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 }, description: 'Page number' },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 }, description: 'Items per page' },
+            { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Search by student name' },
+            { name: 'status', in: 'query', schema: { type: 'string', enum: ['paid', 'partial', 'unpaid', 'overdue'] }, description: 'Filter by payment status' },
+            { name: 'term', in: 'query', schema: { type: 'string' }, description: 'Filter by term' }
+          ],
+          responses: {
+            200: { description: 'Paginated list of fee records', content: { 'application/json': { schema: { allOf: [{ $ref: '#/components/schemas/PaginatedResponse' }, { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/Fee' } } } }] } } } },
+            401: { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        },
+        post: {
+          summary: 'Record a fee payment',
+          operationId: 'recordFeePayment',
+          tags: ['Fees'],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['student_id', 'amount'], properties: { student_id: { type: 'integer', description: 'Student to record payment for' }, amount: { type: 'number', description: 'Payment amount' }, method: { type: 'string', enum: ['cash', 'mobile_money', 'card', 'bank_transfer'], description: 'Payment method' }, reference: { type: 'string', description: 'Transaction reference' }, term: { type: 'string' }, notes: { type: 'string' } } } }  }},
+          responses: {
+            201: { description: 'Payment recorded', content: { 'application/json': { schema: { $ref: '#/components/schemas/Fee' } } } },
+            400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+      '/api/v1/fees/pay': { post: { summary: 'Record fee payment (legacy)', operationId: 'payFee', tags: ['Fees'], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { student_id: { type: 'integer' }, amount: { type: 'number' }, method: { type: 'string' } } } } }, responses: { 200: { description: 'Payment recorded' } } }  }},
+
+      // ── Attendance ────────────────────────────────────────────
+      '/api/v1/attendance': {
+        get: {
+          summary: 'List attendance records',
+          operationId: 'listAttendance',
+          tags: ['Students'],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+            { name: 'date', in: 'query', schema: { type: 'string', format: 'date' }, description: 'Filter by specific date' },
+            { name: 'class', in: 'query', schema: { type: 'string' }, description: 'Filter by class' }
+          ],
+          responses: {
+            200: { description: 'Paginated attendance records', content: { 'application/json': { schema: { allOf: [{ $ref: '#/components/schemas/PaginatedResponse' }, { type: 'object', properties: { data: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, student_id: { type: 'integer' }, student_name: { type: 'string' }, date: { type: 'string', format: 'date' }, status: { type: 'string', enum: ['present', 'absent', 'late'] }, class: { type: 'string' } } } } } }] } } } }
+          }
+        },
+        post: {
+          summary: 'Record attendance for students',
+          operationId: 'recordAttendance',
+          tags: ['Students'],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['records'], properties: { date: { type: 'string', format: 'date' }, class: { type: 'string' }, records: { type: 'array', items: { type: 'object', required: ['student_id', 'status'], properties: { student_id: { type: 'integer' }, status: { type: 'string', enum: ['present', 'absent', 'late'] } } } } } } }  }},
+          responses: {
+            201: { description: 'Attendance recorded' },
+            400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+
+      // ── Members ───────────────────────────────────────────────
+      '/api/v1/members': {
+        get: {
+          summary: 'List all members with pagination and search',
+          operationId: 'listMembers',
+          tags: ['Members'],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+            { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Search by name or email' },
+            { name: 'status', in: 'query', schema: { type: 'string', enum: ['active', 'inactive'] } }
+          ],
+          responses: {
+            200: { description: 'Paginated list of members', content: { 'application/json': { schema: { allOf: [{ $ref: '#/components/schemas/PaginatedResponse' }, { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/Member' } } } }] } } } },
+            401: { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        },
+        post: {
+          summary: 'Create a new member',
+          operationId: 'createMember',
+          tags: ['Members'],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, email: { type: 'string', format: 'email' }, phone: { type: 'string' }, membership_type: { type: 'string' } } } }  }},
+          responses: {
+            201: { description: 'Member created', content: { 'application/json': { schema: { $ref: '#/components/schemas/Member' } } } },
+            400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+      '/api/v1/members/{id}': {
+        delete: {
+          summary: 'Delete a member',
+          operationId: 'deleteMember',
+          tags: ['Members'],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+          responses: {
+            200: { description: 'Member deleted' },
+            404: { description: 'Member not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+      '/api/v1/members/export': { get: { summary: 'Export members CSV', operationId: 'exportMembers', tags: ['Members'], responses: { 200: { description: 'CSV file' } } } },
+
+      // ── Donations ─────────────────────────────────────────────
+      '/api/v1/donations': {
+        get: {
+          summary: 'List all donations with pagination and filters',
+          operationId: 'listDonations',
+          tags: ['Members'],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+            { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Search by donor name' },
+            { name: 'status', in: 'query', schema: { type: 'string', enum: ['completed', 'pending', 'failed'] } }
+          ],
+          responses: {
+            200: { description: 'Paginated list of donations', content: { 'application/json': { schema: { allOf: [{ $ref: '#/components/schemas/PaginatedResponse' }, { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/Donation' } } } }] } } } }
+          }
+        },
+        post: {
+          summary: 'Record a new donation',
+          operationId: 'recordDonation',
+          tags: ['Members'],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['amount'], properties: { donor_name: { type: 'string' }, donor_email: { type: 'string', format: 'email' }, amount: { type: 'number' }, currency: { type: 'string', default: 'UGX' }, method: { type: 'string', enum: ['mobile_money', 'card', 'bank_transfer', 'cash'] }, purpose: { type: 'string' } } } }  }},
+          responses: {
+            201: { description: 'Donation recorded', content: { 'application/json': { schema: { $ref: '#/components/schemas/Donation' } } } },
+            400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+
+      // ── Inventory ─────────────────────────────────────────────
+      '/api/v1/inventory': {
+        get: {
+          summary: 'List all inventory items with pagination and search',
+          operationId: 'listInventory',
+          tags: ['Inventory'],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+            { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Search by item name' },
+            { name: 'category', in: 'query', schema: { type: 'string' }, description: 'Filter by category' },
+            { name: 'low_stock', in: 'query', schema: { type: 'boolean', default: false }, description: 'Show only low-stock items' }
+          ],
+          responses: {
+            200: { description: 'Paginated inventory list', content: { 'application/json': { schema: { allOf: [{ $ref: '#/components/schemas/PaginatedResponse' }, { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/Inventory' } } } }] } } } },
+            401: { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        },
+        post: {
+          summary: 'Add a new inventory item',
+          operationId: 'addInventoryItem',
+          tags: ['Inventory'],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name', 'quantity', 'unit_price'], properties: { name: { type: 'string' }, category: { type: 'string' }, quantity: { type: 'integer' }, unit_price: { type: 'number' }, selling_price: { type: 'number' }, low_stock_alert: { type: 'integer' }, description: { type: 'string' } } } }  }},
+          responses: {
+            201: { description: 'Item added', content: { 'application/json': { schema: { $ref: '#/components/schemas/Inventory' } } } },
+            400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+      '/api/v1/inventory/{id}': {
+        put: {
+          summary: 'Update an inventory item',
+          operationId: 'updateInventoryItem',
+          tags: ['Inventory'],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' }, category: { type: 'string' }, quantity: { type: 'integer' }, unit_price: { type: 'number' }, selling_price: { type: 'number' }, low_stock_alert: { type: 'integer' }, description: { type: 'string' } } } }  }},
+          responses: {
+            200: { description: 'Item updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/Inventory' } } } },
+            404: { description: 'Item not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        },
+        delete: {
+          summary: 'Delete an inventory item',
+          operationId: 'deleteInventoryItem',
+          tags: ['Inventory'],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+          responses: {
+            200: { description: 'Item deleted' },
+            404: { description: 'Item not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+      '/api/v1/inventory/export': { get: { summary: 'Export inventory CSV', operationId: 'exportInventory', tags: ['Inventory'], responses: { 200: { description: 'CSV file' } } } },
+
+      // ── Sales ─────────────────────────────────────────────────
+      '/api/v1/sales': {
+        get: {
+          summary: 'List all sales records with pagination',
+          operationId: 'listSales',
+          tags: ['Inventory'],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+            { name: 'search', in: 'query', schema: { type: 'string' } },
+            { name: 'payment_method', in: 'query', schema: { type: 'string', enum: ['cash', 'mobile_money', 'card'] } },
+            { name: 'date_from', in: 'query', schema: { type: 'string', format: 'date' } },
+            { name: 'date_to', in: 'query', schema: { type: 'string', format: 'date' } }
+          ],
+          responses: {
+            200: { description: 'Paginated sales list', content: { 'application/json': { schema: { allOf: [{ $ref: '#/components/schemas/PaginatedResponse' }, { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/Sale' } } } }] } } } }
+          }
+        },
+        post: {
+          summary: 'Create a new sale',
+          operationId: 'createSale',
+          tags: ['Inventory'],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['item_id', 'quantity'], properties: { item_id: { type: 'integer' }, quantity: { type: 'integer' }, customer_name: { type: 'string' }, payment_method: { type: 'string', enum: ['cash', 'mobile_money', 'card'] } } } }  }},
+          responses: {
+            201: { description: 'Sale created', content: { 'application/json': { schema: { $ref: '#/components/schemas/Sale' } } } },
+            400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+
+      // ── Invoices ──────────────────────────────────────────────
+      '/api/v1/invoices': {
+        get: {
+          summary: 'List all invoices with pagination and status filters',
+          operationId: 'listInvoices',
+          tags: ['Billing'],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+            { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Search by invoice number or student name' },
+            { name: 'status', in: 'query', schema: { type: 'string', enum: ['paid', 'partial', 'unpaid', 'cancelled'] } }
+          ],
+          responses: {
+            200: { description: 'Paginated invoice list', content: { 'application/json': { schema: { allOf: [{ $ref: '#/components/schemas/PaginatedResponse' }, { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/Invoice' } } } }] } } } }
+          }
+        }
+      },
+
+      // ── Events ────────────────────────────────────────────────
+      '/api/v1/events': {
+        get: {
+          summary: 'List all events with pagination and filters',
+          operationId: 'listEvents',
+          tags: ['Members'],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+            { name: 'search', in: 'query', schema: { type: 'string' } },
+            { name: 'status', in: 'query', schema: { type: 'string', enum: ['upcoming', 'ongoing', 'completed', 'cancelled'] } }
+          ],
+          responses: {
+            200: { description: 'Paginated event list', content: { 'application/json': { schema: { allOf: [{ $ref: '#/components/schemas/PaginatedResponse' }, { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/Event' } } } }] } } } }
+          }
+        },
+        post: {
+          summary: 'Create a new event',
+          operationId: 'createEvent',
+          tags: ['Members'],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['title', 'start_date'], properties: { title: { type: 'string' }, description: { type: 'string' }, start_date: { type: 'string', format: 'date-time' }, end_date: { type: 'string', format: 'date-time' }, location: { type: 'string' }, organizer: { type: 'string' } } } }  }},
+          responses: {
+            201: { description: 'Event created', content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } } },
+            400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+
+      // ── Billing ───────────────────────────────────────────────
+      '/api/v1/billing/subscribe': {
+        post: {
+          summary: 'Subscribe to a billing plan',
+          operationId: 'subscribeToPlan',
+          tags: ['Billing'],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['plan'], properties: { plan: { type: 'string', enum: ['starter', 'professional', 'enterprise'], description: 'Plan to subscribe to' }, billing_cycle: { type: 'string', enum: ['monthly', 'yearly'], default: 'monthly' }, payment_method: { type: 'string', enum: ['mobile_money', 'card', 'bank_transfer'] } } } }  }},
+          responses: {
+            201: { description: 'Subscription created', content: { 'application/json': { schema: { $ref: '#/components/schemas/Subscription' } } } },
+            400: { description: 'Invalid plan or payment error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+      '/api/v1/billing/invoices': {
+        get: {
+          summary: 'List billing/subscription invoices',
+          operationId: 'listBillingInvoices',
+          tags: ['Billing'],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+            { name: 'status', in: 'query', schema: { type: 'string', enum: ['paid', 'pending', 'failed'] } }
+          ],
+          responses: {
+            200: { description: 'Paginated billing invoices', content: { 'application/json': { schema: { allOf: [{ $ref: '#/components/schemas/PaginatedResponse' }, { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/Invoice' } } } }] } } } }
+          }
+        }
+      },
+
+      // ── Webhooks ──────────────────────────────────────────────
+      '/api/v1/webhooks': {
+        get: {
+          summary: 'List all webhook configurations',
+          operationId: 'listWebhooks',
+          tags: ['Webhooks'],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } }
+          ],
+          responses: {
+            200: { description: 'Paginated webhook list', content: { 'application/json': { schema: { allOf: [{ $ref: '#/components/schemas/PaginatedResponse' }, { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/Webhook' } } } }] } } } }
+          }
+        },
+        post: {
+          summary: 'Create a new webhook configuration',
+          operationId: 'createWebhook',
+          tags: ['Webhooks'],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['url', 'events'], properties: { url: { type: 'string', format: 'uri' }, events: { type: 'array', items: { type: 'string' }, description: 'Event types to subscribe to (e.g. payment.received, student.created)' }, active: { type: 'boolean', default: true } } } }  }},
+          responses: {
+            201: { description: 'Webhook created', content: { 'application/json': { schema: { $ref: '#/components/schemas/Webhook' } } } },
+            400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+      '/api/v1/webhooks/{id}': {
+        delete: {
+          summary: 'Delete a webhook configuration',
+          operationId: 'deleteWebhook',
+          tags: ['Webhooks'],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+          responses: {
+            200: { description: 'Webhook deleted' },
+            404: { description: 'Webhook not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+
+      // ── Users / Team ──────────────────────────────────────────
+      '/api/v1/users': {
+        get: {
+          summary: 'List team members',
+          operationId: 'listTeamUsers',
+          tags: ['System'],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+            { name: 'role', in: 'query', schema: { type: 'string', enum: ['admin', 'manager', 'staff', 'viewer'] } }
+          ],
+          responses: {
+            200: { description: 'Paginated team user list', content: { 'application/json': { schema: { allOf: [{ $ref: '#/components/schemas/PaginatedResponse' }, { type: 'object', properties: { data: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string', format: 'email' }, role: { type: 'string' }, status: { type: 'string' }, created_at: { type: 'string', format: 'date-time' } } } } } }] } } } }
+          }
+        },
+        post: {
+          summary: 'Invite a new team member',
+          operationId: 'inviteTeamUser',
+          tags: ['System'],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['email', 'role'], properties: { email: { type: 'string', format: 'email' }, role: { type: 'string', enum: ['admin', 'manager', 'staff', 'viewer'] }, name: { type: 'string' } } } }  }},
+          responses: {
+            201: { description: 'Invitation sent' },
+            400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+
+      // ── Reports ───────────────────────────────────────────────
+      '/api/v1/reports/summary': {
+        get: {
+          summary: 'Get dashboard summary statistics',
+          operationId: 'getDashboardSummary',
+          tags: ['System'],
+          responses: {
+            200: { description: 'Dashboard summary data', content: { 'application/json': { schema: { type: 'object', properties: { total_students: { type: 'integer' }, total_members: { type: 'integer' }, total_revenue: { type: 'number' }, fees_collected: { type: 'number' }, outstanding_balance: { type: 'number' }, total_sales: { type: 'number' }, inventory_value: { type: 'number' }, active_subscriptions: { type: 'integer' }, recent_activity: { type: 'array', items: { type: 'object', properties: { type: { type: 'string' }, description: { type: 'string' }, timestamp: { type: 'string', format: 'date-time' } } } } } } } } }
+          }
+        }
+      },
+
+      // ── Automations ───────────────────────────────────────────
+      '/api/v1/automations': {
+        get: {
+          summary: 'List all automation rules',
+          operationId: 'listAutomations',
+          tags: ['System'],
+          parameters: [
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+            { name: 'active', in: 'query', schema: { type: 'boolean' }, description: 'Filter by active status' }
+          ],
+          responses: {
+            200: { description: 'Paginated automation rules', content: { 'application/json': { schema: { allOf: [{ $ref: '#/components/schemas/PaginatedResponse' }, { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/AutomationRule' } } } }] } } } }
+          }
+        },
+        post: {
+          summary: 'Create a new automation rule',
+          operationId: 'createAutomation',
+          tags: ['System'],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name', 'trigger', 'action'], properties: { name: { type: 'string' }, trigger: { type: 'string', description: 'Event trigger (e.g. fee_overdue, student_absent, payment_received)' }, condition: { type: 'string', description: 'Optional condition expression' }, action: { type: 'string', description: 'Action to perform (e.g. send_sms, send_email, create_invoice)' }, active: { type: 'boolean', default: true } } } }  }},
+          responses: {
+            201: { description: 'Automation created', content: { 'application/json': { schema: { $ref: '#/components/schemas/AutomationRule' } } } },
+            400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+
+      // ── Health ────────────────────────────────────────────────
+      '/health': {
+        get: {
+          summary: 'Health check endpoint',
+          operationId: 'healthCheck',
+          tags: ['System'],
+          responses: {
+            200: { description: 'System is healthy', content: { 'application/json': { schema: { $ref: '#/components/schemas/HealthResponse' } } } },
+            503: { description: 'Service unavailable', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } }
+          }
+        }
+      },
+
+      // ── Campaigns (legacy) ────────────────────────────────────
+      '/api/v1/campaigns': { post: { summary: 'Create campaign', operationId: 'createCampaign', tags: ['Members'], responses: { 200: { description: 'OK' } } } }
     }
   });
 });
@@ -13290,7 +14077,7 @@ app.post('/events/:id/tickets/sell', requireAuth, requireNotBanned, ah(async (re
   const amount = ticket.price;
   await pool.query('INSERT INTO ticket_sales(tenant_id,event_id,ticket_type,buyer_name,buyer_phone,buyer_email,amount,payment_method,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, req.params.id, ticket_type, buyer_name, buyer_phone, buyer_email, amount, payment_method, 'confirmed']);
   await pool.query('UPDATE event_tickets SET quantity_sold=quantity_sold+1 WHERE id=$1', [ticket.id]);
-  if (buyer_email) { sendEmail(buyer_email, `Ticket Confirmed - ${ticket_type}`, `<p>Hi ${buyer_name}, your ${ticket_type} ticket is confirmed. Amount: UGX ${amount.toLocaleString()}. Thank you!</p>`); }
+  if (buyer_email) { sendEmail(buyer_email, `Ticket Confirmed - ${ticket_type}`, renderEmailTemplate(`Ticket Confirmed - ${ticket_type}`, `<p>Hi ${escHtml(buyer_name)},</p><p>Your <strong>${escHtml(ticket_type)}</strong> ticket has been confirmed!</p><p><strong>Amount:</strong> UGX ${amount.toLocaleString()}</p><p>We look forward to seeing you at the event. Please keep this email as your ticket confirmation.</p><p>Thank you for your purchase!</p>`)); }
   res.redirect(`/events/${req.params.id}/tickets`);
 }));
 
@@ -14151,7 +14938,7 @@ app.post('/donate/:campaignId/submit', ah(async (req, res) => {
   await pool.query('UPDATE campaigns SET raised=raised+$1 WHERE id=$2', [amount, campaign.id]);
   await fireWebhook(campaign.tenant_id, 'donation.received', { donor: donor_name, amount, campaign: campaign.title });
   await evaluateAutomations(campaign.tenant_id, 'donation.received', { amount, donor: donor_name });
-  if (donor_email) sendEmail(donor_email, 'Thank you for your donation!', `<p>Hi ${donor_name}, thank you for donating UGX ${Number(amount).toLocaleString()} to "${campaign.title}".</p>`);
+  if (donor_email) sendEmail(donor_email, 'Thank you for your donation!', renderEmailTemplate('Thank you for your donation!', `<p>Hi ${escHtml(donor_name)},</p><p>Thank you so much for your generous donation of <strong>UGX ${Number(amount).toLocaleString()}</strong> to <strong>"${escHtml(campaign.title)}"</strong>.</p><p>Your contribution makes a real difference. We truly appreciate your support!</p>`));
   res.send(renderPage('Thank You!', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h1>Thank You!</h1><p>Your donation has been recorded.</p><a href="/" class="btn">Home</a></div>', null));
 }));
 
@@ -14928,24 +15715,77 @@ app.post('/school/uneb/import', requireAuth, requireNotBanned, ah(async (req, re
 }));
 
 // === v6.0: NIRA VERIFICATION ===
-app.get('/school/nira', requireAuth, requireNotBanned, (req, res) => {
+// Create nira_verifications table
+pool.query(`CREATE TABLE IF NOT EXISTS nira_verifications (
+  id SERIAL PRIMARY KEY,
+  tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+  student_id INTEGER,
+  nin TEXT NOT NULL,
+  student_name TEXT NOT NULL,
+  status TEXT DEFAULT 'pending',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)`).catch(e => console.error('[DB Error] nira_verifications table:', e.message));
+
+app.get('/school/nira', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const verifications = (await pool.query('SELECT * FROM nira_verifications WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [t])).rows;
+  const pendingCount = verifications.filter(v => v.status === 'pending').length;
+  const verifiedCount = verifications.filter(v => v.status === 'verified').length;
   res.send(renderPage('NIRA Verification', `
-    <div class="hero"><h1>NIRA Verification</h1><p>Verify student National IDs</p></div>
-    <div class="card" style="max-width:600px;margin:0 auto">
-      <h2>Verify NIN</h2>
-      <form method="POST" action="/school/nira/verify">
-        <input name="nin" placeholder="National Identification Number (NIN)" required>
-        <input name="student_name" placeholder="Student Name" required>
-        <button class="btn" style="width:100%">Verify</button>
-      </form>
-      <p class="muted" style="margin-top:10px">NIRA API integration requires government credentials. Contact support to enable.</p>
+    <div class="hero" style="background:linear-gradient(135deg,#0369a1,#0ea5e9)"><h1>NIRA Verification</h1><p>Verify student National IDs</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${verifications.length}</div><div>Total Requests</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${pendingCount}</div><div>Pending</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${verifiedCount}</div><div>Verified</div></div>
+    </div>
+    <div class="grid">
+      <div class="card" style="max-width:600px;margin:0 auto">
+        <h2>New Verification Request</h2>
+        <form method="POST" action="/school/nira/verify">
+          <input name="nin" placeholder="National Identification Number (NIN)" required>
+          <input name="student_name" placeholder="Student Name" required>
+          <select name="student_id">
+            <option value="">-- Select Student (optional) --</option>
+            ${(await pool.query('SELECT id, name, admission_no FROM students WHERE tenant_id=$1 ORDER BY name LIMIT 200', [t])).rows.map(s => `<option value="${s.id}">${esc(s.admission_no)} - ${esc(s.name)}</option>`).join('')}
+          </select>
+          <button class="btn btn-green" style="width:100%">Submit Verification Request</button>
+        </form>
+        <p class="muted" style="margin-top:10px">NIRA API integration requires government credentials. Requests are logged and can be verified once API access is granted.</p>
+      </div>
+      <div class="card" style="max-width:700px">
+        <h2>Verification History</h2>
+        ${verifications.length > 0 ? `<div style="overflow-x:auto"><table>
+          <tr><th>NIN</th><th>Student Name</th><th>Status</th><th>Date</th></tr>
+          ${verifications.map(v => `<tr>
+            <td style="font-family:monospace;font-size:12px">${esc(v.nin)}</td>
+            <td>${esc(v.student_name)}</td>
+            <td><span class="tag" style="background:${v.status === 'verified' ? '#d1fae5;color:#065f46' : v.status === 'failed' ? '#fee2e2;color:#991b1b' : '#fef3c7;color:#92400e'}">${esc(v.status)}</span></td>
+            <td style="font-size:12px">${new Date(v.created_at).toLocaleString()}</td>
+          </tr>`).join('')}
+        </table></div>` : '<p class="muted">No verification requests yet.</p>'}
+      </div>
     </div>
   `, req.session.user));
-});
+}));
 
 app.post('/school/nira/verify', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const { nin, student_name } = req.body;
-  res.send(renderPage('NIRA Verification', `<div class="card"><div class="alert alert-info"><h2>Verification Pending</h2><p>NIN: ${esc(nin)}</p><p>Name: ${esc(student_name)}</p><p>NIRA API integration requires government-approved credentials. This feature will be activated once API access is granted.</p></div><a href="/school/nira" class="btn">Back</a></div>`, req.session.user));
+  const { nin, student_name, student_id } = req.body;
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO nira_verifications(tenant_id,student_id,nin,student_name,status) VALUES($1,$2,$3,$4,$5)', [t, student_id || null, nin, student_name, 'pending']);
+  await audit(req.session.user.email, 'nira_verification', `Submitted NIN verification for ${student_name} (${nin})`, t, req);
+  res.send(renderPage('NIRA Verification', `
+    <div class="card" style="max-width:600px;margin:40px auto;text-align:center">
+      <div style="width:70px;height:70px;border-radius:50%;background:#f59e0b;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:36px;color:white">&#9203;</div>
+      <h2 style="color:#0369a1">Verification Request Submitted</h2>
+      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:16px;margin:16px 0;text-align:left">
+        <p><strong>NIN:</strong> ${esc(nin)}</p>
+        <p><strong>Student:</strong> ${esc(student_name)}</p>
+        <p><strong>Status:</strong> <span class="tag" style="background:#fef3c7;color:#92400e">Pending Verification</span></p>
+      </div>
+      <p class="muted">Your verification request has been logged. Once NIRA API access is granted, this will be verified automatically. You can track all requests from the NIRA Verification page.</p>
+      <a href="/school/nira" class="btn" style="margin-top:15px">View All Requests</a>
+    </div>
+  `, req.session.user));
 }));
 
 // === v6.0: BANK RECONCILIATION ===
@@ -20703,7 +21543,7 @@ app.post('/org/members/bulk/action', requireAuth, requireNotBanned, ah(async (re
   if (bulk_action === 'delete') {
     let deleted = 0;
     for (const id of ids) {
-      try { await pool.query('DELETE FROM members WHERE id=$1 AND tenant_id=$2', [id, t]); deleted++; } catch(e) {}
+      try { await pool.query('DELETE FROM members WHERE id=$1 AND tenant_id=$2', [id, t]); deleted++; } catch(e) { console.error('[BulkAction] Member delete failed:', e.message); }
     }
     resultMsg = `Deleted ${deleted} member(s)`;
   } else if (bulk_action === 'assign_role') {
@@ -20715,7 +21555,7 @@ app.post('/org/members/bulk/action', requireAuth, requireNotBanned, ah(async (re
     const members = (await pool.query('SELECT email, name FROM members WHERE id=ANY($1) AND tenant_id=$2 AND email IS NOT NULL', [ids, t])).rows;
     let sent = 0;
     for (const m of members) {
-      try { await sendEmail(t, m.email, email_subject || 'Organization Update', email_body || ''); sent++; } catch(e) {}
+      try { await sendEmail(t, m.email, email_subject || 'Organization Update', email_body || ''); sent++; } catch(e) { console.error('[BulkAction] Email send failed:', e.message); }
     }
     resultMsg = `Sent email to ${sent} member(s) (${members.length} have email, ${ids.length - members.length} have no email)`;
   } else if (bulk_action === 'add_to_committee') {
@@ -30043,9 +30883,44 @@ app.post('/pay/dpo/initiate', requireAuth, ah(async (req, res) => {
     return res.redirect(checkoutUrl);
   }
   res.send(renderPage('Card Payment', `
-    <div class="card" style="max-width:500px;margin:40px auto">
-      <div class="alert alert-info"><h2>Card Payments Coming Soon</h2><p>DPO is not yet configured for card payments. Please use MTN MoMo or Airtel Money.</p></div>
-      <a href="/billing" class="btn">Back to Billing</a>
+    <div class="card" style="max-width:520px;margin:40px auto">
+      <div style="text-align:center;margin-bottom:20px">
+        <h2>Pay with Card</h2>
+        <p class="muted">Amount: UGX ${(amt || 0).toLocaleString()}</p>
+      </div>
+      <div style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:14px;margin-bottom:15px">
+        <p style="margin:0;font-size:13px;color:#92400e"><strong>DPO is not configured.</strong> Card payments require DPO (Direct Pay Online) integration. Please use MTN MoMo or Airtel Money below, or contact support to enable card payments.</p>
+      </div>
+      <form method="POST" action="${DPO_BASE}/API/v6/PayToken" id="dpoCardForm" style="display:none">
+        <div style="margin-bottom:12px">
+          <label style="font-size:13px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Card Number</label>
+          <input name="card_number" placeholder="4242 4242 4242 4242" maxlength="19" required style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:8px;font-size:16px;letter-spacing:1px">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div>
+            <label style="font-size:13px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Expiry Date</label>
+            <input name="card_expiry" placeholder="MM/YY" maxlength="5" required style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:8px;font-size:16px">
+          </div>
+          <div>
+            <label style="font-size:13px;font-weight:700;color:#374151;display:block;margin-bottom:4px">CVV</label>
+            <input name="card_cvv" placeholder="123" maxlength="4" type="password" required style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:8px;font-size:16px">
+          </div>
+        </div>
+        <div style="margin-bottom:15px">
+          <label style="font-size:13px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Cardholder Name</label>
+          <input name="card_name" placeholder="Name on card" required style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px">
+        </div>
+        <button type="submit" class="btn btn-green" style="width:100%;padding:14px;font-size:16px;font-weight:700" disabled>Pay UGX ${(amt || 0).toLocaleString()}</button>
+        <p class="muted" style="text-align:center;margin-top:8px;font-size:11px">Secured by DPO (Direct Pay Online)</p>
+      </form>
+      <div style="margin-top:15px;text-align:center">
+        <p class="muted" style="font-size:13px">Or pay with mobile money:</p>
+        <div style="display:flex;gap:10px;justify-content:center;margin-top:8px">
+          <a href="/billing" class="btn" style="background:linear-gradient(135deg,#ff6b00,#ff9500);color:white">MTN MoMo</a>
+          <a href="/billing" class="btn" style="background:linear-gradient(135deg,#ED1C24,#FF4D4D);color:white">Airtel Money</a>
+        </div>
+      </div>
+      <a href="/billing" class="btn btn-sm" style="margin-top:15px;display:block;text-align:center">&larr; Back to Billing</a>
     </div>
   `, req.session.user));
 }));
