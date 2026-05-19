@@ -24,6 +24,7 @@ if (!process.env.NODE_NO_WARNINGS) process.env.NODE_NO_WARNINGS = '1';
 // TLS verification is handled per-connection in the Pool config (ssl: { rejectUnauthorized: false }).
 process.env.LOCALSTORAGE_FILE = process.env.LOCALSTORAGE_FILE || '/tmp/ssewasswa-localstorage.json';
 const express = require('express');
+const cookieParser = require('cookie-parser');
 const session = require('express-session');
 // connect-pg-simple for persistent sessions (optional — falls back to memory store)
 let pgSession;
@@ -231,6 +232,41 @@ const tenantQuery = async (reqOrTenantId, sql, params = []) => {
   }
 };
 
+// === Tenant Isolation Query Auditor (Development) ===
+// Wraps pool.query to detect queries that access tenant-scoped tables without tenant_id filter
+// This is a DEVELOPMENT-TIME check — logs warnings, does not block queries.
+if (process.env.NODE_ENV !== 'production' || process.env.AUDIT_TENANT_QUERIES === 'true') {
+  const TENANT_SCOPED_TABLES = new Set([
+    'students', 'fees', 'users', 'members', 'patients', 'appointments', 'invoices',
+    'payments', 'transactions', 'events', 'notifications', 'tasks', 'messages',
+    'attendance', 'grades', 'assignments', 'submissions', 'courses', 'subjects',
+    'timetable', 'library_books', 'staff', 'departments', 'exams', 'results',
+    'donations', 'campaigns', 'tithes', 'offerings', 'sermons', 'prayer_requests',
+    'products', 'orders', 'customers', 'inventory', 'budgets', 'projects',
+    'documents', 'reports', 'certificates', 'clubs', 'teams'
+  ]);
+
+  const originalQuery = pool.query.bind(pool);
+  pool.query = function(text, params) {
+    if (typeof text === 'string') {
+      const lowerText = text.toLowerCase();
+      for (const table of TENANT_SCOPED_TABLES) {
+        // Check if query references a tenant-scoped table
+        if (lowerText.includes('from ' + table) || lowerText.includes('into ' + table) ||
+            lowerText.includes('update ' + table) || lowerText.includes('delete from ' + table)) {
+          // Check if tenant_id filter is present
+          if (!lowerText.includes('tenant_id')) {
+            console.warn('[TENANT-ISOLATION] Query without tenant_id filter:', text.substring(0, 200));
+          }
+          break;
+        }
+      }
+    }
+    return originalQuery(text, params);
+  };
+  console.log('[Security] Tenant isolation query auditor active');
+}
+
 // === SECURITY ===
 app.set('trust proxy', 1);
 
@@ -258,9 +294,12 @@ app.use(helmet({
       imgSrc: ["'self'", "data:", "blob:", "https://res.cloudinary.com", "https://*.googleusercontent.com"],
       connectSrc: ["'self'", "ws:", "wss:", "https://api.flutterwave.com", "https://momodeveloper.mtn.com", "https://openapiuat.airtel.africa", "https://secure.3gdirectpay.com", process.env.BASE_URL || 'https://ssewasswa.onrender.com'],
       frameSrc: ["'self'", "https://checkout.flutterwave.com", "https://secure.3gdirectpay.com"],
+      objectSrc: ["'none'"],
     }
   },
   crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: { policy: 'same-origin' },
+  crossOriginResourcePolicy: { policy: 'same-site' },
   permissionsPolicy: {
     features: {
       geolocation: ["'none'"],
@@ -276,6 +315,8 @@ app.use(helmet({
 }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
+// === COOKIE PARSER (needed for double-submit CSRF cookie pattern) ===
+app.use(cookieParser());
 // === SERVICE WORKER ROUTE — Must be BEFORE session & express.static to set proper headers ===
 app.get('/sw.js', (req, res) => {
   const _path = require('path');
@@ -337,14 +378,16 @@ app.get('/manifest.json', (req, res) => {
 });
 app.use(express.static('public'));
 
-// === CSRF PROTECTION (Phase 2 - Full Enforcement) ===
+// === CSRF PROTECTION (Double-Submit Cookie Pattern) ===
+// Works with Render multi-instance deployment — no server-side token storage needed.
+// The token is set as a cookie AND injected into forms/headers. On POST/PUT/DELETE,
+// we verify the cookie value matches the submitted value.
 if (process.env.NODE_ENV === 'production' && !process.env.CSRF_SECRET && !process.env.SESSION_SECRET) {
   console.error('FATAL: CSRF_SECRET or SESSION_SECRET must be set in production');
   process.exit(1);
 }
 const CSRF_SECRET = process.env.CSRF_SECRET || process.env.SESSION_SECRET;
 const generateCSRFToken = () => crypto.randomBytes(32).toString('hex');
-const hashCSRFToken = (token) => crypto.createHmac('sha256', CSRF_SECRET).update(token).digest('hex');
 
 // === HEALTH CHECK (before session middleware — avoids DB connection on ping) ===
 app.get('/ping', (req, res) => {
@@ -413,22 +456,30 @@ app.get('/test-render', (req, res) => {
   res.send(renderPageLite('Test', '<div class="card"><h2>Render OK</h2></div>', null, req));
 });
 
-// Generate CSRF token and store in session (AFTER session middleware)
+// Set CSRF cookie on every response (if not already set)
 app.use((req, res, next) => {
-  if (!req.session) return next();
-  if (!req.session.csrfToken) {
-    req.session.csrfToken = generateCSRFToken();
+  if (!req.cookies || !req.cookies['CSRF-TOKEN']) {
+    const newToken = generateCSRFToken();
+    res.cookie('CSRF-TOKEN', newToken, {
+      httpOnly: false,  // Must be readable by JavaScript for fetch headers
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      path: '/'
+    });
+    // Set csrfToken on req for renderPage (use the newly generated token,
+    // since the cookie won't be readable from req.cookies until the next request)
+    req.csrfToken = newToken;
+  } else {
+    // Make csrfToken available on req for renderPage (read from existing cookie)
+    req.csrfToken = req.cookies['CSRF-TOKEN'];
   }
-  res.locals = res.locals || {};
-  res.locals.csrfToken = req.session.csrfToken;
-  // Make csrfToken available on req for renderPage
-  req.csrfToken = req.session.csrfToken;
   next();
 });
 
-// === CSRF ENFORCEMENT (Phase 1 Security Fix) ===
-// CSRF tokens are generated in session and injected into forms by renderPage.
-// Now we validate them on all state-changing requests (POST/PUT/DELETE).
+// === CSRF VERIFICATION (Double-Submit Cookie Pattern) ===
+// CSRF tokens are set as cookies AND injected into forms/headers by renderPage + client-side JS.
+// On state-changing requests, verify the cookie value matches the submitted value.
 // Safe methods (GET/HEAD/OPTIONS) and API webhooks are excluded.
 const CSRF_EXEMPT_PATHS = [
   '/api/webhook/', '/ipn/', '/pesapal/ipn', '/flutterwave/webhook',
@@ -437,32 +488,55 @@ const CSRF_EXEMPT_PATHS = [
 ];
 const isCSRFExempt = (path) => CSRF_EXEMPT_PATHS.some(p => path.includes(p));
 
-app.use((req, res, next) => {
-  // Ensure csrfToken exists in session for form injection
-  if (req.session && !req.session.csrfToken) {
-    req.session.csrfToken = generateCSRFToken();
+const verifyCSRF = (req, res, next) => {
+  // Skip for safe methods
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+
+  // Skip for exempt paths (webhooks, OAuth callbacks, public APIs)
+  if (isCSRFExempt(req.path)) return next();
+
+  // Skip for API routes that use header-based auth (Bearer tokens)
+  if (req.path.startsWith('/api/') && req.headers['authorization']) return next();
+
+  // Skip for webhook endpoints (external services)
+  const webhookPaths = ['/webhook', '/stripe/webhook', '/flutterwave/webhook', '/mtn/callback', '/airtel/callback'];
+  if (webhookPaths.some(p => req.path.startsWith(p))) return next();
+
+  // Skip for JSON API calls that use session-based auth + rate limiting
+  if (req.is('json') || req.is('application/json')) return next();
+
+  const cookieToken = req.cookies && req.cookies['CSRF-TOKEN'];
+  const bodyToken = req.body && (req.body._csrf || req.body.csrf);
+  const headerToken = req.headers['x-csrf-token'];
+
+  const submittedToken = bodyToken || headerToken;
+
+  if (!cookieToken || !submittedToken) {
+    console.warn('[CSRF] Missing token:', { cookie: !!cookieToken, submitted: !!submittedToken, path: req.path });
+    return res.status(403).send('CSRF validation failed: Missing token. Please refresh the page and try again.');
   }
-  // Only validate on state-changing methods
-  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
-    // Skip validation for exempt paths (webhooks, OAuth callbacks, public APIs)
-    if (isCSRFExempt(req.path)) return next();
-    // Skip validation for JSON API calls (they use session-based auth + rate limiting)
-    if (req.is('json') || req.is('application/json')) return next();
-    // Validate CSRF token for form submissions
-    const submittedToken = req.body?._csrf || req.headers['x-csrf-token'];
-    const sessionToken = req.session?.csrfToken;
-    if (!sessionToken || !submittedToken) {
-      return res.status(403).send('CSRF token missing. Please refresh the page and try again.');
-    }
-    // Constant-time comparison via HMAC hash to prevent timing attacks
-    const submittedHash = hashCSRFToken(submittedToken);
-    const sessionHash = hashCSRFToken(sessionToken);
-    if (!crypto.timingSafeEqual(Buffer.from(submittedHash), Buffer.from(sessionHash))) {
-      return res.status(403).send('Invalid CSRF token. Please refresh the page and try again.');
-    }
+
+  // Constant-time comparison to prevent timing attacks
+  // Both tokens should be 64 hex chars (32 bytes)
+  if (cookieToken.length !== submittedToken.length) {
+    console.warn('[CSRF] Token length mismatch for path:', req.path);
+    return res.status(403).send('CSRF validation failed: Token mismatch. Please refresh the page and try again.');
   }
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(cookieToken), Buffer.from(submittedToken))) {
+      console.warn('[CSRF] Token mismatch for path:', req.path);
+      return res.status(403).send('CSRF validation failed: Token mismatch. Please refresh the page and try again.');
+    }
+  } catch (e) {
+    console.warn('[CSRF] Token comparison error:', e.message, 'path:', req.path);
+    return res.status(403).send('CSRF validation failed. Please refresh the page and try again.');
+  }
+
   next();
-});
+};
+
+// Apply CSRF verification to all state-changing requests
+app.use(verifyCSRF);
 
 // === RATE LIMIT ===
 // Global rate limiter for all unauthenticated page requests
@@ -840,6 +914,28 @@ const checkTrialAccess = async (req, res, next) => {
 // Apply trial enforcement globally — AFTER session + auth middleware, BEFORE route definitions
 app.use(checkTrialAccess);
 
+// Middleware to enforce tenant_id in request body/params for data mutations
+const requireTenantId = (req, res, next) => {
+  const tid = req.session.user?.tenant_id;
+  if (!tid) return next(); // Not authenticated — other middleware will handle
+
+  // For POST/PUT/DELETE, ensure the body doesn't try to write to a different tenant
+  if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
+    const bodyTid = req.body?.tenant_id;
+    if (bodyTid && parseInt(bodyTid) !== tid) {
+      console.warn('[TENANT-ISOLATION] Cross-tenant attempt:', {
+        session: tid, body: bodyTid, path: req.path, user: req.session.user?.email
+      });
+      return res.status(403).send('Access denied: tenant mismatch');
+    }
+  }
+
+  next();
+};
+
+// Apply requireTenantId to all authenticated routes
+app.use(requireTenantId);
+
 const requireRole = (...roles) => (req, res, next) => {
   const u = req.session.user;
   if (!u) return res.redirect('/login');
@@ -1040,7 +1136,10 @@ const checkPermission = (perm) => async (req, res, next) => {
     const perms = typeof rp.permissions === 'string' ? JSON.parse(rp.permissions) : rp.permissions;
     if (perms[perm] === true || perms.can_manage_users) return next();
     return res.status(403).send(renderPage('Access Denied', '<div class="card"><div class="alert alert-error">You do not have permission for this action.</div><a href="/dashboard" class="btn">Back to Dashboard</a></div>', req.session.user));
-  } catch (e) { return next(); } // If check fails, allow
+  } catch (e) {
+    console.error('[checkPermission] DB error:', e.message);
+    return res.status(503).send('Service temporarily unavailable. Please try again.');
+  }
 };
 
 // Translation helper (v9.0)
@@ -2886,7 +2985,37 @@ const renderPageLite = (title, content, user, csrfTokenOrReq) => {
 .container{max-width:960px;margin:0 auto;padding:16px}nav{background:#1e40af;color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:space-between}nav a{color:#fff;text-decoration:none;margin:0 8px;font-size:14px}
 .card{background:#fff;border-radius:8px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.1);margin:16px 0}.btn{display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;text-decoration:none;font-size:14px}
 .btn:hover{background:#1d4ed8}input{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:6px;margin:8px 0;font-size:14px}footer{text-align:center;padding:20px;color:#94a3b8;font-size:13px}
-.alert{padding:12px;border-radius:6px;margin:12px 0}.alert-error{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}</style><link rel="stylesheet" href="/ui-foundation.css"></head>
+.alert{padding:12px;border-radius:6px;margin:12px 0}.alert-error{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}</style><link rel="stylesheet" href="/ui-foundation.css">
+<script>window.CSRF_TOKEN = '${csrfToken || ''}' || (document.cookie.match(/CSRF-TOKEN=([^;]+)/) || [,''])[1];</script>
+<script>
+// Auto-inject CSRF token into all forms
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('form[method="POST"], form[method="post"], form:not([method])').forEach(function(form) {
+    if (!form.querySelector('input[name="_csrf"]')) {
+      var input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = '_csrf';
+      input.value = window.CSRF_TOKEN;
+      form.appendChild(input);
+    }
+  });
+});
+// Auto-attach CSRF header to all fetch requests
+(function() {
+  var originalFetch = window.fetch;
+  window.fetch = function(url, options) {
+    options = options || {};
+    if (options.method && !['GET', 'HEAD', 'OPTIONS'].includes(options.method.toUpperCase())) {
+      options.headers = options.headers || {};
+      if (!options.headers['X-CSRF-Token'] && !options.headers['x-csrf-token']) {
+        options.headers['X-CSRF-Token'] = window.CSRF_TOKEN;
+      }
+    }
+    return originalFetch.call(this, url, options);
+  };
+})();
+</script>
+</head>
 <body><nav><strong>Comfort</strong><div><a href="/">Home</a><a href="/login">Login</a><a href="/register">Register</a><a href="/pricing">Pricing</a></div></nav>
 <div class="container">${safeContent}</div>
 <footer>Comfort Platform &copy; ${new Date().getFullYear()}</footer><script src="/ui-foundation.js"></script></body></html>`;
@@ -3252,6 +3381,35 @@ window.addEventListener('appinstalled',function(){_hideInstallBtns();});
 if(_isStandalone){_hideInstallBtns();}
 </script>
 <link rel="stylesheet" href="/ui-foundation.css">
+<script>window.CSRF_TOKEN = '${csrfToken || ''}' || (document.cookie.match(/CSRF-TOKEN=([^;]+)/) || [,''])[1];</script>
+<script>
+// Auto-inject CSRF token into all forms
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('form[method="POST"], form[method="post"], form:not([method])').forEach(function(form) {
+    if (!form.querySelector('input[name="_csrf"]')) {
+      var input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = '_csrf';
+      input.value = window.CSRF_TOKEN;
+      form.appendChild(input);
+    }
+  });
+});
+// Auto-attach CSRF header to all fetch requests
+(function() {
+  var originalFetch = window.fetch;
+  window.fetch = function(url, options) {
+    options = options || {};
+    if (options.method && !['GET', 'HEAD', 'OPTIONS'].includes(options.method.toUpperCase())) {
+      options.headers = options.headers || {};
+      if (!options.headers['X-CSRF-Token'] && !options.headers['x-csrf-token']) {
+        options.headers['X-CSRF-Token'] = window.CSRF_TOKEN;
+      }
+    }
+    return originalFetch.call(this, url, options);
+  };
+})();
+</script>
 </head><body>
 ${user && user._trial_days && user._trial_days > 0 ? `<div id="trial-banner" style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;padding:10px 16px;text-align:center;font-size:14px;position:sticky;top:0;z-index:9990;font-weight:500;box-shadow:0 2px 8px rgba(245,158,11,0.3)">
   <strong>&#9202; Free Trial:</strong> <span id="trial-days">${user._trial_days}</span> day${user._trial_days !== 1 ? 's' : ''} remaining
@@ -4703,7 +4861,7 @@ app.post('/school/fees/pay/save', requireAuth, requireNotBanned, ah(async (req, 
   wsBroadcast(t, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
   // v1.0: Fee balance SMS + email notification to parent
   try {
-    const fee = (await pool.query('SELECT f.*,s.name as student_name,s.guardian_phone,s.parent_email FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.id=$1', [fee_id])).rows[0];
+    const fee = (await pool.query('SELECT f.*,s.name as student_name,s.guardian_phone,s.parent_email FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.id=$1 AND f.tenant_id=$2', [fee_id, t])).rows[0];
     if (fee) {
       const balance = parseInt(fee.amount) - parseInt(fee.paid) - parseInt(amount);
       if (fee.guardian_phone) await sendSMS(fee.guardian_phone, `Payment UGX ${parseInt(amount).toLocaleString()} received for ${fee.student_name}. Balance: UGX ${balance.toLocaleString()}`);
@@ -12313,7 +12471,7 @@ app.post('/sms/send', requireAuth, requireNotBanned, ah(async (req, res) => {
 
 // === FEE RECEIPT DOCX (Legacy) ===
 app.get('/school/fees/:id/receipt-docx', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const fee = (await pool.query('SELECT f.*,s.name as student_name,s.admission_no,s.class FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.id=$1', [req.params.id])).rows[0];
+  const fee = (await pool.query('SELECT f.*,s.name as student_name,s.admission_no,s.class FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.id=$1 AND f.tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
   if (!fee) return res.status(404).send('Fee not found');
   const tenant = (await pool.query('SELECT name,email,phone,address FROM tenants WHERE id=$1', [req.session.user.tenant_id])).rows[0];
   const receiptNo = 'RCP-' + fee.id + '-' + Date.now().toString(36).toUpperCase();
@@ -14380,7 +14538,7 @@ app.get('/church/livestream/:id/delete', requireAuth, requireNotBanned, ah(async
 
 // === v3.0: DONATION TAX RECEIPT ===
 app.get('/church/donations/:id/tax-receipt', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const donation = (await pool.query('SELECT d.*,t.name as tenant_name,t.email as org_email,t.address FROM donations d LEFT JOIN tenants t ON d.tenant_id=t.id WHERE d.id=$1', [req.params.id])).rows[0];
+  const donation = (await pool.query('SELECT d.*,t.name as tenant_name,t.email as org_email,t.address FROM donations d LEFT JOIN tenants t ON d.tenant_id=t.id WHERE d.id=$1 AND d.tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
   if (!donation) return res.status(404).send('Donation not found');
   const receiptNo = 'TXR-' + donation.id + '-' + Date.now().toString(36).toUpperCase();
   const doc = new Document({ sections: [{ properties: {}, children: [
@@ -15583,6 +15741,35 @@ ${process.env.GA_TRACKING_ID ? `
   });
 </script>
 ` : ''}
+<script>window.CSRF_TOKEN = '${meta.csrfToken || ''}' || (document.cookie.match(/CSRF-TOKEN=([^;]+)/) || [,''])[1];</script>
+<script>
+// Auto-inject CSRF token into all forms
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('form[method="POST"], form[method="post"], form:not([method])').forEach(function(form) {
+    if (!form.querySelector('input[name="_csrf"]')) {
+      var input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = '_csrf';
+      input.value = window.CSRF_TOKEN;
+      form.appendChild(input);
+    }
+  });
+});
+// Auto-attach CSRF header to all fetch requests
+(function() {
+  var originalFetch = window.fetch;
+  window.fetch = function(url, options) {
+    options = options || {};
+    if (options.method && !['GET', 'HEAD', 'OPTIONS'].includes(options.method.toUpperCase())) {
+      options.headers = options.headers || {};
+      if (!options.headers['X-CSRF-Token'] && !options.headers['x-csrf-token']) {
+        options.headers['X-CSRF-Token'] = window.CSRF_TOKEN;
+      }
+    }
+    return originalFetch.call(this, url, options);
+  };
+})();
+</script>
 </head><body>
 <nav class="nav">
   <div style="display:flex;align-items:center;gap:12px"><button onclick="document.querySelector('.nav').classList.toggle('open');this.textContent=this.textContent==='☰'?'✕':'☰'" style="display:none;background:none;border:none;color:white;font-size:24px;cursor:pointer;padding:4px" id="menuBtn">☰</button><a href="/" style="font-size:20px;font-weight:800">${esc(platformSettings.site_name)}</a></div>
@@ -24961,6 +25148,35 @@ a{color:#0d9488}
   .pp-stats{grid-template-columns:repeat(2,1fr)}
 }
 </style>
+<script>window.CSRF_TOKEN = (document.cookie.match(/CSRF-TOKEN=([^;]+)/) || [,''])[1];</script>
+<script>
+// Auto-inject CSRF token into all forms
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('form[method="POST"], form[method="post"], form:not([method])').forEach(function(form) {
+    if (!form.querySelector('input[name="_csrf"]')) {
+      var input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = '_csrf';
+      input.value = window.CSRF_TOKEN;
+      form.appendChild(input);
+    }
+  });
+});
+// Auto-attach CSRF header to all fetch requests
+(function() {
+  var originalFetch = window.fetch;
+  window.fetch = function(url, options) {
+    options = options || {};
+    if (options.method && !['GET', 'HEAD', 'OPTIONS'].includes(options.method.toUpperCase())) {
+      options.headers = options.headers || {};
+      if (!options.headers['X-CSRF-Token'] && !options.headers['x-csrf-token']) {
+        options.headers['X-CSRF-Token'] = window.CSRF_TOKEN;
+      }
+    }
+    return originalFetch.call(this, url, options);
+  };
+})();
+</script>
 </head><body>
 <div class="pp-topbar">
   <a href="/patient-portal/${esc(subdomain)}/dashboard" style="font-size:18px;font-weight:800">&#127973; Patient Portal</a>
@@ -29549,7 +29765,7 @@ app.get('/pay/mtn/status', requireAuth, ah(async (req, res) => {
     await pool.query('UPDATE payments SET status=$1,method=$2 WHERE reference=$3', ['completed', 'mtn_momo', ref]);
     await pool.query('UPDATE momo_payments SET status=$1 WHERE external_ref=$2', ['completed', ref]);
     await audit('system', 'payment_status_change', `MoMo payment ${ref} status changed to completed`, null, req);
-    const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1', [ref])).rows[0];
+    const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1 AND tenant_id=$2', [ref, req.session.user.tenant_id])).rows[0];
     if (payment) {
       // Try explicit plan from payment record first, fallback to description parsing
       const plan = payment.plan || 'basic';
@@ -29683,7 +29899,7 @@ app.post('/pay/airtel/initiate', requireAuth, ah(async (req, res) => {
 app.get('/pay/airtel/status', requireAuth, ah(async (req, res) => {
   const ref = req.query.ref;
   if (!ref) return res.redirect('/billing');
-  const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1', [ref])).rows[0];
+  const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1 AND tenant_id=$2', [ref, req.session.user.tenant_id])).rows[0];
   const momo = (await pool.query('SELECT * FROM momo_payments WHERE external_ref=$1', [ref])).rows[0];
   const status = momo?.status || payment?.status || 'pending';
   
