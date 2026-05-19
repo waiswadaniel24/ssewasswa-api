@@ -99,6 +99,8 @@ const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthT
 const PDFDocument = require('pdfkit');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const path = require('path');
+const fs = require('fs');
 const http = require('http');
 
 // === VAPID KEY SETUP (web-push) ===
@@ -425,6 +427,31 @@ app.get('/manifest.json', (req, res) => {
     launch_handler: { client_mode: "auto" }
   }));
 });
+// === UPLOADS DIRECTORY FOR TENANT BRANDING ASSETS ===
+const uploadsTenantDir = path.join(__dirname, 'uploads', 'tenant');
+try { fs.mkdirSync(uploadsTenantDir, { recursive: true }); } catch(e) { /* ignore */ }
+app.use('/uploads/tenant', express.static(uploadsTenantDir));
+
+// === DYNAMIC FAVICON PER TENANT ===
+// Must be BEFORE express.static('public') so it intercepts /favicon.ico first
+app.get('/favicon.ico', async (req, res, next) => {
+  try {
+    const branding = req.session?.tenantBranding;
+    if (branding?.favicon_url) {
+      // Check if it's a local uploaded file — serve directly for speed
+      if (branding.favicon_url.startsWith('/uploads/tenant/')) {
+        const filePath = path.join(__dirname, branding.favicon_url);
+        if (fs.existsSync(filePath)) {
+          return res.sendFile(filePath);
+        }
+      }
+      // External URL — redirect to tenant's custom favicon
+      return res.redirect(301, branding.favicon_url);
+    }
+  } catch(e) { /* non-critical */ }
+  next(); // Fall through to default favicon in public/
+});
+
 app.use(express.static('public'));
 
 // === CSRF PROTECTION (Double-Submit Cookie Pattern) ===
@@ -832,7 +859,7 @@ const loadTenantBranding = async (req) => {
       [req.session.user.tenant_id]
     )).rows[0];
     if (tenant) {
-      req.session.tenantBranding = {
+      const branding = {
         custom_css: tenant.custom_css || '',
         logo_url: tenant.logo_url || '',
         favicon_url: tenant.favicon_url || '',
@@ -840,6 +867,9 @@ const loadTenantBranding = async (req) => {
         secondary_color: tenant.secondary_color || '',
         font_family: tenant.font_family || ''
       };
+      req.session.tenantBranding = branding;
+      // Also attach to user object so renderPage can access it via the user param
+      req.session.user._branding = branding;
       req.session._brandingLoadedAt = now;
     }
   } catch (e) { /* non-critical: branding load failure should not block requests */ }
@@ -1060,12 +1090,36 @@ const getEmailTransporter = () => {
   });
   return _emailTransporter;
 };
-const sendEmail = async (to, subject, html, tenantFromName) => {
+const sendEmail = async (to, subject, html, tenantFromName, tenantId) => {
   const transporter = getEmailTransporter();
   if (!transporter) return false;
   try {
     const fromName = tenantFromName || platformSettings.site_name || 'Comfort';
-    await transporter.sendMail({ from: `"${fromName}" <${process.env.GMAIL_USER}>`, to, subject, html });
+    // Fetch tenant branding for email template wrapping
+    let brandingLogo = '';
+    let brandingColor = '#4f46e5';
+    let brandingFooter = 'Ssewasswa Platform';
+    if (tenantId) {
+      try {
+        const bRow = (await pool.query(
+          'SELECT logo_url, primary_color, email_footer FROM tenants WHERE id=$1',
+          [tenantId]
+        )).rows[0];
+        if (bRow) {
+          brandingLogo = bRow.logo_url || '';
+          brandingColor = bRow.primary_color || '#4f46e5';
+          brandingFooter = bRow.email_footer || fromName || 'Ssewasswa Platform';
+        }
+      } catch(e) { /* non-critical */ }
+    }
+    // Wrap the HTML body in a branded template
+    const brandedHtml = `
+<div style="max-width:600px;margin:0 auto;font-family:Arial,sans-serif">
+  ${brandingLogo ? `<div style="text-align:center;padding:20px 0"><img src="${brandingLogo.startsWith('/') ? (process.env.BASE_URL || '') + brandingLogo : brandingLogo}" style="max-height:60px" alt="Logo"></div>` : ''}
+  <div style="border-top:3px solid ${brandingColor};padding:20px">${html}</div>
+  <div style="text-align:center;padding:20px;color:#94a3b8;font-size:12px;border-top:1px solid #e2e8f0">${esc(brandingFooter)}</div>
+</div>`;
+    await transporter.sendMail({ from: `"${fromName}" <${process.env.GMAIL_USER}>`, to, subject, brandedHtml });
     return true;
   } catch (e) { console.warn('Email failed:', e.message); return false; }
 };
@@ -3089,6 +3143,10 @@ const renderPage = (title, content, user, csrfTokenOrReq) => {
   const lang = user?.language || 'en';
   const siteName = platformSettings?.site_name || 'Comfort';
   const siteDesc = platformSettings?.site_tagline || 'The Operating System for African Institutions';
+  // Resolve branding from either req.session.tenantBranding or user._branding
+  const branding = (typeof csrfTokenOrReq === 'object' && csrfTokenOrReq?.session?.tenantBranding)
+    || user?._branding
+    || {};
   // Inline translation helper for UI text in renderPage
   const uiT = (key) => {
     const dict = {
@@ -3220,8 +3278,8 @@ ${platformSettings.google_verification ? `<meta name="google-site-verification" 
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}">
 <meta name="user-lang" content="${lang}">
-${typeof csrfTokenOrReq === 'object' && csrfTokenOrReq?.session?.tenantBranding?.favicon_url ? `<link rel="icon" href="${esc(csrfTokenOrReq.session.tenantBranding.favicon_url)}">` : ''}
-${typeof csrfTokenOrReq === 'object' && csrfTokenOrReq?.session?.tenantBranding?.font_family ? `<style>body{font-family:'${esc(csrfTokenOrReq.session.tenantBranding.font_family)}',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important}</style>` : ''}
+${branding.favicon_url ? `<link rel="icon" href="${esc(branding.favicon_url)}">` : ''}
+${branding.font_family ? `<style>body{font-family:'${esc(branding.font_family)}',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important}</style>` : ''}
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
@@ -3366,7 +3424,10 @@ a{color:var(--primary);text-decoration:none;font-weight:500;transition:color 0.2
 @media(min-width:769px) and (max-width:1024px){.stats{grid-template-columns:repeat(4,1fr)}.grid{grid-template-columns:repeat(2,1fr)}.stat-num{font-size:28px}}
 @media(max-width:380px){.grid{grid-template-columns:1fr!important;gap:8px}}
 @media print{.nav,.bottom-nav,.float-install-btn,.btn-group{display:none!important}.card{border:none!important;box-shadow:none!important;break-inside:avoid}body{background:white!important;padding:0!important;color:#000!important}}
-${typeof csrfTokenOrReq === 'object' && csrfTokenOrReq?.session?.tenantBranding?.custom_css ? `\n/* Tenant Custom CSS */\n${sanitizeCSS(csrfTokenOrReq.session.tenantBranding.custom_css)}\n` : ''}
+${branding.custom_css ? `\n/* Tenant Custom CSS */\n${sanitizeCSS(branding.custom_css)}\n` : ''}
+${branding.primary_color ? `:root{--primary:${esc(branding.primary_color)};--primary-light:${esc(branding.primary_color)}cc;--primary-dark:${esc(branding.primary_color)}}` : ''}
+${branding.secondary_color ? `:root{--accent:${esc(branding.secondary_color)}}` : ''}
+${branding.logo_url ? `.nav-brand-logo{display:inline-block;content:url('${esc(branding.logo_url)}');max-height:32px;max-width:120px;object-fit:contain;border-radius:6px;margin-right:8px;vertical-align:middle}` : ''}
 </style>
 <!-- Phase 3: Chart.js for interactive client-side charts -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -3527,6 +3588,7 @@ ${user && user._trial_days && user._trial_days > 0 ? `<div id="trial-banner" sty
           <a href="/fleet"><span class="dd-icon">🚗</span><span class="dd-label">${esc(uiT('mod.fleet'))}</span></a>
           <a href="/tickets"><span class="dd-icon">🎫</span><span class="dd-label">${esc(uiT('mod.tickets'))}</span></a>
           <a href="/kb"><span class="dd-icon">📚</span><span class="dd-label">${esc(uiT('mod.kb'))}</span></a>
+          ${user && (user.role === 'admin' || user.role === 'super_admin') ? '<div class="dd-divider"></div><div class="dd-header">Admin</div><a href="/rbac"><span class="dd-icon">🛡️</span><span class="dd-label">Roles & Permissions</span></a>' : ''}
         </div>
       </div>
       <div class="dd" id="ddMore">
@@ -9352,29 +9414,236 @@ app.post('/settings/backup/upload', requireAuth, express.raw({ type: 'applicatio
 }));
 
 // === TENANT BRANDING ===
+// --- Branding file upload (multer diskStorage) ---
+const brandingUpload = multer({
+  storage: multer.diskStorage({
+    destination: function(req, file, cb) {
+      const dir = path.join(__dirname, 'uploads', 'tenant', String(req.session.user.tenant_id));
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: function(req, file, cb) {
+      const ext = path.extname(file.originalname);
+      cb(null, file.fieldname + '-' + Date.now() + ext);
+    }
+  }),
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  fileFilter: function(req, file, cb) {
+    if (/image\/(png|jpeg|jpg|gif|svg\+xml|webp|x-icon)/.test(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files allowed (png, jpg, gif, svg, webp, ico)'));
+    }
+  }
+});
+
+// Upload route for logo/favicon
+app.post('/settings/branding/upload', requireAuth, brandingUpload.fields([
+  { name: 'logo', maxCount: 1 },
+  { name: 'favicon', maxCount: 1 }
+]), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const updates = {};
+
+  if (req.files.logo) {
+    updates.logo_url = `/uploads/tenant/${tid}/${req.files.logo[0].filename}`;
+  }
+  if (req.files.favicon) {
+    updates.favicon_url = `/uploads/tenant/${tid}/${req.files.favicon[0].filename}`;
+  }
+
+  if (Object.keys(updates).length) {
+    const setClauses = Object.keys(updates).map((k, i) => `${k}=$${i+2}`).join(', ');
+    await pool.query(`UPDATE tenants SET ${setClauses} WHERE id=$1`, [tid, ...Object.values(updates)]);
+    // Invalidate branding cache so changes take effect immediately
+    req.session._brandingLoadedAt = 0;
+  }
+
+  await audit(req.session.user.email, 'branding_upload', 'Uploaded branding asset(s)', tid, req);
+  res.redirect('/settings/branding');
+}));
+
 app.get('/settings/branding', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  const currentLogo = tenant.logo_url || '';
+  const currentFavicon = tenant.favicon_url || '';
   res.send(renderPage('Branding Settings', `
-    <div class="card" style="max-width:600px;margin:40px auto"><h3>Organization Branding</h3>
-      <form method="POST" action="/settings/branding/save">
-        <input name="logo_url" value="${esc(tenant.logo_url || '')}" placeholder="Logo URL (https://...)">
-        <p class="muted">Enter the URL of your organization's logo image.</p>
-        <input name="favicon_url" value="${esc(tenant.favicon_url || '')}" placeholder="Favicon URL (https://...)">
-        <p class="muted">Enter the URL of your favicon (16x16 or 32x32 .ico/.png).</p>
-        <textarea name="custom_css" rows="8" placeholder="Custom CSS (e.g. .nav { background: red; })">${esc(tenant.custom_css || '')}</textarea>
-        <p class="muted">Add custom CSS to style your portal pages.</p>
-        <button class="btn btn-green">Save Branding</button>
-      </form>
-      ${tenant.logo_url ? `<div style="margin-top:20px;text-align:center"><h4>Current Logo</h4><img src="${esc(tenant.logo_url)}" alt="Logo" style="max-height:100px;margin-top:10px"></div>` : ''}
+    <style>
+      .branding-upload-area{border:2px dashed var(--border);border-radius:14px;padding:32px 20px;text-align:center;cursor:pointer;transition:all .25s ease;background:var(--bg-card);margin:8px 0 16px}
+      .branding-upload-area:hover{border-color:var(--primary);background:rgba(99,102,241,0.04)}
+      .branding-upload-area.dragover{border-color:var(--primary);background:rgba(99,102,241,0.08);transform:scale(1.01)}
+      .branding-preview{max-width:200px;max-height:80px;border-radius:8px;margin:8px auto}
+      .branding-label{font-weight:600;font-size:14px;margin-bottom:2px;display:block}
+      .branding-section{margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--border)}
+      .branding-remove{font-size:12px;color:var(--danger);cursor:pointer;margin-top:4px;display:inline-block}
+      .branding-remove:hover{text-decoration:underline}
+    </style>
+    <div class="card" style="max-width:680px;margin:40px auto">
+      <h3 style="margin-bottom:20px">&#127912; Organization Branding</h3>
+
+      <!-- Logo Upload Section -->
+      <div class="branding-section">
+        <span class="branding-label">Logo</span>
+        <form method="POST" action="/settings/branding/upload" enctype="multipart/form-data" id="logo-form">
+          <div class="branding-upload-area" id="logo-drop-area"
+            ondragover="event.preventDefault();this.classList.add('dragover')"
+            ondragleave="this.classList.remove('dragover')"
+            ondrop="handleBrandDrop(event,'logo')"
+            onclick="document.getElementById('logo-upload').click()">
+            <input type="file" id="logo-upload" name="logo" accept="image/png,image/jpeg,image/gif,image/svg+xml,image/webp" style="display:none" onchange="previewBrandImage(this,'logo-preview')">
+            <div id="logo-preview">
+              ${currentLogo ? `<img src="${esc(currentLogo)}" alt="Logo" style="max-width:200px;max-height:80px;border-radius:8px">` : '<div style="color:var(--text-muted);font-size:14px">&#128196; Drag & drop your logo or click to upload<br><span style="font-size:12px">PNG, JPG, GIF, SVG, WebP &mdash; max 2MB</span></div>'}
+            </div>
+          </div>
+        </form>
+        ${currentLogo ? `<span class="branding-remove" onclick="removeBrandingAsset('logo')">&#10060; Remove logo</span>` : ''}
+        <div style="margin-top:8px">
+          <span style="font-size:12px;color:var(--text-dim)">Or paste a URL:</span>
+          <form method="POST" action="/settings/branding/save" style="display:flex;gap:8px;align-items:center;margin-top:4px">
+            <input name="logo_url" value="${esc(currentLogo)}" placeholder="https://example.com/logo.png" style="flex:1;font-size:13px;padding:8px 12px">
+            <input type="hidden" name="favicon_url" value="${esc(currentFavicon)}">
+            <input type="hidden" name="custom_css" value="${esc(tenant.custom_css || '')}">
+            <button class="btn btn-sm" type="submit">Set</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Favicon Upload Section -->
+      <div class="branding-section">
+        <span class="branding-label">Favicon</span>
+        <form method="POST" action="/settings/branding/upload" enctype="multipart/form-data" id="favicon-form">
+          <div class="branding-upload-area" id="favicon-drop-area"
+            ondragover="event.preventDefault();this.classList.add('dragover')"
+            ondragleave="this.classList.remove('dragover')"
+            ondrop="handleBrandDrop(event,'favicon')"
+            onclick="document.getElementById('favicon-upload').click()">
+            <input type="file" id="favicon-upload" name="favicon" accept="image/png,image/jpeg,image/gif,image/x-icon,image/svg+xml,image/webp" style="display:none" onchange="previewBrandImage(this,'favicon-preview')">
+            <div id="favicon-preview">
+              ${currentFavicon ? `<img src="${esc(currentFavicon)}" alt="Favicon" style="max-width:48px;max-height:48px;border-radius:6px">` : '<div style="color:var(--text-muted);font-size:14px">&#127760; Drag & drop your favicon or click to upload<br><span style="font-size:12px">ICO, PNG, SVG &mdash; 16x16 or 32x32 recommended</span></div>'}
+            </div>
+          </div>
+        </form>
+        ${currentFavicon ? `<span class="branding-remove" onclick="removeBrandingAsset('favicon')">&#10060; Remove favicon</span>` : ''}
+        <div style="margin-top:8px">
+          <span style="font-size:12px;color:var(--text-dim)">Or paste a URL:</span>
+          <form method="POST" action="/settings/branding/save" style="display:flex;gap:8px;align-items:center;margin-top:4px">
+            <input name="favicon_url" value="${esc(currentFavicon)}" placeholder="https://example.com/favicon.ico" style="flex:1;font-size:13px;padding:8px 12px">
+            <input type="hidden" name="logo_url" value="${esc(currentLogo)}">
+            <input type="hidden" name="custom_css" value="${esc(tenant.custom_css || '')}">
+            <button class="btn btn-sm" type="submit">Set</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Colors Section -->
+      <div class="branding-section">
+        <span class="branding-label">Colors</span>
+        <form method="POST" action="/settings/branding/save" style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">
+          <div style="flex:1;min-width:140px">
+            <label style="font-size:12px;color:var(--text-muted)">Primary Color</label>
+            <input type="color" name="primary_color" value="${esc(tenant.primary_color || '#4f46e5')}" style="height:44px;padding:4px;cursor:pointer">
+          </div>
+          <div style="flex:1;min-width:140px">
+            <label style="font-size:12px;color:var(--text-muted)">Secondary Color</label>
+            <input type="color" name="secondary_color" value="${esc(tenant.secondary_color || '#7c3aed')}" style="height:44px;padding:4px;cursor:pointer">
+          </div>
+          <input type="hidden" name="logo_url" value="${esc(currentLogo)}">
+          <input type="hidden" name="favicon_url" value="${esc(currentFavicon)}">
+          <input type="hidden" name="custom_css" value="${esc(tenant.custom_css || '')}">
+          <div style="align-self:flex-end"><button class="btn btn-sm btn-green" type="submit">Save Colors</button></div>
+        </form>
+      </div>
+
+      <!-- Custom CSS Section -->
+      <div class="branding-section" style="border-bottom:none">
+        <span class="branding-label">Custom CSS</span>
+        <form method="POST" action="/settings/branding/save" style="margin-top:8px">
+          <textarea name="custom_css" rows="6" placeholder="Custom CSS (e.g. .nav { background: red; })" style="font-family:monospace;font-size:13px">${esc(tenant.custom_css || '')}</textarea>
+          <input type="hidden" name="logo_url" value="${esc(currentLogo)}">
+          <input type="hidden" name="favicon_url" value="${esc(currentFavicon)}">
+          <button class="btn btn-green" type="submit" style="margin-top:8px">Save Branding</button>
+        </form>
+      </div>
+
+      <!-- Email Footer Section -->
+      <div class="branding-section" style="border-bottom:none;margin-top:0;padding-top:0">
+        <span class="branding-label">Email Footer Text</span>
+        <form method="POST" action="/settings/branding/save" style="margin-top:8px">
+          <input name="email_footer" value="${esc(tenant.email_footer || '')}" placeholder="e.g. Sent from ABC School Management System" style="font-size:13px">
+          <p style="font-size:12px;color:var(--text-dim);margin-top:4px">This text appears at the bottom of emails sent from your organization.</p>
+          <input type="hidden" name="logo_url" value="${esc(currentLogo)}">
+          <input type="hidden" name="favicon_url" value="${esc(currentFavicon)}">
+          <input type="hidden" name="custom_css" value="${esc(tenant.custom_css || '')}">
+          <button class="btn btn-sm" type="submit" style="margin-top:8px">Save Email Footer</button>
+        </form>
+      </div>
     </div>
-  `, req.session.user));
+
+    <script>
+    function previewBrandImage(input, previewId) {
+      var preview = document.getElementById(previewId);
+      if (input.files && input.files[0]) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          preview.innerHTML = '<img src="' + e.target.result + '" style="max-width:200px;max-height:80px;border-radius:8px">';
+        };
+        reader.readAsDataURL(input.files[0]);
+        // Auto-submit the form
+        input.closest('form').submit();
+      }
+    }
+    function handleBrandDrop(event, fieldName) {
+      event.preventDefault();
+      event.currentTarget.classList.remove('dragover');
+      var files = event.dataTransfer.files;
+      if (files.length > 0) {
+        var input = document.getElementById(fieldName + '-upload');
+        // Create a new DataTransfer to set files on the input
+        var dt = new DataTransfer();
+        dt.items.add(files[0]);
+        input.files = dt.files;
+        previewBrandImage(input, fieldName + '-preview');
+      }
+    }
+    function removeBrandingAsset(field) {
+      var form = document.createElement('form');
+      form.method = 'POST';
+      form.action = '/settings/branding/save';
+      form.innerHTML = '<input name="logo_url" value="${esc(currentLogo)}">' +
+        '<input name="favicon_url" value="${esc(currentFavicon)}">' +
+        '<input name="custom_css" value="' + encodeURIComponent('${esc(tenant.custom_css || '')}') + '">';
+      var input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = field === 'logo' ? 'logo_url' : 'favicon_url';
+      input.value = '';
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
+    }
+    </script>
+  `, req.session.user, req));
 }));
 
 app.post('/settings/branding/save', requireAuth, ah(async (req, res) => {
-  const { logo_url, favicon_url, custom_css } = req.body;
-  await pool.query('UPDATE tenants SET logo_url=$1,favicon_url=$2,custom_css=$3 WHERE id=$4', [logo_url, favicon_url, sanitizeCSS(custom_css), req.session.user.tenant_id]);
-  await audit(req.session.user.email, 'branding_update', 'Updated organization branding', req.session.user.tenant_id, req);
+  const { logo_url, favicon_url, custom_css, primary_color, secondary_color, email_footer } = req.body;
+  const tid = req.session.user.tenant_id;
+  // Build dynamic UPDATE based on provided fields
+  const updates = [];
+  const values = [tid];
+  let idx = 2;
+  if (logo_url !== undefined) { updates.push(`logo_url=$${idx++}`); values.push(logo_url); }
+  if (favicon_url !== undefined) { updates.push(`favicon_url=$${idx++}`); values.push(favicon_url); }
+  if (custom_css !== undefined) { updates.push(`custom_css=$${idx++}`); values.push(sanitizeCSS(custom_css)); }
+  if (primary_color !== undefined) { updates.push(`primary_color=$${idx++}`); values.push(primary_color); }
+  if (secondary_color !== undefined) { updates.push(`secondary_color=$${idx++}`); values.push(secondary_color); }
+  if (email_footer !== undefined) { updates.push(`email_footer=$${idx++}`); values.push(email_footer); }
+  if (updates.length) {
+    await pool.query(`UPDATE tenants SET ${updates.join(',')} WHERE id=$1`, values);
+  }
+  // Invalidate branding cache so changes take effect immediately
+  req.session._brandingLoadedAt = 0;
+  await audit(req.session.user.email, 'branding_update', 'Updated organization branding', tid, req);
   res.redirect('/settings/branding');
 }));
 
@@ -42276,7 +42545,21 @@ const processEmailQueue = async () => {
     console.log(`[AutoEmail] Processing ${pending.length} queued email(s)`);
     for (const email of pending) {
       try {
-        await transporter.sendMail({ from: process.env.GMAIL_USER, to: email.to_email, subject: email.subject, html: email.html ? email.body : undefined, text: email.html ? undefined : email.body });
+        // Apply tenant branding to queued emails
+        let emailBody = email.html ? email.body : undefined;
+        if (email.tenant_id && email.html) {
+          try {
+            const bRow = (await pool.query('SELECT logo_url, primary_color, email_footer, name FROM tenants WHERE id=$1', [email.tenant_id])).rows[0];
+            if (bRow) {
+              const bLogo = bRow.logo_url || '';
+              const bColor = bRow.primary_color || '#4f46e5';
+              const bFooter = bRow.email_footer || bRow.name || 'Ssewasswa Platform';
+              const bLogoUrl = bLogo.startsWith('/') ? (process.env.BASE_URL || '') + bLogo : bLogo;
+              emailBody = `<div style="max-width:600px;margin:0 auto;font-family:Arial,sans-serif">${bLogo ? `<div style="text-align:center;padding:20px 0"><img src="${bLogoUrl}" style="max-height:60px" alt="Logo"></div>` : ''}<div style="border-top:3px solid ${bColor};padding:20px">${email.body}</div><div style="text-align:center;padding:20px;color:#94a3b8;font-size:12px;border-top:1px solid #e2e8f0">${esc(bFooter)}</div></div>`;
+            }
+          } catch(e) { /* branding fetch failed, send unbranded */ }
+        }
+        await transporter.sendMail({ from: process.env.GMAIL_USER, to: email.to_email, subject: email.subject, html: emailBody, text: email.html ? undefined : email.body });
         await pool.query("UPDATE email_queue SET status='sent', sent_at=NOW() WHERE id=$1", [email.id]);
       } catch (e) {
         const newAttempts = (email.attempts || 0) + 1;
@@ -44274,6 +44557,653 @@ app.use((req, res, next) => {
     next();
   }
 });
+
+// ============================================================
+// UNIVERSAL RBAC — Accessible from ALL portal types
+// (school, church, org, health, business, individual)
+// Uses the same rbac_* tables as rbac-manager.js but with
+// portal-agnostic routes at /rbac instead of /school/rbac
+// ============================================================
+
+// Helper: ensure rbac tables exist (graceful fallback)
+let _rbacTablesReady = false;
+async function ensureRbacTables() {
+  if (_rbacTablesReady) return;
+  const migrations = [
+    `CREATE TABLE IF NOT EXISTS rbac_roles (
+      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0,
+      role_name VARCHAR(80) NOT NULL, description TEXT,
+      is_system BOOLEAN DEFAULT false, priority INTEGER DEFAULT 50,
+      color VARCHAR(7) DEFAULT '#4f46e5', created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS rbac_permissions (
+      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0,
+      permission_key VARCHAR(100) NOT NULL, permission_name VARCHAR(150) NOT NULL,
+      category VARCHAR(50) NOT NULL, description TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(tenant_id, permission_key))`,
+    `CREATE TABLE IF NOT EXISTS rbac_role_permissions (
+      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0,
+      role_id INTEGER NOT NULL REFERENCES rbac_roles(id) ON DELETE CASCADE,
+      permission_id INTEGER NOT NULL REFERENCES rbac_permissions(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(role_id, permission_id))`,
+    `CREATE TABLE IF NOT EXISTS rbac_user_roles (
+      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0,
+      user_email VARCHAR(200) NOT NULL, role_id INTEGER NOT NULL REFERENCES rbac_roles(id) ON DELETE CASCADE,
+      assigned_by VARCHAR(200), assigned_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(user_email, role_id))`,
+    `CREATE TABLE IF NOT EXISTS rbac_permission_audit (
+      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0,
+      action VARCHAR(50) NOT NULL, user_email VARCHAR(200),
+      target_email VARCHAR(200), role_id INTEGER,
+      permission_id INTEGER, details TEXT,
+      ip_address VARCHAR(50), created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE INDEX IF NOT EXISTS idx_rbac_roles_tid ON rbac_roles(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_rbac_perms_tid ON rbac_permissions(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_rbac_perms_cat ON rbac_permissions(tenant_id, category)`,
+    `CREATE INDEX IF NOT EXISTS idx_rbac_rp_rid ON rbac_role_permissions(role_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_rbac_ur_email ON rbac_user_roles(user_email)`,
+    `CREATE INDEX IF NOT EXISTS idx_rbac_audit_tid ON rbac_permission_audit(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_rbac_audit_created ON rbac_permission_audit(created_at DESC)`,
+  ];
+  const client = await pool.connect();
+  try {
+    for (const sql of migrations) await client.query(sql);
+    _rbacTablesReady = true;
+    console.log('[UniversalRBAC] Tables verified/created');
+  } catch (e) {
+    console.error('[UniversalRBAC] Table creation error:', e.message);
+  } finally { client.release(); }
+}
+
+// Helper: seed default permissions and roles for a tenant
+async function seedRbacTenant(tid) {
+  await ensureRbacTables();
+  const { rows: pc } = await pool.query('SELECT COUNT(*)::int as c FROM rbac_permissions WHERE tenant_id=$1', [tid]);
+  if (pc[0].c > 0) return; // Already seeded
+
+  const DEFAULT_PERMS = [
+    { key: 'students.view', name: 'View Students', category: 'students', description: 'View student profiles and lists' },
+    { key: 'students.create', name: 'Create Student', category: 'students', description: 'Add new student records' },
+    { key: 'students.edit', name: 'Edit Student', category: 'students', description: 'Modify student information' },
+    { key: 'students.delete', name: 'Delete Student', category: 'students', description: 'Remove student records' },
+    { key: 'students.export', name: 'Export Students', category: 'students', description: 'Export student data to files' },
+    { key: 'members.view', name: 'View Members', category: 'members', description: 'View member profiles and lists' },
+    { key: 'members.create', name: 'Create Member', category: 'members', description: 'Add new member records' },
+    { key: 'members.edit', name: 'Edit Member', category: 'members', description: 'Modify member information' },
+    { key: 'members.delete', name: 'Delete Member', category: 'members', description: 'Remove member records' },
+    { key: 'patients.view', name: 'View Patients', category: 'patients', description: 'View patient profiles' },
+    { key: 'patients.create', name: 'Create Patient', category: 'patients', description: 'Add new patient records' },
+    { key: 'patients.edit', name: 'Edit Patient', category: 'patients', description: 'Modify patient information' },
+    { key: 'finance.fees', name: 'Manage Fees', category: 'finance', description: 'Configure fee structures' },
+    { key: 'finance.payments', name: 'Record Payments', category: 'finance', description: 'Process payments' },
+    { key: 'finance.payroll', name: 'Manage Payroll', category: 'finance', description: 'Staff salary management' },
+    { key: 'finance.expenses', name: 'Track Expenses', category: 'finance', description: 'Record expenses' },
+    { key: 'finance.reports', name: 'Financial Reports', category: 'finance', description: 'View financial summaries' },
+    { key: 'finance.invoices', name: 'Manage Invoices', category: 'finance', description: 'Create and send invoices' },
+    { key: 'hr.staff', name: 'Manage Staff', category: 'hr', description: 'Add and manage staff records' },
+    { key: 'hr.leave', name: 'Manage Leave', category: 'hr', description: 'Approve/deny leave requests' },
+    { key: 'hr.attendance', name: 'Staff Attendance', category: 'hr', description: 'Track staff check-in/out' },
+    { key: 'communications.announcements', name: 'Post Announcements', category: 'communications', description: 'Create announcements' },
+    { key: 'communications.messages', name: 'Send Messages', category: 'communications', description: 'Send messages to users' },
+    { key: 'communications.sms', name: 'Send SMS', category: 'communications', description: 'Bulk SMS messaging' },
+    { key: 'admin.settings', name: 'System Settings', category: 'admin', description: 'Configure system settings' },
+    { key: 'admin.users', name: 'Manage Users', category: 'admin', description: 'Create and manage user accounts' },
+    { key: 'admin.backup', name: 'Backup Data', category: 'admin', description: 'Create data backups' },
+    { key: 'admin.billing', name: 'Manage Billing', category: 'admin', description: 'Subscription and billing settings' },
+    { key: 'reports.view', name: 'View Reports', category: 'reports', description: 'Access all report dashboards' },
+    { key: 'reports.export', name: 'Export Reports', category: 'reports', description: 'Download reports as PDF/Excel' },
+    { key: 'reports.analytics', name: 'Advanced Analytics', category: 'reports', description: 'Access analytics features' },
+    { key: 'settings.general', name: 'General Settings', category: 'settings', description: 'Edit profile and branding' },
+    { key: 'settings.security', name: 'Security Settings', category: 'settings', description: 'Password policies, 2FA, sessions' },
+  ];
+  for (const p of DEFAULT_PERMS) {
+    await pool.query(
+      `INSERT INTO rbac_permissions (tenant_id,permission_key,permission_name,category,description) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+      [tid, p.key, p.name, p.category, p.description]);
+  }
+  const { rows: perms } = await pool.query('SELECT id, permission_key FROM rbac_permissions WHERE tenant_id=$1', [tid]);
+  const pmap = {};
+  perms.forEach(p => pmap[p.permission_key] = p.id);
+
+  const DEFAULT_ROLES = [
+    { name: 'super_admin', desc: 'Full system access', priority: 1, color: '#dc2626', is_system: true, perms: 'ALL' },
+    { name: 'admin', desc: 'Organization administrator', priority: 2, color: '#d97706', is_system: true,
+      perms: ['students', 'members', 'patients', 'hr', 'communications', 'reports', 'settings', 'admin.settings', 'admin.users'] },
+    { name: 'manager', desc: 'Team manager', priority: 3, color: '#059669', is_system: true,
+      perms: ['students.view', 'students.edit', 'members.view', 'members.edit', 'patients.view', 'patients.edit', 'hr.attendance', 'communications', 'reports.view'] },
+    { name: 'staff', desc: 'General staff member', priority: 4, color: '#6366f1', is_system: true,
+      perms: ['students.view', 'members.view', 'patients.view', 'communications.messages', 'reports.view'] },
+    { name: 'viewer', desc: 'Read-only access', priority: 5, color: '#64748b', is_system: true,
+      perms: ['students.view', 'members.view', 'patients.view', 'reports.view'] },
+  ];
+  const categories = [...new Set(DEFAULT_PERMS.map(p => p.category))];
+  for (const r of DEFAULT_ROLES) {
+    const { rows: er } = await pool.query('SELECT id FROM rbac_roles WHERE tenant_id=$1 AND role_name=$2', [tid, r.name]);
+    if (er.length) continue;
+    const { rows: rr } = await pool.query(
+      `INSERT INTO rbac_roles (tenant_id,role_name,description,is_system,priority,color) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [tid, r.name, r.desc, r.is_system, r.priority, r.color]);
+    const roleId = rr[0].id;
+    const pidList = [];
+    if (r.perms === 'ALL') {
+      perms.forEach(p => pidList.push(p.id));
+    } else {
+      for (const spec of r.perms) {
+        if (pmap[spec]) { pidList.push(pmap[spec]); }
+        else {
+          Object.keys(pmap).filter(k => k.startsWith(spec + '.')).forEach(k => pidList.push(pmap[k]));
+        }
+        if (categories.includes(spec)) {
+          Object.keys(pmap).filter(k => k.startsWith(spec + '.')).forEach(k => { if (!pidList.includes(pmap[k])) pidList.push(pmap[k]); });
+        }
+      }
+    }
+    for (const pid of [...new Set(pidList)]) {
+      await pool.query('INSERT INTO rbac_role_permissions (tenant_id,role_id,permission_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [tid, roleId, pid]);
+    }
+  }
+}
+
+// Helper: log RBAC audit
+async function logRbacAction(tid, action, user_email, target_email, role_id, perm_id, details, req) {
+  try {
+    await pool.query(
+      `INSERT INTO rbac_permission_audit (tenant_id,action,user_email,target_email,role_id,permission_id,details,ip_address,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())`,
+      [tid, action, user_email, target_email, role_id, perm_id, details, req?.ip || req?.connection?.remoteAddress || null]);
+  } catch (e) { console.error('[UniversalRBAC] Audit log error:', e.message); }
+}
+
+// Shared CSS for universal RBAC pages
+const URBAC_CSS = `<style>
+  .urbac-root{max-width:1200px;margin:0 auto;font-family:system-ui,-apple-system,sans-serif}
+  .urbac-nav{display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap;align-items:center;padding:12px 16px;background:var(--bg-card);border-radius:14px;border:1px solid var(--border)}
+  .urbac-nav a{padding:8px 16px;border-radius:10px;font-size:13px;font-weight:600;text-decoration:none;color:var(--text-muted);background:var(--input-bg);transition:.15s;border:1px solid transparent}
+  .urbac-nav a:hover{background:var(--border-light);color:var(--primary)}
+  .urbac-nav a.active{background:var(--primary);color:#fff;border-color:var(--primary);box-shadow:0 2px 8px rgba(99,102,241,.25)}
+  .urbac-hero{background:linear-gradient(135deg,var(--primary-dark),var(--primary-light));padding:28px 32px;border-radius:16px;margin-bottom:24px;color:#fff;position:relative;overflow:hidden}
+  .urbac-hero h1{font-size:24px;margin:0 0 4px;position:relative;z-index:1}
+  .urbac-hero p{opacity:.85;margin:0;font-size:14px;position:relative;z-index:1}
+  .urbac-hero-actions{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;position:relative;z-index:1}
+  .urbac-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:24px}
+  .urbac-stat{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:20px;text-align:center;transition:.2s}
+  .urbac-stat:hover{box-shadow:var(--shadow-md);transform:translateY(-2px)}
+  .urbac-stat-icon{font-size:28px;margin-bottom:6px}
+  .urbac-stat-val{font-size:32px;font-weight:800;color:var(--text)}
+  .urbac-stat-lbl{font-size:11px;color:var(--text-muted);margin-top:4px;text-transform:uppercase;letter-spacing:.5px}
+  .urbac-btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;transition:.15s}
+  .urbac-btn:hover{opacity:.9;transform:translateY(-1px)}
+  .urbac-btn-primary{background:var(--primary);color:#fff}
+  .urbac-btn-danger{background:#fee2e2;color:#dc2626;border:1px solid #fecaca}
+  .urbac-btn-secondary{background:var(--bg-card);color:var(--text-muted);border:1px solid var(--border)}
+  .urbac-btn-sm{padding:6px 12px;font-size:12px;border-radius:8px}
+  .urbac-card{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:20px;transition:.15s}
+  .urbac-card:hover{box-shadow:var(--shadow-md)}
+  .urbac-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px}
+  .urbac-card-title{font-size:16px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px}
+  .urbac-table{width:100%;border-collapse:collapse;font-size:13px}
+  .urbac-table th{padding:10px 14px;text-align:left;border-bottom:2px solid var(--border);color:var(--text-muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;background:var(--border-light)}
+  .urbac-table td{padding:10px 14px;border-bottom:1px solid var(--border-light);color:var(--text)}
+  .urbac-table tr:hover{background:var(--border-light)}
+  .urbac-input{width:100%;padding:10px 14px;border:2px solid var(--border);border-radius:10px;font-size:14px;transition:.15s;box-sizing:border-box;font-family:inherit;background:var(--input-bg);color:var(--text)}
+  .urbac-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+  .urbac-form-group{margin-bottom:16px}
+  .urbac-form-group label{display:block;font-size:13px;font-weight:600;color:var(--text);margin-bottom:5px}
+  .urbac-matrix{width:100%;border-collapse:collapse;font-size:12px}
+  .urbac-matrix th{padding:8px 6px;text-align:center;background:var(--border-light);color:var(--primary-dark);font-weight:700;font-size:11px;border:1px solid var(--border);white-space:nowrap}
+  .urbac-matrix th:first-child{text-align:left;min-width:160px}
+  .urbac-matrix td{padding:6px;text-align:center;border:1px solid var(--border);background:var(--bg-card)}
+  .urbac-matrix td:first-child{text-align:left;font-weight:600;color:var(--text);font-size:12px;background:var(--border-light);white-space:nowrap}
+  .urbac-matrix input[type=checkbox]{width:16px;height:16px;accent-color:var(--primary);cursor:pointer}
+  .urbac-matrix .cat-row td{background:var(--border-light);font-weight:700;color:var(--primary-dark);font-size:12px;text-align:left}
+  .urbac-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700}
+  .urbac-alert{padding:14px 18px;border-radius:10px;font-size:13px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+  .urbac-alert-success{background:#d1fae5;color:#065f46;border:1px solid #a7f3d0}
+  .urbac-alert-error{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+  .urbac-alert-info{background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe}
+  .urbac-empty{text-align:center;padding:40px;color:var(--text-dim)}
+  .urbac-role-card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:16px;transition:.2s;border-left:4px solid var(--primary)}
+  .urbac-role-card:hover{box-shadow:var(--shadow-md);transform:translateY(-2px)}
+  .urbac-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .urbac-select{width:100%;padding:10px 14px;border:2px solid var(--border);border-radius:10px;font-size:13px;background:var(--input-bg);box-sizing:border-box;font-family:inherit;cursor:pointer;color:var(--text)}
+  .urbac-select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+  .urbac-progress{background:var(--border);border-radius:8px;height:10px;overflow:hidden;width:100%}
+  .urbac-progress-bar{height:100%;border-radius:8px;transition:width .4s ease}
+  @media(max-width:768px){.urbac-stats{grid-template-columns:1fr 1fr}.urbac-grid-2{grid-template-columns:1fr}.urbac-nav{flex-direction:column}.urbac-hero{padding:20px}}
+</style>`;
+
+// Universal RBAC navigation helper
+function urbacNav(active, tenantType) {
+  const items = [
+    { href: '/rbac', label: '📋 Dashboard', key: 'dash' },
+    { href: '/rbac/roles', label: '👥 Roles', key: 'roles' },
+    { href: '/rbac/permissions', label: '🔐 Matrix', key: 'perms' },
+    { href: '/rbac/users', label: '👤 Users', key: 'users' },
+  ];
+  // If school portal, also link to the full RBAC manager
+  if (tenantType === 'school') {
+    items.push({ href: '/school/rbac', label: '🎓 Full RBAC', key: 'full' });
+  }
+  return `<nav class="urbac-nav" aria-label="RBAC Navigation">${items.map(i =>
+    `<a href="${i.href}" class="${active === i.key ? 'active' : ''}">${i.label}</a>`).join('')}</nav>`;
+}
+
+// Portal type label map
+const PORTAL_LABELS = {
+  school: 'School', church: 'Church', health: 'Health Facility',
+  business: 'Business', organization: 'Organization', individual: 'Individual',
+};
+
+// ── ROUTE: GET /rbac — Universal RBAC Dashboard ───────────
+app.get('/rbac', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id || 0;
+  const tenantType = u.tenant_type || 'school';
+  const portalLabel = PORTAL_LABELS[tenantType] || 'Organization';
+  await seedRbacTenant(tid);
+
+  const [[rc], [pc], [urc], [ac]] = await Promise.all([
+    pool.query('SELECT COUNT(*)::int as c FROM rbac_roles WHERE tenant_id=$1', [tid]),
+    pool.query('SELECT COUNT(*)::int as c FROM rbac_permissions WHERE tenant_id=$1', [tid]),
+    pool.query('SELECT COUNT(DISTINCT user_email)::int as c FROM rbac_user_roles WHERE tenant_id=$1', [tid]),
+    pool.query('SELECT COUNT(*)::int as c FROM rbac_permission_audit WHERE tenant_id=$1', [tid]),
+  ]);
+  const { rows: roles } = await pool.query('SELECT * FROM rbac_roles WHERE tenant_id=$1 ORDER BY priority', [tid]);
+  const { rows: recent } = await pool.query('SELECT * FROM rbac_permission_audit WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 8', [tid]);
+  const { rows: topUsers } = await pool.query(
+    `SELECT ur.user_email, COUNT(ur.role_id)::int as role_cnt, STRING_AGG(DISTINCT r.role_name, ', ') as role_names
+     FROM rbac_user_roles ur JOIN rbac_roles r ON r.id=ur.role_id WHERE ur.tenant_id=$1 GROUP BY ur.user_email ORDER BY role_cnt DESC LIMIT 6`, [tid]);
+
+  const totalPerms = pc.rows[0].c;
+  const roleCards = roles.map(r => {
+    const style = `border-left-color:${r.color || 'var(--primary)'}`;
+    return `<div class="urbac-role-card" style="${style}">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><strong style="color:var(--text)">${esc(r.role_name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))}</strong>
+        <div style="font-size:12px;color:var(--text-muted)">${esc(r.description || '')}</div></div>
+        ${r.is_system ? '<span class="urbac-badge" style="background:#fef3c7;color:#92400e">⚙ System</span>' : '<span class="urbac-badge" style="background:#dbeafe;color:#1e40af">Custom</span>'}
+      </div></div>`;
+  }).join('');
+
+  const timeline = recent.map(a => `<div style="padding:8px 0;border-bottom:1px solid var(--border-light)">
+    <div style="font-size:13px;font-weight:600;color:var(--text)">${esc((a.action || '').replace(/_/g, ' '))}</div>
+    ${a.details ? '<div style="font-size:12px;color:var(--text-muted)">' + esc(a.details) + '</div>' : ''}
+    <div style="font-size:11px;color:var(--text-dim)">${a.created_at ? new Date(a.created_at).toLocaleString() : ''}</div>
+  </div>`).join('') || '<div class="urbac-empty">No activity yet</div>';
+
+  const userRows = topUsers.map(usr => {
+    const names = (usr.role_names || '').split(', ');
+    return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;margin-bottom:8px">
+      <div style="width:36px;height:36px;border-radius:50%;background:var(--border-light);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:var(--primary)">${esc((usr.user_email || '?')[0].toUpperCase())}</div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(usr.user_email)}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">${names.map(n => '<span class="urbac-badge" style="background:var(--border-light);color:var(--primary)">' + esc(n) + '</span>').join('')}</div>
+      </div>
+      <a href="/rbac/users/${encodeURIComponent(usr.user_email)}" class="urbac-btn urbac-btn-sm urbac-btn-secondary">View →</a>
+    </div>`;
+  }).join('') || '<div class="urbac-empty">No users with assigned roles yet</div>';
+
+  const rolePermStats = await Promise.all(roles.map(async r => {
+    const { rows: rpc } = await pool.query('SELECT COUNT(*)::int as c FROM rbac_role_permissions WHERE role_id=$1 AND tenant_id=$2', [r.id, tid]);
+    return { name: r.role_name, color: r.color, count: rpc[0].c, pct: totalPerms ? Math.round(rpc[0].c / totalPerms * 100) : 0 };
+  }));
+  const coverageHtml = rolePermStats.map(s =>
+    `<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="font-weight:600;color:var(--text)">${esc(s.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))}</span><span style="color:var(--text-muted)">${s.count}/${totalPerms} (${s.pct}%)</span></div><div class="urbac-progress"><div class="urbac-progress-bar" style="width:${s.pct}%;background:${s.color || 'var(--primary)'}"></div></div></div>`
+  ).join('');
+
+  const msg = req.query.msg ? `<div class="urbac-alert urbac-alert-success">✅ ${esc(req.query.msg)}</div>` : '';
+
+  const html = URBAC_CSS + `<div class="urbac-root">${urbacNav('dash', tenantType)}
+    <div class="urbac-hero"><h1>🛡️ Roles & Permissions</h1><p>Manage access control for your ${esc(portalLabel)} portal</p>
+      <div class="urbac-hero-actions">
+        <a href="/rbac/roles/create" class="urbac-btn" style="background:var(--primary-light);color:#fff">➕ Create Role</a>
+        <a href="/rbac/permissions" class="urbac-btn" style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3)">🔐 Permission Matrix</a>
+      </div></div>
+    ${msg}
+    <div class="urbac-stats">
+      <div class="urbac-stat"><div class="urbac-stat-icon">👥</div><div class="urbac-stat-val">${rc.rows[0].c}</div><div class="urbac-stat-lbl">Roles</div></div>
+      <div class="urbac-stat"><div class="urbac-stat-icon">🔑</div><div class="urbac-stat-val">${pc.rows[0].c}</div><div class="urbac-stat-lbl">Permissions</div></div>
+      <div class="urbac-stat"><div class="urbac-stat-icon">👤</div><div class="urbac-stat-val">${urc.rows[0].c}</div><div class="urbac-stat-lbl">Assigned Users</div></div>
+      <div class="urbac-stat"><div class="urbac-stat-icon">📝</div><div class="urbac-stat-val">${ac.rows[0].c}</div><div class="urbac-stat-lbl">Audit Entries</div></div>
+    </div>
+    <div class="urbac-grid-2">
+      <div class="urbac-card"><div class="urbac-card-header"><div class="urbac-card-title">📊 Permission Coverage</div></div><div style="margin-top:8px">${coverageHtml || '<div class="urbac-empty">No data</div>'}</div></div>
+      <div class="urbac-card"><div class="urbac-card-title">👥 Roles</div><div style="display:grid;gap:8px;margin-top:12px">${roleCards || '<div class="urbac-empty">No roles</div>'}</div></div>
+    </div>
+    <div class="urbac-grid-2" style="margin-top:14px">
+      <div class="urbac-card"><div class="urbac-card-header"><div class="urbac-card-title">📝 Recent Changes</div><a href="/rbac/audit" class="urbac-btn urbac-btn-sm urbac-btn-secondary">View All →</a></div><div style="margin-top:12px">${timeline}</div></div>
+      <div class="urbac-card"><div class="urbac-card-header"><div class="urbac-card-title">👤 Top Users</div></div><div style="margin-top:8px">${userRows}</div></div>
+    </div></div>`;
+  res.send(renderPage('Roles & Permissions', html, u, req));
+}));
+
+// ── ROUTE: GET /rbac/roles — Role list ───────────────────
+app.get('/rbac/roles', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id || 0;
+  const tenantType = u.tenant_type || 'school';
+  await seedRbacTenant(tid);
+
+  const { rows: roles } = await pool.query(
+    `SELECT r.*, (SELECT COUNT(*)::int FROM rbac_user_roles ur WHERE ur.role_id=r.id AND ur.tenant_id=$1) as member_count,
+     (SELECT COUNT(*)::int FROM rbac_role_permissions rp WHERE rp.role_id=r.id AND rp.tenant_id=$1) as perm_count
+     FROM rbac_roles r WHERE r.tenant_id=$1 ORDER BY r.priority`, [tid]);
+
+  const rows = roles.map(r => `<tr>
+    <td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${r.color || 'var(--primary)'};margin-right:8px"></span><strong>${esc(r.role_name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))}</strong></td>
+    <td style="font-size:12px;color:var(--text-muted)">${esc(r.description || '—')}</td>
+    <td><span class="urbac-badge" style="background:var(--border-light);color:var(--primary)">${r.perm_count}</span></td>
+    <td><span class="urbac-badge" style="background:#d1fae5;color:#065f46">${r.member_count}</span></td>
+    <td>${r.is_system ? '<span class="urbac-badge" style="background:#fef3c7;color:#92400e">System</span>' : '<span class="urbac-badge" style="background:var(--border-light);color:var(--text-muted)">Custom</span>'}</td>
+    <td>
+      <a href="/rbac/roles/${r.id}/edit" class="urbac-btn urbac-btn-sm urbac-btn-primary">✏️ Edit</a>
+      ${!r.is_system ? `<form method="POST" action="/rbac/roles/${r.id}/delete" style="display:inline" onsubmit="return confirm('Delete this role?')"><button class="urbac-btn urbac-btn-sm urbac-btn-danger">🗑️</button></form>` : ''}
+    </td></tr>`).join('');
+
+  const html = URBAC_CSS + `<div class="urbac-root">${urbacNav('roles', tenantType)}
+    <div class="urbac-hero"><h1>👥 Role Management</h1><p>Create, edit and manage access roles</p>
+      <div class="urbac-hero-actions"><a href="/rbac/roles/create" class="urbac-btn" style="background:var(--primary-light);color:#fff">➕ Create Role</a></div></div>
+    <div class="urbac-card"><div style="overflow-x:auto"><table class="urbac-table">
+      <thead><tr><th>Role</th><th>Description</th><th>Permissions</th><th>Members</th><th>Type</th><th>Actions</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="6" class="urbac-empty">No roles found</td></tr>'}</tbody>
+    </table></div></div></div>`;
+  res.send(renderPage('Roles', html, u, req));
+}));
+
+// ── ROUTE: GET /rbac/roles/create ─────────────────────────
+app.get('/rbac/roles/create', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id || 0;
+  const tenantType = u.tenant_type || 'school';
+  await seedRbacTenant(tid);
+
+  const { rows: perms } = await pool.query('SELECT * FROM rbac_permissions WHERE tenant_id=$1 ORDER BY category, permission_key', [tid]);
+  const cats = [...new Set(perms.map(p => p.category))];
+  const matrix = cats.map(cat => {
+    const catPerms = perms.filter(p => p.category === cat);
+    return `<div style="margin-bottom:16px">
+      <h4 style="margin:0 0 8px;color:var(--primary);font-size:14px;text-transform:capitalize">${esc(cat)}</h4>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">
+        ${catPerms.map(p => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:4px 0">
+          <input type="checkbox" name="perms" value="${p.id}" style="accent-color:var(--primary);width:16px;height:16px"> ${esc(p.permission_name)}</label>`).join('')}
+      </div></div>`;
+  }).join('');
+
+  const html = URBAC_CSS + `<div class="urbac-root">${urbacNav('roles', tenantType)}
+    <a href="/rbac/roles" style="color:var(--text-muted);text-decoration:none;font-size:14px;margin-bottom:16px;display:inline-block">← Back to Roles</a>
+    <div class="urbac-card" style="max-width:800px">
+      <div class="urbac-card-title">➕ Create New Role</div>
+      <form method="POST" action="/rbac/roles/create">
+        <div class="urbac-form-group"><label>Role Name</label><input class="urbac-input" name="role_name" required placeholder="e.g. department_head"></div>
+        <div class="urbac-form-group"><label>Description</label><input class="urbac-input" name="description" placeholder="Brief role description"></div>
+        <div class="urbac-grid-2">
+          <div class="urbac-form-group"><label>Priority (lower = higher)</label><input class="urbac-input" type="number" name="priority" value="50" min="1" max="100"></div>
+          <div class="urbac-form-group"><label>Color</label><input class="urbac-input" type="color" name="color" value="#6366f1"></div>
+        </div>
+        <div style="margin-top:20px;margin-bottom:12px"><h3 style="margin:0 0 12px;color:var(--text)">🔐 Assign Permissions</h3>${matrix}</div>
+        <button type="submit" class="urbac-btn urbac-btn-primary" style="margin-top:12px">💾 Create Role</button>
+      </form></div></div>`;
+  res.send(renderPage('Create Role', html, u, req));
+}));
+
+// ── ROUTE: POST /rbac/roles/create ────────────────────────
+app.post('/rbac/roles/create', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id || 0;
+  const { role_name, description = '', priority = 50, color = '#6366f1', perms = [] } = req.body;
+  const permIds = Array.isArray(perms) ? perms.map(Number).filter(n => n > 0) : [Number(perms)].filter(n => n > 0);
+  const { rows: rr } = await pool.query(
+    `INSERT INTO rbac_roles (tenant_id,role_name,description,priority,color) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+    [tid, role_name, description, Number(priority), color]);
+  for (const pid of permIds) {
+    await pool.query('INSERT INTO rbac_role_permissions (tenant_id,role_id,permission_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [tid, rr[0].id, pid]);
+  }
+  await logRbacAction(tid, 'role_created', u.email, null, rr[0].id, null, `Created role "${role_name}" with ${permIds.length} permissions`, req);
+  res.redirect('/rbac/roles?msg=Role+created+successfully');
+}));
+
+// ── ROUTE: GET /rbac/roles/:id/edit ──────────────────────
+app.get('/rbac/roles/:id/edit', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id || 0;
+  const tenantType = u.tenant_type || 'school';
+  const rid = req.params.id;
+  await seedRbacTenant(tid);
+
+  const { rows: role } = await pool.query('SELECT * FROM rbac_roles WHERE id=$1 AND tenant_id=$2', [rid, tid]);
+  if (!role.length) return res.status(404).send('Role not found');
+  const { rows: perms } = await pool.query('SELECT * FROM rbac_permissions WHERE tenant_id=$1 ORDER BY category, permission_key', [tid]);
+  const { rows: assigned } = await pool.query('SELECT permission_id FROM rbac_role_permissions WHERE role_id=$1 AND tenant_id=$2', [rid, tid]);
+  const assignedIds = new Set(assigned.map(a => a.permission_id));
+  const cats = [...new Set(perms.map(p => p.category))];
+
+  const matrix = cats.map(cat => {
+    const catPerms = perms.filter(p => p.category === cat);
+    return `<div style="margin-bottom:16px">
+      <h4 style="margin:0 0 8px;color:var(--primary);font-size:14px;text-transform:capitalize">${esc(cat)}</h4>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">
+        ${catPerms.map(p => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:4px 0">
+          <input type="checkbox" name="perms" value="${p.id}" ${assignedIds.has(p.id) ? 'checked' : ''} style="accent-color:${role[0].color || 'var(--primary)'};width:16px;height:16px"> ${esc(p.permission_name)}</label>`).join('')}
+      </div></div>`;
+  }).join('');
+
+  const html = URBAC_CSS + `<div class="urbac-root">${urbacNav('roles', tenantType)}
+    <a href="/rbac/roles" style="color:var(--text-muted);text-decoration:none;font-size:14px;margin-bottom:16px;display:inline-block">← Back to Roles</a>
+    <div class="urbac-card" style="max-width:800px">
+      <div class="urbac-card-title">✏️ Edit Role: <span style="color:${role[0].color || 'var(--primary)'}">${esc(role[0].role_name)}</span></div>
+      <form method="POST" action="/rbac/roles/${rid}/edit">
+        <div class="urbac-form-group"><label>Role Name</label><input class="urbac-input" name="role_name" value="${esc(role[0].role_name)}" required></div>
+        <div class="urbac-form-group"><label>Description</label><input class="urbac-input" name="description" value="${esc(role[0].description || '')}"></div>
+        <div class="urbac-grid-2">
+          <div class="urbac-form-group"><label>Priority</label><input class="urbac-input" type="number" name="priority" value="${role[0].priority}" min="1" max="100"></div>
+          <div class="urbac-form-group"><label>Color</label><input class="urbac-input" type="color" name="color" value="${role[0].color || '#6366f1'}"></div>
+        </div>
+        <div style="margin-top:20px;margin-bottom:12px"><h3 style="margin:0 0 12px;color:var(--text)">🔐 Permissions (${assignedIds.size} assigned)</h3>${matrix}</div>
+        <button type="submit" class="urbac-btn urbac-btn-primary" style="margin-top:12px">💾 Save Changes</button>
+      </form></div></div>`;
+  res.send(renderPage('Edit Role', html, u, req));
+}));
+
+// ── ROUTE: POST /rbac/roles/:id/edit ──────────────────────
+app.post('/rbac/roles/:id/edit', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id || 0;
+  const rid = req.params.id;
+  const { role_name, description = '', priority = 50, color = '#6366f1', perms = [] } = req.body;
+  const permIds = Array.isArray(perms) ? perms.map(Number).filter(n => n > 0) : [Number(perms)].filter(n => n > 0);
+  await pool.query('UPDATE rbac_roles SET role_name=$1,description=$2,priority=$3,color=$4 WHERE id=$5 AND tenant_id=$6',
+    [role_name, description, Number(priority), color, rid, tid]);
+  await pool.query('DELETE FROM rbac_role_permissions WHERE role_id=$1 AND tenant_id=$2', [rid, tid]);
+  for (const pid of permIds) {
+    await pool.query('INSERT INTO rbac_role_permissions (tenant_id,role_id,permission_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [tid, rid, pid]);
+  }
+  await logRbacAction(tid, 'role_updated', u.email, null, Number(rid), null, `Updated role "${role_name}" — ${permIds.length} permissions`, req);
+  res.redirect('/rbac/roles?msg=Role+updated');
+}));
+
+// ── ROUTE: POST /rbac/roles/:id/delete ────────────────────
+app.post('/rbac/roles/:id/delete', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id || 0;
+  const rid = req.params.id;
+  const { rows: role } = await pool.query('SELECT * FROM rbac_roles WHERE id=$1 AND tenant_id=$2', [rid, tid]);
+  if (!role.length) return res.status(404).send('Role not found');
+  if (role[0].is_system) return res.status(400).send('Cannot delete system role');
+  const { rows: members } = await pool.query('SELECT id FROM rbac_user_roles WHERE role_id=$1 AND tenant_id=$2', [rid, tid]);
+  await pool.query('DELETE FROM rbac_role_permissions WHERE role_id=$1 AND tenant_id=$2', [rid, tid]);
+  await pool.query('DELETE FROM rbac_user_roles WHERE role_id=$1 AND tenant_id=$2', [rid, tid]);
+  await pool.query('DELETE FROM rbac_roles WHERE id=$1 AND tenant_id=$2', [rid, tid]);
+  await logRbacAction(tid, 'role_deleted', u.email, null, Number(rid), null, `Deleted role "${role[0].role_name}" (${members.length} members affected)`, req);
+  res.redirect('/rbac/roles?msg=Role+deleted');
+}));
+
+// ── ROUTE: GET /rbac/permissions — Permission Matrix ─────
+app.get('/rbac/permissions', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id || 0;
+  const tenantType = u.tenant_type || 'school';
+  await seedRbacTenant(tid);
+
+  const { rows: roles } = await pool.query('SELECT * FROM rbac_roles WHERE tenant_id=$1 ORDER BY priority', [tid]);
+  const { rows: perms } = await pool.query('SELECT * FROM rbac_permissions WHERE tenant_id=$1 ORDER BY category, permission_key', [tid]);
+  const { rows: rp } = await pool.query('SELECT role_id, permission_id FROM rbac_role_permissions WHERE tenant_id=$1', [tid]);
+  const rpSet = new Set(rp.map(r => `${r.role_id}:${r.permission_id}`));
+
+  const headerCells = roles.map(r =>
+    `<th><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${r.color || 'var(--primary)'};margin-right:4px"></span>${esc(r.role_name.length > 10 ? r.role_name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).substring(0, 10) + '…' : r.role_name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))}</th>`).join('');
+  const cats = [...new Set(perms.map(p => p.category))];
+  let bodyHtml = '';
+  for (const cat of cats) {
+    bodyHtml += `<tr class="cat-row"><td>${esc(cat.toUpperCase())}</td><td colspan="${roles.length}"></td></tr>`;
+    const catPerms = perms.filter(p => p.category === cat);
+    for (const p of catPerms) {
+      bodyHtml += `<tr><td title="${esc(p.description || '')}">${esc(p.permission_name)}</td>`;
+      for (const r of roles) {
+        const checked = rpSet.has(`${r.id}:${p.id}`);
+        bodyHtml += `<td><input type="checkbox" ${checked ? 'checked' : ''} disabled style="accent-color:${checked ? (r.color || 'var(--primary)') : '#d1d5db'}"></td>`;
+      }
+      bodyHtml += `</tr>`;
+    }
+  }
+
+  const html = URBAC_CSS + `<div class="urbac-root">${urbacNav('perms', tenantType)}
+    <div class="urbac-hero"><h1>🔐 Permission Matrix</h1><p>Visual overview of all role-permission assignments</p></div>
+    <div class="urbac-card"><div style="overflow-x:auto">
+      <table class="urbac-matrix"><thead><tr><th>Permission</th>${headerCells}</tr></thead>
+      <tbody>${bodyHtml}</tbody></table>
+    </div></div></div>`;
+  res.send(renderPage('Permission Matrix', html, u, req));
+}));
+
+// ── ROUTE: GET /rbac/users — User role assignments ───────
+app.get('/rbac/users', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id || 0;
+  const tenantType = u.tenant_type || 'school';
+  await seedRbacTenant(tid);
+
+  // Get all users in this tenant with their role info
+  const { rows: userRoles } = await pool.query(
+    `SELECT u.email, u.name, u.role as system_role,
+            STRING_AGG(DISTINCT r.role_name, ', ' ORDER BY r.role_name) as rbac_roles,
+            COUNT(DISTINCT ur.role_id)::int as role_count
+     FROM users u
+     LEFT JOIN rbac_user_roles ur ON ur.user_email = u.email AND ur.tenant_id = $1
+     LEFT JOIN rbac_roles r ON r.id = ur.role_id
+     WHERE u.tenant_id = $1
+     GROUP BY u.email, u.name, u.role
+     ORDER BY role_count DESC, u.email`, [tid]);
+
+  const rows = userRoles.map(usr => `<tr>
+    <td>
+      <div style="font-weight:600;color:var(--text)">${esc(usr.name || usr.email?.split('@')[0] || 'Unknown')}</div>
+      <div style="font-size:11px;color:var(--text-dim)">${esc(usr.email)}</div>
+    </td>
+    <td><span class="urbac-badge" style="background:var(--border-light);color:var(--primary)">${esc(usr.system_role || 'member')}</span></td>
+    <td>${usr.rbac_roles ? usr.rbac_roles.split(', ').map(r => '<span class="urbac-badge" style="background:var(--border-light);color:var(--primary);margin:1px">' + esc(r) + '</span>').join(' ') : '<span style="color:var(--text-dim);font-size:12px">No roles assigned</span>'}</td>
+    <td>
+      <a href="/rbac/users/${encodeURIComponent(usr.email)}" class="urbac-btn urbac-btn-sm urbac-btn-primary">Manage</a>
+    </td></tr>`).join('');
+
+  const html = URBAC_CSS + `<div class="urbac-root">${urbacNav('users', tenantType)}
+    <div class="urbac-hero"><h1>👤 User Role Assignments</h1><p>Assign and manage roles for your team members</p></div>
+    <div class="urbac-card"><div style="overflow-x:auto"><table class="urbac-table">
+      <thead><tr><th>User</th><th>System Role</th><th>RBAC Roles</th><th>Actions</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="4" class="urbac-empty">No users found</td></tr>'}</tbody>
+    </table></div></div></div>`;
+  res.send(renderPage('User Roles', html, u, req));
+}));
+
+// ── ROUTE: GET /rbac/users/:email — User detail ──────────
+app.get('/rbac/users/:email', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id || 0;
+  const tenantType = u.tenant_type || 'school';
+  const email = decodeURIComponent(req.params.email);
+  await seedRbacTenant(tid);
+
+  const { rows: assignments } = await pool.query(
+    `SELECT ur.*, r.role_name, r.color, r.description,
+            (SELECT COUNT(*)::int FROM rbac_role_permissions rp WHERE rp.role_id=r.id AND rp.tenant_id=$2) as perm_count
+     FROM rbac_user_roles ur JOIN rbac_roles r ON r.id=ur.role_id
+     WHERE ur.user_email=$1 AND ur.tenant_id=$2 ORDER BY r.priority`,
+    [email, tid]);
+
+  const allPerms = await Promise.all(assignments.map(async a => {
+    const { rows: pp } = await pool.query(
+      `SELECT p.* FROM rbac_permissions p JOIN rbac_role_permissions rp ON rp.permission_id=p.id WHERE rp.role_id=$1 AND rp.tenant_id=$2`,
+      [a.role_id, tid]);
+    return { role: a, perms: pp };
+  }));
+
+  const roleCards = allPerms.map(({ role: a, perms: pp }) => {
+    const permList = pp.map(p => `<span class="urbac-badge" style="background:var(--border-light);color:var(--primary);margin:2px">${esc(p.permission_key)}</span>`).join('');
+    return `<div class="urbac-card" style="border-left:4px solid ${a.color || 'var(--primary)'}">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><strong style="color:var(--text)">${esc(a.role_name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))}</strong>
+        <div style="font-size:12px;color:var(--text-muted)">${a.perm_count} permissions · Assigned ${a.assigned_at ? new Date(a.assigned_at).toLocaleString() : '—'}</div></div>
+        <form method="POST" action="/rbac/users/${encodeURIComponent(email)}/revoke" style="display:inline">
+          <input type="hidden" name="role_id" value="${a.role_id}">
+          <button class="urbac-btn urbac-btn-sm urbac-btn-danger" onclick="return confirm('Revoke this role?')">❌ Revoke</button>
+        </form>
+      </div>
+      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">${permList || '<span style="font-size:12px;color:var(--text-dim)">No permissions</span>'}</div>
+    </div>`;
+  }).join('');
+
+  // Available roles for assignment
+  const assignedRoleIds = new Set(assignments.map(a => a.role_id));
+  const { rows: allRoles } = await pool.query('SELECT * FROM rbac_roles WHERE tenant_id=$1 ORDER BY priority', [tid]);
+  const availableRoles = allRoles.filter(r => !assignedRoleIds.has(r.id));
+
+  const html = URBAC_CSS + `<div class="urbac-root">${urbacNav('users', tenantType)}
+    <a href="/rbac/users" style="color:var(--text-muted);text-decoration:none;font-size:14px;margin-bottom:16px;display:inline-block">← Back to Users</a>
+    <div class="urbac-hero"><h1>👤 ${esc(email.split('@')[0])}</h1><p>Roles and permissions for this user</p></div>
+    ${availableRoles.length ? `<div class="urbac-card" style="margin-bottom:16px">
+      <div class="urbac-card-title">➕ Assign New Role</div>
+      <form method="POST" action="/rbac/users/${encodeURIComponent(email)}/assign" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px"><label style="font-size:12px;font-weight:600;color:var(--text);display:block;margin-bottom:4px">Role</label>
+          <select name="role_id" class="urbac-select" required>
+            <option value="">Select role...</option>
+            ${availableRoles.map(r => `<option value="${r.id}">${esc(r.role_name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))}</option>`).join('')}
+          </select></div>
+        <button type="submit" class="urbac-btn urbac-btn-primary">Assign Role</button>
+      </form></div>` : ''}
+    <div style="display:grid;gap:12px">${roleCards || '<div class="urbac-empty">No roles assigned to this user</div>'}</div></div>`;
+  res.send(renderPage('User RBAC — ' + email, html, u, req));
+}));
+
+// ── ROUTE: POST /rbac/users/:email/assign ────────────────
+app.post('/rbac/users/:email/assign', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id || 0;
+  const email = decodeURIComponent(req.params.email);
+  const roleId = req.body.role_id;
+  if (!roleId) return res.redirect('/rbac/users/' + encodeURIComponent(email) + '?msg=No+role+selected');
+  await pool.query('INSERT INTO rbac_user_roles (tenant_id,user_email,role_id,assigned_by) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING', [tid, email, roleId, u.email]);
+  const { rows: rr } = await pool.query('SELECT role_name FROM rbac_roles WHERE id=$1', [roleId]);
+  await logRbacAction(tid, 'role_assigned', u.email, email, Number(roleId), null, `Assigned role "${rr[0]?.role_name}" to ${email}`, req);
+  res.redirect('/rbac/users/' + encodeURIComponent(email) + '?msg=Role+assigned');
+}));
+
+// ── ROUTE: POST /rbac/users/:email/revoke ────────────────
+app.post('/rbac/users/:email/revoke', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const u = req.session.user;
+  const tid = u.tenant_id || 0;
+  const email = decodeURIComponent(req.params.email);
+  const roleId = req.body.role_id;
+  const { rows: rr } = await pool.query('SELECT role_name FROM rbac_roles WHERE id=$1', [roleId]);
+  await pool.query('DELETE FROM rbac_user_roles WHERE user_email=$1 AND role_id=$2 AND tenant_id=$3', [email, roleId, tid]);
+  await logRbacAction(tid, 'role_revoked', u.email, email, Number(roleId), null, `Revoked role "${rr[0]?.role_name}" from ${email}`, req);
+  res.redirect('/rbac/users/' + encodeURIComponent(email) + '?msg=Role+revoked');
+}));
+
+// ── ROUTE: GET /admin/rbac — Redirect to universal RBAC ──
+app.get('/admin/rbac', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  res.redirect('/rbac');
+}));
+
+console.log('[UniversalRBAC] Portal-agnostic RBAC routes registered — /rbac/* (accessible from all portal types)');
 
 // ============================================================
 // PHASE 4 COMPLETE: All remaining gap analysis tasks implemented

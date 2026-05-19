@@ -6,3 +6,4 @@ node_modules/
 convert-whiteboard.js
 coverage/
 .nyc_output/
+uploads/
