@@ -1688,7 +1688,8 @@ const migrations = [
   // Seed default feature flags
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('plan_enforcement', 'Plan Enforcement', 'Block free plan at 50 students', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('usage_limits', 'Usage Limits', 'Auto-block when plan limit exceeded', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('auto_backup', 'Auto Daily Backup', 'pg_dump to Cloudinary at 2am UTC', '3.0', 'core', 'CLOUDINARY_URL env var', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('auto_backup', 'Auto Daily Backup', 'pg_dump to Cloudinary at 2am UTC', '3.0', 'core', 'CLOUDINARY_URL env var', true) ON CONFLICT DO NOTHING`,
+  `UPDATE feature_flags SET is_active = true WHERE feature_key = 'auto_backup'`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('soft_delete', 'Soft Delete', 'Deleted items can be restored within 30 days', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('version_history', 'Version History', 'Track all data changes with undo support', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('pagination', 'Pagination', '50 rows per page on all lists', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
@@ -14192,6 +14193,13 @@ const runAutoBackup = async () => {
       } catch(e) { console.warn(`Backup failed for tenant ${t.id}:`, e.message); }
     }
     console.log(`Auto-backup completed for ${Math.min(tenants.length, 5)} tenants`);
+    // Notify super_admin of backup results
+    try {
+      const superAdmin = (await pool.query("SELECT email FROM users WHERE role='super_admin' LIMIT 1")).rows[0];
+      if (superAdmin) {
+        queueEmail(superAdmin.email, 'Daily Backup Complete', `<div style="max-width:500px;margin:0 auto;font-family:sans-serif"><h2>Backup Report</h2><p>Auto-backup completed for <b>${Math.min(tenants.length, 5)}</b> tenants out of ${tenants.length} total.</p><p>Check the <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/settings/backup">Backup Log</a> for details.</p></div>`);
+      }
+    } catch(e) { console.warn('[Backup] Admin notification error:', e.message); }
   } catch(e) { console.warn('Auto-backup error:', e.message); }
 };
 // Run daily at 2am UTC (every 24 hours)
