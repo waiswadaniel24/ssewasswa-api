@@ -220,6 +220,16 @@ module.exports = async function (pool) {
     `ALTER TABLE user_points ADD COLUMN IF NOT EXISTS total_points INTEGER DEFAULT 0`,
 
     // ----------------------------------------------------------
+    // subscriptions — Trial enforcement columns
+    //   Used by checkTrialAccess middleware to enforce 2-month
+    //   free trial expiration and redirect to billing.
+    // ----------------------------------------------------------
+    `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS trial_start TIMESTAMPTZ`,
+    `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS trial_end TIMESTAMPTZ`,
+    `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS trial_expired BOOLEAN DEFAULT false`,
+    `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
+
+    // ----------------------------------------------------------
     // affiliate_links — canonical: viral-content-engine.js
     //   has: id, tenant_id, original_url, affiliate_slug (UNIQUE),
     //        title, description, platform, clicks, conversions,
@@ -254,6 +264,32 @@ module.exports = async function (pool) {
     ['scraped_content', 'scraped_jobs', 'scraped_opportunities',
      'developer_revenue', 'poll_options', 'ad_clicks'
     ].forEach(t => VALID_TABLES.add(t));
+  }
+
+  // ============================================================
+  // PART 4: BACKFILL TRIAL DATES FOR EXISTING FREE SUBSCRIPTIONS
+  // Existing free-plan tenants get a 2-month trial from the time
+  // this migration runs. Paid-plan tenants are left alone.
+  // ============================================================
+  try {
+    const backfillResult = await pool.query(`
+      UPDATE subscriptions
+      SET trial_start = COALESCE(started_at, NOW()),
+          trial_end = COALESCE(started_at, NOW()) + INTERVAL '60 days',
+          trial_expired = false
+      WHERE plan = 'free'
+        AND status = 'active'
+        AND trial_start IS NULL
+        AND trial_end IS NULL
+    `);
+    if (backfillResult.rowCount > 0) {
+      results.altered.push(`subscriptions.trial_backfill (${backfillResult.rowCount} rows)`);
+      console.log(`[SchemaGaps] Backfilled trial dates for ${backfillResult.rowCount} existing free subscriptions`);
+    }
+  } catch (e) {
+    if (!e.message.includes('does not exist')) {
+      console.warn('[SchemaGaps] Trial backfill error:', e.message);
+    }
   }
 
   console.log('[SchemaGaps] Created tables:', results.created.join(', '));

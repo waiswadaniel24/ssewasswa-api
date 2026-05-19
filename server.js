@@ -684,6 +684,100 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// === TRIAL ENFORCEMENT MIDDLEWARE ===
+// Blocks expired trial users from accessing features, redirects to billing.
+// Must be placed AFTER session + impersonation middleware, BEFORE routes.
+const checkTrialAccess = async (req, res, next) => {
+  // Skip for non-authenticated routes (login, register, static files, health checks)
+  if (!req.session.user) return next();
+
+  // Skip for super_admin — always has full access
+  if (req.session.user.role === 'super_admin') return next();
+
+  // Skip for billing-related routes (so user can upgrade/pay)
+  const billingRoutes = ['/billing', '/billing/', '/billing/invoices', '/billing/history', '/settings', '/settings/profile', '/settings/password', '/logout', '/api/subscription/status'];
+  if (billingRoutes.some(r => req.path === r || req.path.startsWith(r + '/'))) return next();
+
+  // Skip for dev panel routes
+  if (req.path.startsWith('/dev/')) return next();
+
+  // Skip for static/asset routes
+  if (req.path.match(/\.(css|js|png|jpg|ico|svg|woff|woff2|ttf|map)$/)) return next();
+
+  // Skip for auth routes
+  if (['/login', '/register', '/forgot-password', '/ping', '/health', '/sw.js', '/manifest.json'].includes(req.path)) return next();
+
+  // Check trial status from database
+  try {
+    const result = await pool.query(
+      `SELECT s.trial_start, s.trial_end, s.trial_expired, s.status, s.plan
+       FROM subscriptions s
+       WHERE s.tenant_id = $1 AND s.status = 'active'
+       ORDER BY COALESCE(s.created_at, s.started_at) DESC LIMIT 1`,
+      [req.session.user.tenant_id]
+    );
+
+    if (!result.rows.length) return next(); // No subscription = allow (edge case)
+
+    const sub = result.rows[0];
+
+    // If on a paid plan (not free), allow access
+    if (sub.plan && sub.plan !== 'free' && sub.plan !== 'Free') return next();
+
+    // If trial_end exists and is in the future, allow access and set trial info on session
+    if (sub.trial_end && new Date(sub.trial_end) > new Date()) {
+      const daysLeft = Math.ceil((new Date(sub.trial_end) - new Date()) / (1000 * 60 * 60 * 24));
+      // Set trial info on session for banner rendering (only update if changed)
+      if (req.session.user._trial_days !== daysLeft) {
+        req.session.user._trial_days = daysLeft;
+        req.session.user._trial_expired = false;
+      }
+      return next();
+    }
+
+    // Trial has expired — mark it in DB if not already marked
+    if (!sub.trial_expired) {
+      pool.query(
+        'UPDATE subscriptions SET trial_expired = true WHERE tenant_id = $1 AND trial_end < NOW() AND (trial_expired = false OR trial_expired IS NULL)',
+        [req.session.user.tenant_id]
+      ).catch(e => console.error('[TrialCheck] DB update error:', e.message));
+    }
+
+    // Check if admin has granted free access extension via platform_settings
+    try {
+      const grantCheck = await pool.query(
+        "SELECT value->>'free_access_until' as until FROM platform_settings WHERE key = 'tenant_grants' AND value->>'tenant_id' = $1",
+        [req.session.user.tenant_id.toString()]
+      );
+      if (grantCheck.rows.length && grantCheck.rows[0].until && new Date(grantCheck.rows[0].until) > new Date()) {
+        req.session.user._trial_days = null;
+        req.session.user._trial_expired = false;
+        return next();
+      }
+    } catch(grantErr) {
+      // platform_settings table or column may not exist — ignore
+    }
+
+    // Set trial expired flag on session
+    req.session.user._trial_expired = true;
+    req.session.user._trial_days = 0;
+
+    // TRIAL EXPIRED — redirect or return 402
+    if (req.xhr || (req.headers.accept && req.headers.accept.includes('application/json'))) {
+      return res.status(402).json({ error: 'Free trial expired', redirect: '/billing' });
+    }
+    return res.redirect('/billing?trial_expired=1');
+
+  } catch(err) {
+    console.error('[TrialCheck] Error:', err.message);
+    return next(); // Fail open — allow access on error
+  }
+};
+
+// Apply trial enforcement globally — AFTER session + auth middleware, BEFORE route definitions
+app.use(checkTrialAccess);
+
 const requireRole = (...roles) => (req, res, next) => {
   const u = req.session.user;
   if (!u) return res.redirect('/login');
@@ -2686,10 +2780,10 @@ const renderPageLite = (title, content, user, csrfTokenOrReq) => {
 .container{max-width:960px;margin:0 auto;padding:16px}nav{background:#1e40af;color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:space-between}nav a{color:#fff;text-decoration:none;margin:0 8px;font-size:14px}
 .card{background:#fff;border-radius:8px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.1);margin:16px 0}.btn{display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;text-decoration:none;font-size:14px}
 .btn:hover{background:#1d4ed8}input{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:6px;margin:8px 0;font-size:14px}footer{text-align:center;padding:20px;color:#94a3b8;font-size:13px}
-.alert{padding:12px;border-radius:6px;margin:12px 0}.alert-error{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}</style></head>
+.alert{padding:12px;border-radius:6px;margin:12px 0}.alert-error{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}</style><link rel="stylesheet" href="/ui-foundation.css"></head>
 <body><nav><strong>Comfort</strong><div><a href="/">Home</a><a href="/login">Login</a><a href="/register">Register</a><a href="/pricing">Pricing</a></div></nav>
 <div class="container">${safeContent}</div>
-<footer>Comfort Platform &copy; ${new Date().getFullYear()}</footer></body></html>`;
+<footer>Comfort Platform &copy; ${new Date().getFullYear()}</footer><script src="/ui-foundation.js"></script></body></html>`;
 };
 
 // === RENDER PAGE (with dark mode support) ===
@@ -3049,7 +3143,13 @@ window.addEventListener('appinstalled',function(){_hideInstallBtns();});
 // Show install buttons always if not in standalone mode
 if(_isStandalone){_hideInstallBtns();}
 </script>
+<link rel="stylesheet" href="/ui-foundation.css">
 </head><body>
+${user && user._trial_days && user._trial_days > 0 ? `<div id="trial-banner" style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;padding:10px 16px;text-align:center;font-size:14px;position:sticky;top:0;z-index:9990;font-weight:500;box-shadow:0 2px 8px rgba(245,158,11,0.3)">
+  <strong>&#9202; Free Trial:</strong> <span id="trial-days">${user._trial_days}</span> day${user._trial_days !== 1 ? 's' : ''} remaining
+  <a href="/billing" style="background:#000;color:#fff;padding:5px 14px;border-radius:6px;margin-left:14px;text-decoration:none;font-size:13px;font-weight:600;transition:all 0.2s" onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background='#000'">Upgrade Now</a>
+  <button onclick="document.getElementById('trial-banner').style.display='none'" style="background:none;border:none;font-size:18px;cursor:pointer;margin-left:12px;vertical-align:middle;color:#000;opacity:0.7" title="Dismiss">&times;</button>
+</div>` : ''}
 <a href="#main" style="position:absolute;top:-100px;left:0;background:#4f46e5;color:white;padding:8px;z-index:9999" onfocus="this.style.top=\"0\"" onblur="this.style.top=\"-100px\"">Skip to main content</a>
 <div id="float-install-btn" style="position:fixed;bottom:80px;right:20px;z-index:9999;flex-direction:column;align-items:center;gap:4px">
 <a href="#" onclick="_installApp();return false" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#059669,#10b981);color:white;padding:12px 24px;border-radius:50px;text-decoration:none;font-weight:700;font-size:13px;box-shadow:0 4px 20px rgba(5,150,105,0.4);font-family:'Inter',sans-serif;letter-spacing:-0.01em;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);animation:installPulse 2s ease-in-out infinite">&#128241; Install App</a>
@@ -3167,9 +3267,10 @@ function updateNotifBadge(count){ if(!_notifBadge) return; if(count>0){_notifBad
   try {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     var ws = new WebSocket(proto + '//' + location.host + '/ws/notifications?sid=' + encodeURIComponent(document.cookie.match(/connect\\.sid=([^;]+)/) ? document.cookie.match(/connect\\.sid=([^;]+)/)[1] : ''));
+    window._ws = ws;
     ws.onopen = function(){ console.log('[WS] Connected'); fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){updateBadge(d.count)}).catch(function(){}); };
     ws.onmessage = function(e){ var d=JSON.parse(e.data); if(d.type==='notification'){updateBadge(d.count);if(Notification.permission==='granted'){new Notification('Comfort',{body:d.title,icon:'/favicon.ico'});}else if(d.title){_notifBadge.style.animation='none';_notifBadge.offsetHeight;_notifBadge.style.animation='pulse 0.5s ease';}} };
-    ws.onclose = function(){ console.log('[WS] Closed, fallback to polling'); startPolling(); };
+    ws.onclose = function(){ console.log('[WS] Closed, fallback to polling'); window._ws = null; startPolling(); };
     ws.onerror = function(){ ws.close(); };
   } catch(e){ startPolling(); }
   function startPolling(){ setInterval(function(){ fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){updateBadge(d.count)}).catch(function(){}); }, 30000); }
@@ -3323,6 +3424,7 @@ ${user ? `<script>
   });
 })();
 </script>` : ''}
+<script src="/ui-foundation.js"></script>
 </body></html>`;
 };
 
@@ -3702,7 +3804,18 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
   sendEmail(email, 'Welcome to Comfort!', welcomeHtml);
   queueEmail(tenant.rows[0].id, email, 'Welcome to Comfort!', welcomeHtml);
   // v1.0: Subscription based on chosen plan
-  try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status) VALUES($1,$2,$3,$4)', [newTenantId, chosenPlan, planAmounts[chosenPlan] || 0, chosenPlan === 'free' ? 'active' : 'pending_payment']); } catch(e) { /* duplicate subscription OK */ }
+  // Set 2-month free trial for free plan, or trial dates for paid plans too
+  const trialStart = new Date();
+  const trialEnd = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days from now
+  try {
+    await pool.query(
+      'INSERT INTO subscriptions(tenant_id,plan,amount,status,trial_start,trial_end,trial_expired) VALUES($1,$2,$3,$4,$5,$6,$7)',
+      [newTenantId, chosenPlan, planAmounts[chosenPlan] || 0, chosenPlan === 'free' ? 'active' : 'pending_payment', trialStart, trialEnd, false]
+    );
+  } catch(e) {
+    // duplicate subscription OK — fallback without trial columns (older schema)
+    try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status) VALUES($1,$2,$3,$4)', [newTenantId, chosenPlan, planAmounts[chosenPlan] || 0, chosenPlan === 'free' ? 'active' : 'pending_payment']); } catch(e2) { /* duplicate subscription OK */ }
+  }
   // If plan is not free, update the subscription status to pending_payment for billing
   if (chosenPlan !== 'free') {
     try { await pool.query('UPDATE subscriptions SET plan=$1, amount=$2, status=$3 WHERE tenant_id=$4', [chosenPlan, planAmounts[chosenPlan], 'pending_payment', newTenantId]); } catch(e) { /* non-critical */ }
@@ -4079,13 +4192,13 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
   const hasBranches = pi.accessible.has('multi_branch');
   const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/g, 'href="/billing"')}</div>`;
   res.send(renderPage('School Dashboard', `
-    <div class="hero"><h1>School Portal</h1><p>Manage students, fees, exams, attendance, reports</p><div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div></div>
+    <div data-dashboard><div class="hero"><h1>School Portal <span class=\"live-indicator\"><span class=\"live-dot\"></span> Live</span></h1><p>Manage students, fees, exams, attendance, reports</p><div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div></div>
     <div class="stats">
-      <div class="stat-card"><div class="stat-num">${students.rows[0].count}</div><div>Students</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(fees.rows[0].coalesce).toLocaleString()}</div><div>Fees Due</div></div>
-      <div class="stat-card"><div class="stat-num">${exams.rows[0].count}</div><div>Exams</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#059669">${attendance.rows[0].count}</div><div>Present Today</div></div>
-    </div>
+      <div class="stat-card"><div class="stat-num" data-stat="student_count">${students.rows[0].count}</div><div>Students</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="fee_total">UGX ${parseInt(fees.rows[0].coalesce).toLocaleString()}</div><div>Fees Due</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="exam_count">${exams.rows[0].count}</div><div>Exams</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="attendance_today" style="color:#059669">${attendance.rows[0].count}</div><div>Present Today</div></div>
+    </div></div>
     ${ds('📚', 'Academics', `
       <div class="card"><h3>Students</h3><a href="/school/students" class="btn">Manage Students</a><a href="/school/students/import" class="btn btn-green btn-sm" style="margin-top:8px">CSV Import</a></div>
       <div class="card"><h3>Exams & Marks</h3><a href="/school/exams" class="btn">Exam Results</a><a href="/school/exams/new" class="btn btn-sm" style="margin-top:8px">New Exam</a></div>
@@ -4294,6 +4407,7 @@ app.post('/school/students/save', requireAuth, requireNotBanned, validate({ name
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO students(tenant_id,admission_no,name,class,stream,guardian_name,guardian_phone) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, admission_no, name, finalClass, finalStream, guardian_name, guardian_phone]);
   await audit(req.session.user.email, 'add_student', `Added student: ${name}`, req.session.user.tenant_id, req);
+  wsBroadcast(t, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
   res.redirect('/school/students');
 }));
 
@@ -4478,6 +4592,7 @@ app.post('/school/fees/pay/save', requireAuth, requireNotBanned, ah(async (req, 
   const t = req.session.user.tenant_id;
   await pool.query('UPDATE fees SET paid=paid+$1 WHERE id=$2 AND tenant_id=$3', [amount, fee_id, t]);
   await audit(req.session.user.email, 'fee_payment', `Payment UGX ${amount} on fee #${fee_id}`, req.session.user.tenant_id, req);
+  wsBroadcast(t, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
   // v1.0: Fee balance SMS + email notification to parent
   try {
     const fee = (await pool.query('SELECT f.*,s.name as student_name,s.guardian_phone,s.parent_email FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.id=$1', [fee_id])).rows[0];
@@ -5800,15 +5915,15 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
     tenant.has_fundraising = true;
   }
   res.send(renderPage('Organization Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#8b5cf6)">
-      <h1>Organization Portal</h1><p>Manage members, projects, events, meetings, notices</p>
+    <div data-dashboard><div class="hero" style="background:linear-gradient(135deg,#7c3aed,#8b5cf6)">
+      <h1>Organization Portal <span class="live-indicator"><span class="live-dot"></span> Live</span></h1><p>Manage members, projects, events, meetings, notices</p>
     </div>
     <div class="stats">
-      <div class="stat-card"><div class="stat-num">${members.rows[0].count}</div><div>Members</div></div>
-      <div class="stat-card"><div class="stat-num">${projects.rows[0].count}</div><div>Projects</div></div>
-      <div class="stat-card"><div class="stat-num">${events.rows[0].count}</div><div>Events</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(budget.rows[0].coalesce).toLocaleString()}</div><div>Income</div></div>
-    </div>
+      <div class="stat-card"><div class="stat-num" data-stat="member_count">${members.rows[0].count}</div><div>Members</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="project_count">${projects.rows[0].count}</div><div>Projects</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="event_count">${events.rows[0].count}</div><div>Events</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="income_total">UGX ${parseInt(budget.rows[0].coalesce).toLocaleString()}</div><div>Income</div></div>
+    </div></div>
     ${ds('🏢', 'Core', `
       <div class="grid">
       <div class="card"><h3>Members</h3>
@@ -6028,6 +6143,7 @@ app.post('/org/register/save', requireAuth, requireNotBanned, ah(async (req, res
   const { name, email, phone, role } = req.body;
   await pool.query('INSERT INTO members(tenant_id,name,email,phone,role) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, name, email, phone, role]);
   await audit(req.session.user.email, 'add_member', `Added member: ${name}`, req.session.user.tenant_id, req);
+  wsBroadcast(req.session.user.tenant_id, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
   res.redirect('/org/members');
 }));
 
@@ -6516,16 +6632,16 @@ app.get('/portal/church', requireAuth, requireNotBanned, ah(async (req, res) => 
     pool.query('SELECT COUNT(*) FROM service_schedule WHERE tenant_id=$1', [t])
   ]);
   res.send(renderPage('Church Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#7c2d12,#ea580c)">
-      <h1>Church Portal</h1><p>Congregation, Tithes, Sermons, Prayer Requests</p>
+    <div data-dashboard><div class="hero" style="background:linear-gradient(135deg,#7c2d12,#ea580c)">
+      <h1>Church Portal <span class="live-indicator"><span class="live-dot"></span> Live</span></h1><p>Congregation, Tithes, Sermons, Prayer Requests</p>
       <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div>
     </div>
     <div class="stats">
-      <div class="stat-card"><div class="stat-num">${members.rows[0].count}</div><div>Members</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(tithes.rows[0].coalesce).toLocaleString()}</div><div>Total Tithes</div></div>
-      <div class="stat-card"><div class="stat-num">${sermons.rows[0].count}</div><div>Sermons</div></div>
-      <div class="stat-card"><div class="stat-num">${prayers.rows[0].count}</div><div>Prayer Requests</div></div>
-    </div>
+      <div class="stat-card"><div class="stat-num" data-stat="member_count">${members.rows[0].count}</div><div>Members</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="tithe_total">UGX ${parseInt(tithes.rows[0].coalesce).toLocaleString()}</div><div>Total Tithes</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="sermon_count">${sermons.rows[0].count}</div><div>Sermons</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="prayer_count">${prayers.rows[0].count}</div><div>Prayer Requests</div></div>
+    </div></div>
 ${ds('👥','Congregation',`
       <div class="card"><h3>Congregation</h3>
         <a href="/org/members" class="btn btn-sm">Members</a>
@@ -6850,6 +6966,7 @@ app.post('/church/members/save', requireAuth, requireNotBanned, ah(async (req, r
   const { name, email, phone, address, role, date_of_birth } = req.body;
   await pool.query('INSERT INTO church_members(tenant_id,name,email,phone,address,role,date_of_birth) VALUES($1,$2,$3,$4,$5,$6,$7)', [req.session.user.tenant_id, name, email, phone, address, role, date_of_birth || null]);
   await audit(req.session.user.email, 'add_church_member', `Added church member: ${name}`, req.session.user.tenant_id, req);
+  wsBroadcast(req.session.user.tenant_id, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
   res.redirect('/church/members');
 }));
 
@@ -6917,6 +7034,7 @@ app.post('/church/donations/save', requireAuth, requireNotBanned, ah(async (req,
   const { donor_name, amount, type, method, reference } = req.body;
   await pool.query('INSERT INTO donations(tenant_id,donor_name,amount,type,method,reference) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, donor_name, amount, type, method, reference]);
   await audit(req.session.user.email, 'add_donation', `Donation UGX ${amount} from ${donor_name}`, req.session.user.tenant_id, req);
+  wsBroadcast(req.session.user.tenant_id, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
   res.redirect('/church/donations');
 }));
 
@@ -6945,18 +7063,18 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
   const hasReports = pi.accessible.has('scheduled_reports');
   const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/g, 'href="/billing"')}</div>`;
   res.send(renderPage('Business Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#0891b2,#06b6d4)">
-      <h1>Business Portal</h1><p>POS, Inventory, Invoices, Customers, Profit/Loss</p>
+    <div data-dashboard><div class="hero" style="background:linear-gradient(135deg,#0891b2,#06b6d4)">
+      <h1>Business Portal <span class="live-indicator"><span class="live-dot"></span> Live</span></h1><p>POS, Inventory, Invoices, Customers, Profit/Loss</p>
       <a href="/business/settings" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.3);font-size:13px">Change Business Type</a>
       <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div>
     </div>
     <div class="stats">
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(sales.rows[0].coalesce).toLocaleString()}</div><div>Month Sales</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:${profit >= 0 ? '#059669' : '#dc2626'}">UGX ${profit.toLocaleString()}</div><div>Net Profit</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${inventory.rows[0].count}</div><div>Low Stock</div></div>
-      <div class="stat-card"><div class="stat-num">${invoices.rows[0].count}</div><div>Unpaid Invoices</div></div>
-      <div class="stat-card"><div class="stat-num">${customers.rows[0].count}</div><div>Customers</div></div>
-    </div>
+      <div class="stat-card"><div class="stat-num" data-stat="revenue_total">UGX ${parseInt(sales.rows[0].coalesce).toLocaleString()}</div><div>Month Sales</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="net_profit" style="color:${profit >= 0 ? '#059669' : '#dc2626'}">UGX ${profit.toLocaleString()}</div><div>Net Profit</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="low_stock_count" style="color:#dc2626">${inventory.rows[0].count}</div><div>Low Stock</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="unpaid_invoices">${invoices.rows[0].count}</div><div>Unpaid Invoices</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="customer_count">${customers.rows[0].count}</div><div>Customers</div></div>
+    </div></div>
     ${ds('🛒', 'Sales & POS', `<div class="grid">
       <div class="card"><h3>Point of Sale</h3><a href="/business/pos" class="btn btn-sm">New Sale</a><a href="/business/sales" class="btn btn-sm" style="margin-top:8px">Sales History</a></div>
       <div class="card"><h3>Invoices</h3><a href="/business/invoices" class="btn btn-sm">Manage Invoices</a></div>
@@ -7165,6 +7283,7 @@ app.post('/business/pos/checkout', requireAuth, requireNotBanned, requireTenantA
   }
   const sale = (await pool.query('INSERT INTO sales(tenant_id,customer_name,total,paid,status) VALUES($1,$2,$3,$4,$5) RETURNING id',
     [t, finalCustomerName, total, payment_status === 'paid' ? total : 0, payment_status])).rows[0];
+  wsBroadcast(t, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
   for (let item of items) {
     await pool.query('INSERT INTO sale_items(sale_id,inventory_id,quantity,price) VALUES($1,$2,$3,$4)', [sale.id, item.id, item.qty, item.price]);
   }
@@ -7618,8 +7737,8 @@ app.get('/portal/health', requireAuth, requireNotBanned, ah(async (req, res) => 
   const hasReports = pi.accessible.has('scheduled_reports');
   const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/g, 'href="/billing"')}</div>`;
   res.send(renderPage('Health Portal', `
-    <div class="hero" style="background:linear-gradient(135deg,#0f766e,#14b8a6)">
-      <h1>Health Portal</h1>
+    <div data-dashboard><div class="hero" style="background:linear-gradient(135deg,#0f766e,#14b8a6)">
+      <h1>Health Portal <span class="live-indicator"><span class="live-dot"></span> Live</span></h1>
       <p>Full patient management, departments, pharmacy, lab, billing & bed management</p>
       <a href="/health/settings" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.3);font-size:13px">Change Institution Type</a>
       <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div>
@@ -7640,9 +7759,9 @@ app.get('/portal/health', requireAuth, requireNotBanned, ah(async (req, res) => 
     </div>` : ''}
 
     <div class="stats">
-      <div class="stat-card"><div class="stat-num">${patientTotal}</div><div>Total Patients</div></div>
-      <div class="stat-card" style="border-left:4px solid #f59e0b"><div class="stat-num" style="color:#f59e0b">${waiting}</div><div>Waiting Now</div></div>
-      <div class="stat-card" style="border-left:4px solid #3b82f6"><div class="stat-num">${consultToday}</div><div>Today Consults</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="patient_count">${patientTotal}</div><div>Total Patients</div></div>
+      <div class="stat-card" style="border-left:4px solid #f59e0b"><div class="stat-num" data-stat="appointment_today" style="color:#f59e0b">${waiting}</div><div>Waiting Now</div></div>
+      <div class="stat-card" style="border-left:4px solid #3b82f6"><div class="stat-num" data-stat="consult_today">${consultToday}</div><div>Today Consults</div></div>
       <div class="stat-card" style="border-left:4px solid #8b5cf6"><div class="stat-num">${completedToday}</div><div>Completed</div></div>
       <div class="stat-card" style="border-left:4px solid #10b981"><div class="stat-num">${rxToday}</div><div>Today Rx</div></div>
       <div class="stat-card" style="border-left:4px solid #ec4899"><div class="stat-num">${pendingLabs}</div><div>Pending Labs</div></div>
@@ -8154,16 +8273,16 @@ app.get('/portal/individual', requireAuth, requireNotBanned, ah(async (req, res)
     pool.query('SELECT COALESCE(SUM(planned),0) as planned, COALESCE(SUM(actual),0) as actual FROM budget_items WHERE tenant_id=$1', [t])
   ]);
   res.send(renderPage('Personal Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)">
-      <h1>Personal Portal</h1><p>Your budgets, goals, notes, personal tracking</p>
+    <div data-dashboard><div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)">
+      <h1>Personal Portal <span class="live-indicator"><span class="live-dot"></span> Live</span></h1><p>Your budgets, goals, notes, personal tracking</p>
       <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div>
     </div>
     <div class="stats">
-      <div class="stat-card"><div class="stat-num">${goals.rows[0].count}</div><div>Goals</div></div>
-      <div class="stat-card"><div class="stat-num">${notes.rows[0].count}</div><div>Notes</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(budgetItems.rows[0].planned).toLocaleString()}</div><div>Budget Planned</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(budgetItems.rows[0].actual).toLocaleString()}</div><div>Budget Spent</div></div>
-    </div>
+      <div class="stat-card"><div class="stat-num" data-stat="goal_count">${goals.rows[0].count}</div><div>Goals</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="note_count">${notes.rows[0].count}</div><div>Notes</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="budget_planned">UGX ${parseInt(budgetItems.rows[0].planned).toLocaleString()}</div><div>Budget Planned</div></div>
+      <div class="stat-card"><div class="stat-num" data-stat="budget_actual">UGX ${parseInt(budgetItems.rows[0].actual).toLocaleString()}</div><div>Budget Spent</div></div>
+    </div></div>
     ${ds('💰', 'Personal Finance', `
       <div class="card"><h3>Budget Tracker</h3><a href="/individual/budget" class="btn btn-sm">Manage Budget</a></div>
       <div class="card"><h3>Goals</h3><a href="/individual/goals" class="btn btn-sm">Set Goals</a></div>
@@ -9560,6 +9679,68 @@ app.get('/dev/plans/delete/:id', requireAuth, requireSuperAdmin, ah(async (req, 
   res.redirect('/dev/plans');
 }));
 
+// === ADMIN TRIAL MANAGEMENT ===
+// Grant trial extension to a tenant
+app.post('/dev/trial/extend', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { tenant_id, days } = req.body;
+  if (!tenant_id || !days) {
+    req.session.flash = { type: 'error', msg: 'Tenant ID and days are required' };
+    return res.redirect('/dev/master');
+  }
+  const extendDays = parseInt(days);
+  if (isNaN(extendDays) || extendDays <= 0) {
+    req.session.flash = { type: 'error', msg: 'Days must be a positive number' };
+    return res.redirect('/dev/master');
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE subscriptions SET
+        trial_end = COALESCE(trial_end, NOW()) + INTERVAL '1 day' * $1,
+        trial_expired = false
+       WHERE tenant_id = $2 AND status = 'active' AND plan = 'free'`,
+      [extendDays, tenant_id]
+    );
+    if (result.rowCount > 0) {
+      await audit(req.session.user.email, 'trial_extension', `Extended trial by ${extendDays} days for tenant ${tenant_id}`);
+      req.session.flash = { type: 'success', msg: `Trial extended by ${extendDays} days for tenant ${tenant_id}` };
+    } else {
+      req.session.flash = { type: 'warning', msg: `No active free subscription found for tenant ${tenant_id}` };
+    }
+  } catch (e) {
+    req.session.flash = { type: 'error', msg: `Error: ${e.message}` };
+  }
+  res.redirect('/dev/master');
+}));
+
+// API: Get subscription/trial status (skipped by trial middleware)
+app.get('/api/subscription/status', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  try {
+    const result = await pool.query(
+      `SELECT s.plan, s.status, s.trial_start, s.trial_end, s.trial_expired
+       FROM subscriptions s
+       WHERE s.tenant_id = $1
+       ORDER BY COALESCE(s.created_at, s.started_at) DESC LIMIT 1`,
+      [t]
+    );
+    if (!result.rows.length) return res.json({ plan: 'free', status: 'none', trial_expired: false });
+    const sub = result.rows[0];
+    const trialDaysLeft = sub.trial_end && !sub.trial_expired
+      ? Math.max(0, Math.ceil((new Date(sub.trial_end) - new Date()) / (1000 * 60 * 60 * 24)))
+      : 0;
+    res.json({
+      plan: sub.plan,
+      status: sub.status,
+      trial_start: sub.trial_start,
+      trial_end: sub.trial_end,
+      trial_expired: sub.trial_expired || false,
+      trial_days_remaining: trialDaysLeft
+    });
+  } catch (e) {
+    res.json({ plan: 'free', status: 'error', trial_expired: false, error: e.message });
+  }
+}));
+
 // === TEAM MANAGEMENT — ADMIN/STAFF ACCESS ===
 app.get('/team', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
@@ -10529,14 +10710,38 @@ app.use(async (req, res, next) => {
 // === BILLING & SUBSCRIPTIONS ===
 app.get('/billing', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
+  const trialExpired = req.query.trial_expired === '1';
   const [sub, payments] = await Promise.all([
     pool.query('SELECT * FROM subscriptions WHERE tenant_id=$1 ORDER BY started_at DESC LIMIT 1', [t]),
     pool.query('SELECT * FROM payments WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [t])
   ]);
   const plan = sub.rows[0]?.plan || 'free';
   const planNames = { free: 'Free Plan', basic: 'Basic - UGX 50,000/mo', pro: 'Pro - UGX 150,000/mo', enterprise: 'Enterprise - UGX 500,000/mo' };
+
+  // Build trial expired banner if applicable
+  const trialBanner = trialExpired || (sub.rows[0]?.trial_expired) ? `
+    <div class="info-banner info-warning" style="margin-bottom:20px;font-size:15px;border:2px solid #f59e0b">
+      <span style="font-size:28px">&#9888;&#65039;</span>
+      <div>
+        <strong style="font-size:16px">Your free trial has expired.</strong>
+        <p style="margin-top:4px">Upgrade to continue using all features. Your data is safe — upgrade anytime to regain full access.</p>
+      </div>
+    </div>` : '';
+
+  // Build trial info section if on free plan with trial dates
+  const trialInfo = (plan === 'free' && sub.rows[0]?.trial_start && sub.rows[0]?.trial_end) ? `
+    <div class="card" style="border:2px solid #f59e0b;margin-bottom:16px">
+      <h3 style="color:#d97706">&#9202; Free Trial Status</h3>
+      <p class="muted">Trial started: ${new Date(sub.rows[0].trial_start).toLocaleDateString()}</p>
+      <p class="muted">Trial ends: ${new Date(sub.rows[0].trial_end).toLocaleDateString()}</p>
+      ${sub.rows[0].trial_expired ? '<p style="color:#ef4444;font-weight:600;margin-top:8px">&#10060; Trial expired — Upgrade to continue</p>' : `<p style="color:#059669;font-weight:600;margin-top:8px">&#9989; Trial active</p>`}
+      <a href="/billing/subscribe/pro" class="btn btn-gold btn-sm" style="margin-top:10px">Upgrade Now</a>
+    </div>` : '';
+
   res.send(renderPage('Billing & Subscriptions', `
+    ${trialBanner}
     <div class="hero"><h1>Billing & Subscriptions</h1><p>Manage your plan and payments</p></div>
+    ${trialInfo}
     <div class="card">
       <h2>Current Plan</h2>
       <div class="stats">
@@ -16444,6 +16649,179 @@ app.get('/api/sync/pull', requireAuth, ah(async (req, res) => {
   res.json({ since: since.toISOString(), students: students.rows, fees: fees.rows, attendance: attendance.rows, marks: marks.rows, shop_sales: shopSales.rows, donations: donations.rows });
 }));
 
+// === DASHBOARD AUTO-REFRESH API ===
+app.get('/api/dashboard/stats', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenantType = req.session.user.tenant_type;
+  try {
+    let stats = {};
+    if (tenantType === 'school') {
+      const [students, fees, feePaid, exams, attendance] = await Promise.all([
+        pool.query('SELECT COUNT(*)::int as cnt FROM students WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query('SELECT COALESCE(SUM(amount),0)::int as total FROM fees WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ total: 0 }] })),
+        pool.query('SELECT COALESCE(SUM(paid),0)::int as total FROM fees WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ total: 0 }] })),
+        pool.query('SELECT COUNT(*)::int as cnt FROM exams WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query("SELECT COUNT(DISTINCT student_id)::int as cnt FROM attendance WHERE tenant_id=$1 AND date=CURRENT_DATE AND status='present'", [t]).catch(() => ({ rows: [{ cnt: 0 }] }))
+      ]);
+      stats = {
+        student_count: students.rows[0].cnt,
+        fee_total: fees.rows[0].total,
+        fee_collected: feePaid.rows[0].total,
+        exam_count: exams.rows[0].cnt,
+        attendance_today: attendance.rows[0].cnt
+      };
+    } else if (tenantType === 'church') {
+      const [members, tithes, sermons, prayers, events] = await Promise.all([
+        pool.query('SELECT COUNT(*)::int as cnt FROM members WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query("SELECT COALESCE(SUM(amount),0)::int as total FROM org_finance WHERE tenant_id=$1 AND type='income' AND description ILIKE '%tithe%'", [t]).catch(() => ({ rows: [{ total: 0 }] })),
+        pool.query('SELECT COUNT(*)::int as cnt FROM sermons WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query('SELECT COUNT(*)::int as cnt FROM prayer_requests WHERE tenant_id=$1 AND is_private=false', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query('SELECT COUNT(*)::int as cnt FROM events WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] }))
+      ]);
+      stats = {
+        member_count: members.rows[0].cnt,
+        tithe_total: tithes.rows[0].total,
+        sermon_count: sermons.rows[0].cnt,
+        prayer_count: prayers.rows[0].cnt,
+        event_count: events.rows[0].cnt
+      };
+    } else if (tenantType === 'organization') {
+      const [members, projects, events, budget, notices] = await Promise.all([
+        pool.query('SELECT COUNT(*)::int as cnt FROM members WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query('SELECT COUNT(*)::int as cnt FROM projects WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query('SELECT COUNT(*)::int as cnt FROM events WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query("SELECT COALESCE(SUM(amount),0)::int as total FROM org_finance WHERE tenant_id=$1 AND type='income'", [t]).catch(() => ({ rows: [{ total: 0 }] })),
+        pool.query('SELECT COUNT(*)::int as cnt FROM notice_board WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] }))
+      ]);
+      stats = {
+        member_count: members.rows[0].cnt,
+        project_count: projects.rows[0].cnt,
+        event_count: events.rows[0].cnt,
+        income_total: budget.rows[0].total,
+        notice_count: notices.rows[0].cnt
+      };
+    } else if (tenantType === 'health') {
+      const [patients, appointments, beds, staff, consults] = await Promise.all([
+        pool.query('SELECT COUNT(*)::int as cnt FROM clinic_patients WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query("SELECT COUNT(*)::int as cnt FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=CURRENT_DATE", [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query("SELECT COUNT(*)::int as total, COALESCE(SUM(CASE WHEN status='occupied' THEN 1 ELSE 0 END),0)::int as occupied FROM clinic_beds WHERE tenant_id=$1", [t]).catch(() => ({ rows: [{ total: 0, occupied: 0 }] })),
+        pool.query('SELECT COUNT(*)::int as cnt FROM clinic_staff WHERE tenant_id=$1 AND is_active=true', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query("SELECT COUNT(*)::int as cnt FROM consultations WHERE tenant_id=$1 AND created_at>DATE_TRUNC('day',NOW())", [t]).catch(() => ({ rows: [{ cnt: 0 }] }))
+      ]);
+      stats = {
+        patient_count: patients.rows[0].cnt,
+        appointment_today: appointments.rows[0].cnt,
+        bed_total: beds.rows[0].total,
+        bed_occupied: beds.rows[0].occupied,
+        active_staff: staff.rows[0].cnt,
+        consult_today: consults.rows[0].cnt
+      };
+    } else if (tenantType === 'business') {
+      const [sales, inventory, invoices, expenses, customers] = await Promise.all([
+        pool.query("SELECT COALESCE(SUM(total),0)::int as total FROM sales WHERE tenant_id=$1 AND created_at>DATE_TRUNC('month', NOW())", [t]).catch(() => ({ rows: [{ total: 0 }] })),
+        pool.query('SELECT COUNT(*)::int as cnt FROM inventory WHERE tenant_id=$1 AND quantity<5', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query("SELECT COUNT(*)::int as cnt FROM invoices WHERE tenant_id=$1 AND status='unpaid'", [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query("SELECT COALESCE(SUM(amount),0)::int as total FROM expenses WHERE tenant_id=$1 AND COALESCE(expense_date, created_at::date)>DATE_TRUNC('month', NOW())", [t]).catch(() => ({ rows: [{ total: 0 }] })),
+        pool.query('SELECT COUNT(*)::int as cnt FROM customers WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] }))
+      ]);
+      stats = {
+        revenue_total: sales.rows[0].total,
+        low_stock_count: inventory.rows[0].cnt,
+        unpaid_invoices: invoices.rows[0].cnt,
+        expense_total: expenses.rows[0].total,
+        customer_count: customers.rows[0].cnt,
+        net_profit: sales.rows[0].total - expenses.rows[0].total
+      };
+    } else if (tenantType === 'individual') {
+      const [goals, notes, budgetPlanned, budgetActual] = await Promise.all([
+        pool.query('SELECT COUNT(*)::int as cnt FROM goals WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query('SELECT COUNT(*)::int as cnt FROM personal_notes WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query('SELECT COALESCE(SUM(planned),0)::int as total FROM budget_items WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ total: 0 }] })),
+        pool.query('SELECT COALESCE(SUM(actual),0)::int as total FROM budget_items WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ total: 0 }] }))
+      ]);
+      stats = {
+        goal_count: goals.rows[0].cnt,
+        note_count: notes.rows[0].cnt,
+        budget_planned: budgetPlanned.rows[0].total,
+        budget_actual: budgetActual.rows[0].total
+      };
+    } else if (tenantType === 'public') {
+      const [pages, posts, shopItems] = await Promise.all([
+        pool.query('SELECT COUNT(*)::int as cnt FROM public_pages WHERE tenant_id=$1 AND is_published=true', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query('SELECT COUNT(*)::int as cnt FROM public_posts WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
+        pool.query('SELECT COUNT(*)::int as cnt FROM school_shop_items WHERE tenant_id=$1 AND (is_active=true OR is_active IS NULL)', [t]).catch(() => ({ rows: [{ cnt: 0 }] }))
+      ]);
+      stats = {
+        page_count: pages.rows[0].cnt,
+        post_count: posts.rows[0].cnt,
+        shop_item_count: shopItems.rows[0].cnt
+      };
+    } else {
+      stats = { message: 'No dashboard stats available for this tenant type' };
+    }
+    res.json({ success: true, tenant_type: tenantType, stats });
+  } catch (err) {
+    console.error('[Dashboard Stats API]', err.message);
+    res.status(500).json({ success: false, error: 'Failed to load dashboard stats' });
+  }
+}));
+
+app.get('/api/dashboard/chart-data', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenantType = req.session.user.tenant_type;
+  const chartType = req.query.type || 'revenue';
+  const days = parseInt(req.query.days) || 30;
+  try {
+    let labels = [];
+    let datasets = [];
+    if (tenantType === 'school') {
+      if (chartType === 'revenue') {
+        const rows = (await pool.query("SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day, COALESCE(SUM(paid),0)::int as total FROM fees WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '1 day' * $2 GROUP BY day ORDER BY day", [t, days])).rows;
+        labels = rows.map(r => r.day);
+        datasets = [{ label: 'Fees Collected', data: rows.map(r => r.total), borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.15)', fill: true }];
+      } else if (chartType === 'activity') {
+        const rows = (await pool.query("SELECT TO_CHAR(date, 'YYYY-MM-DD') as day, COUNT(*)::int as cnt FROM attendance WHERE tenant_id=$1 AND date > CURRENT_DATE - INTERVAL '1 day' * $2 GROUP BY day ORDER BY day", [t, days])).rows;
+        labels = rows.map(r => r.day);
+        datasets = [{ label: 'Attendance Records', data: rows.map(r => r.cnt), borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.15)', fill: true }];
+      }
+    } else if (tenantType === 'business') {
+      if (chartType === 'revenue') {
+        const rows = (await pool.query("SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day, COALESCE(SUM(total),0)::int as total FROM sales WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '1 day' * $2 GROUP BY day ORDER BY day", [t, days])).rows;
+        labels = rows.map(r => r.day);
+        datasets = [{ label: 'Daily Sales', data: rows.map(r => r.total), borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.15)', fill: true }];
+      }
+    } else if (tenantType === 'church') {
+      if (chartType === 'revenue') {
+        const rows = (await pool.query("SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day, COALESCE(SUM(amount),0)::int as total FROM org_finance WHERE tenant_id=$1 AND type='income' AND created_at > NOW() - INTERVAL '1 day' * $2 GROUP BY day ORDER BY day", [t, days])).rows;
+        labels = rows.map(r => r.day);
+        datasets = [{ label: 'Income', data: rows.map(r => r.total), borderColor: '#ea580c', backgroundColor: 'rgba(234,88,12,0.15)', fill: true }];
+      }
+    } else if (tenantType === 'health') {
+      if (chartType === 'activity') {
+        const rows = (await pool.query("SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day, COUNT(*)::int as cnt FROM consultations WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '1 day' * $2 GROUP BY day ORDER BY day", [t, days])).rows;
+        labels = rows.map(r => r.day);
+        datasets = [{ label: 'Consultations', data: rows.map(r => r.cnt), borderColor: '#14b8a6', backgroundColor: 'rgba(20,184,166,0.15)', fill: true }];
+      }
+    } else if (tenantType === 'organization') {
+      if (chartType === 'revenue') {
+        const rows = (await pool.query("SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day, COALESCE(SUM(amount),0)::int as total FROM org_finance WHERE tenant_id=$1 AND type='income' AND created_at > NOW() - INTERVAL '1 day' * $2 GROUP BY day ORDER BY day", [t, days])).rows;
+        labels = rows.map(r => r.day);
+        datasets = [{ label: 'Income', data: rows.map(r => r.total), borderColor: '#7c3aed', backgroundColor: 'rgba(124,58,237,0.15)', fill: true }];
+      }
+    }
+    if (datasets.length === 0) {
+      // Generate empty chart data for unsupported combos
+      const now = new Date();
+      labels = Array.from({ length: Math.min(days, 7) }, (_, i) => { const d = new Date(now); d.setDate(d.getDate() - i); return d.toISOString().split('T')[0]; }).reverse();
+      datasets = [{ label: 'No data', data: labels.map(() => 0), borderColor: '#94a3b8', backgroundColor: 'rgba(148,163,184,0.1)' }];
+    }
+    res.json({ success: true, type: chartType, labels, datasets });
+  } catch (err) {
+    console.error('[Dashboard Chart API]', err.message);
+    res.status(500).json({ success: false, error: 'Failed to load chart data' });
+  }
+}));
+
 // =============================================
 // v8.0: DEEP LINKING
 // =============================================
@@ -22050,6 +22428,7 @@ app.post('/clinic/queue/save', requireAuth, requireNotBanned, requireFeature('pa
   const t = req.session.user.tenant_id;
   const { patient_type, patient_id, patient_name, complaint, priority, triage_notes, queue_number } = req.body;
   await pool.query('INSERT INTO patient_queue(tenant_id,patient_type,patient_id,patient_name,complaint,priority,triage_notes,queue_number) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, patient_type||'student', patient_id||null, patient_name, complaint, priority||'normal', triage_notes||null, queue_number||1]);
+  wsBroadcast(t, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
   res.redirect('/clinic/queue');
 }));
 
@@ -27233,6 +27612,7 @@ app.post('/fundraising/:id/donate-save', requireAuth, requireNotBanned, requireF
   try {
     if (_processDonationEffects) await _processDonationEffects({ tenant_id: t, campaign_id: req.params.id, donation_id: donationId, donor_name: displayName, donor_email: donorEmail, donor_phone: donorPhone, amount, method, message, is_anonymous: isAnonymous });
   } catch(e) { /* non-blocking */ }
+  wsBroadcast(t, { type: 'dashboard:refresh', section: 'stats', timestamp: Date.now() });
   res.redirect('/fundraising/'+req.params.id);
 }));
 
@@ -34458,8 +34838,8 @@ app.get('/portal/public', requireAuth, ah(async (req, res) => {
   const posts = (await pool.query('SELECT * FROM public_posts WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [tid])).rows;
   const shopItems = (await pool.query('SELECT * FROM school_shop_items WHERE tenant_id=$1 AND (is_active=true OR is_active IS NULL) ORDER BY name LIMIT 50', [tid])).rows;
   const html = `
-    <div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);padding:32px;border-radius:16px;margin-bottom:24px;color:white;text-align:center">
-      <h1 style="font-size:28px">${esc(tenant?.name || 'Welcome')}</h1>
+    <div data-dashboard><div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);padding:32px;border-radius:16px;margin-bottom:24px;color:white;text-align:center">
+      <h1 style="font-size:28px">${esc(tenant?.name || 'Welcome')} <span class="live-indicator"><span class="live-dot"></span> Live</span></h1>
       <p style="opacity:0.9;margin-top:8px">${esc(tenant?.type || 'Organization')} Public Portal</p>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
@@ -34501,7 +34881,7 @@ app.get('/portal/public', requireAuth, ah(async (req, res) => {
     <div style="margin-top:20px">
       <a href="/dashboard" class="btn">Back to Dashboard</a>
       <a href="/settings/public-pages" class="btn btn-gold" style="margin-left:8px">Manage Pages</a>
-    </div>`;
+    </div></div>`;
   res.send(renderPage('Public Portal', html, req.session.user));
 }));
 
@@ -38304,6 +38684,9 @@ const _tenantMw = (req, res, next) => {
   next();
 };
 const _newModOpts = { tenantMiddleware: _tenantMw, requireAuth, requireNotBanned, requireSuperAdmin, ah, esc, renderPage, audit, notify, notifyAll, sendEmail, sendSMS, wsBroadcast, redis: redisCache, queueEmail, uiT };
+
+// === UI FOUNDATION — Toast, Loading, Skeleton (loaded first so all pages get it) ===
+try { const m = require('./ui-foundation'); m(app, pool, _newModOpts); console.log('[UIFoundation] Toast/Loading/Skeleton module loaded'); } catch(e) { console.warn('[UIFoundation] Error:', e.message); }
 
 // Batch 1: Old-style modules (app, db, pool, renderPage, esc)
 ['approval_requests','approval_actions','approval_notifications','approval_steps','approval_workflow_templates','approval_workflows'].forEach(t => VALID_TABLES.add(t));
