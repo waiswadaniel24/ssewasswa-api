@@ -3456,6 +3456,17 @@ app.post('/reset-password', ah(async (req, res) => {
 }));
 
 // === DASHBOARD ROUTER ===
+// Portal types defined here for the dashboard picker (also used by /switch-portal below)
+const DASH_PORTAL_TYPES = [
+  { type: 'school', label: 'School', icon: '🏫', color: '#059669', desc: 'Students, fees, exams, attendance, report cards, timetable, transport, library' },
+  { type: 'church', label: 'Church', icon: '⛪', color: '#7c3aed', desc: 'Members, tithes, sermons, events, groups, choir, cell groups' },
+  { type: 'organization', label: 'Organization', icon: '🤝', color: '#10b981', desc: 'Projects, members, documents, meetings, task boards' },
+  { type: 'health', label: 'Health Institution', icon: '🏥', color: '#ef4444', desc: 'Hospital, clinic, pharmacy, lab, patients, prescriptions, bed management' },
+  { type: 'business', label: 'Business', icon: '🏢', color: '#0891b2', desc: 'POS, invoices, payroll, inventory — Hotel, Restaurant, Retail, Salon & more' },
+  { type: 'individual', label: 'Individual', icon: '👤', color: '#8b5cf6', desc: 'Personal notes, goals, finance, tasks, budgets' },
+  { type: 'public', label: 'Public Portal', icon: '🌐', color: '#0ea5e9', desc: 'Public pages, blog posts, shop, community content, entertainment & fundraising' }
+];
+
 app.get('/dashboard', requireAuth, (req, res) => {
   const u = req.session.user;
   // If super_admin is impersonating a tenant, let them into the tenant dashboard
@@ -3468,7 +3479,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
   // Show beautiful portal picker instead of auto-redirecting
   const currentType = u.tenant_type || 'school';
   const dark = u?.dark_mode || false;
-  const portalCards = USER_PORTAL_TYPES.map(p => {
+  const portalCards = DASH_PORTAL_TYPES.map(p => {
     const isActive = currentType === p.type;
     const isSchool = p.type === 'school';
     const isChurch = p.type === 'church';
@@ -3487,8 +3498,10 @@ app.get('/dashboard', requireAuth, (req, res) => {
                  'linear-gradient(135deg,#0ea5e9,#38bdf8)';
     const lightBg = isSchool ? '#ecfdf5' : isChurch ? '#f5f3ff' : isOrg ? '#ecfdf5' : isHealth ? '#fef2f2' : isBusiness ? '#ecfeff' : isIndividual ? '#f5f3ff' : '#f0f9ff';
     const borderCol = isActive ? '#22c55e' : (dark ? '#334155' : '#e2e8f0');
+    // For current portal: direct link. For others: switch first then redirect
+    const link = isActive ? `/portal/${p.type}` : `/go-portal/${p.type}`;
     return `
-      <a href="/portal/${p.type}" style="display:block;text-decoration:none;color:inherit;border:2px solid ${borderCol};border-radius:20px;overflow:hidden;background:${dark ? '#1e293b' : '#fff'};transition:all 0.35s cubic-bezier(0.16,1,0.3,1);position:relative" onmouseover="this.style.transform='translateY(-6px) scale(1.02)';this.style.boxShadow='0 20px 40px rgba(0,0,0,0.12)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+      <a href="${link}" style="display:block;text-decoration:none;color:inherit;border:2px solid ${borderCol};border-radius:20px;overflow:hidden;background:${dark ? '#1e293b' : '#fff'};transition:all 0.35s cubic-bezier(0.16,1,0.3,1);position:relative" onmouseover="this.style.transform='translateY(-6px) scale(1.02)';this.style.boxShadow='0 20px 40px rgba(0,0,0,0.12)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
         ${isActive ? '<div style="position:absolute;top:12px;right:12px;background:#22c55e;color:white;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;z-index:2;letter-spacing:0.5px">CURRENT</div>' : ''}
         <div style="background:${grad};padding:28px 20px 20px;text-align:center;position:relative;overflow:hidden">
           <div style="position:absolute;top:-20px;right:-20px;width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,0.1)"></div>
@@ -3547,6 +3560,31 @@ app.get('/dashboard', requireAuth, (req, res) => {
     </div>
   `, req.session.user));
 });
+
+// === GO-PORTAL: Switch tenant type then redirect to portal ===
+// This handles clicking a non-current portal card on the dashboard
+app.get('/go-portal/:type', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const newType = String(req.params.type || '').trim().toLowerCase();
+  const validTypes = DASH_PORTAL_TYPES.map(p => p.type);
+  if (!validTypes.includes(newType)) return res.redirect('/dashboard');
+  const user = req.session.user;
+  const tid = user.tenant_id;
+  // Update the tenant type in the database
+  await pool.query('UPDATE tenants SET type = $1 WHERE id = $2', [newType, tid]);
+  // Update user role to match new portal type (unless super_admin)
+  if (user.role !== 'super_admin') {
+    await pool.query('UPDATE users SET role = $1 WHERE id = $2', [newType, user.id]);
+  }
+  // Update session
+  req.session.user.tenant_type = newType;
+  if (user.role !== 'super_admin') {
+    req.session.user.role = newType;
+  }
+  await audit(user.email, 'portal_switch', 'Switched portal type to ' + newType + ' via dashboard');
+  // Clear plan cache
+  _planCache && _planCache.delete(tid);
+  res.redirect('/portal/' + newType);
+}));
 
 // === EXIT TENANT IMPERSONATION ===
 app.get('/dev/exit-tenant', requireAuth, requireSuperAdmin, (req, res) => {
