@@ -49,10 +49,10 @@ const wsBroadcast = (tenantId, data) => {
 let redisCache = null;
 try {
   const IORedis = require('ioredis');
-  if (process.env.REDIS_URL) {
-    redisCache = new IORedis(process.env.REDIS_URL, { maxRetriesPerRequest: 3, retryDelayOnFailover: 100 });
-    redisCache.on('error', (err) => console.warn('[Redis Cache]', err.message));
-    console.log('[Redis Cache] Connected for query caching');
+  if (process.env.REDIS_URL && process.env.REDIS_URL.startsWith('redis://')) {
+    redisCache = new IORedis(process.env.REDIS_URL, { maxRetriesPerRequest: 3, retryDelayOnFailover: 100, lazyConnect: true, connectTimeout: 3000 });
+    redisCache.on('error', (err) => { if (!err.message.includes('ECONNREFUSED') && !err.message.includes('ENOTFOUND')) console.warn('[Redis Cache]', err.message); });
+    redisCache.connect().then(() => console.log('[Redis Cache] Connected for query caching')).catch(() => { redisCache = null; });
   }
 } catch (e) { console.warn('[Redis Cache] Not available:', e.message); }
 
@@ -88,7 +88,7 @@ if (process.env.SENTRY_DSN) {
 const app = express();
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : false, // rejectUnauthorized:true enforces proper SSL cert validation in production
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false, // rejectUnauthorized:false allows self-signed certs (Render free PostgreSQL)
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000
