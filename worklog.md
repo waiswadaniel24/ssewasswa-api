@@ -259,3 +259,38 @@ Stage Summary:
 - Full CRUD for roles + user role assignment/revoke + permission matrix view
 - Audit logging for all RBAC actions
 - Backward compatible: /admin/rbac redirects to /rbac
+
+---
+Task ID: session-3
+Agent: Main Agent
+Task: Fix remaining 9 gaps from gap analysis — PWA install, MTN MoMo, form validation, email invitations, financial reports
+
+Work Log:
+- Diagnosed GitHub account suspension (token exposed in remote URL)
+- Discovered ROOT CAUSE of PWA install failure: marketplace-pwa.js was overwriting sw.js v9.0 with v2.0 on every server restart
+- Fixed marketplace-pwa.js to check SW version before overwriting (preserves newer versions)
+- Converted favicon.png from JPEG to actual PNG format
+- Added manifest link + SW registration to static index.html
+- Fixed express.static() to use absolute path instead of relative 'public'
+- Standardized theme-color to #059669 across all pages (was inconsistent: #0d9488, #6366f1, #4f46e5)
+- Built /settings/payments admin page for MTN MoMo, Airtel Money, DPO API key configuration
+- Added payment_config table for per-tenant payment provider settings
+- Made MTN MoMo helpers read from DB config first, fall back to env vars
+- Exposed requestMtnPayment via app.set() so qr-payments.js can use it
+- Added Test Connection button for MTN MoMo
+- Created public/form-validator.js — standalone client-side validation (zero deps)
+- Added validation attributes to registration, login, student, invoice, fee forms
+- Real-time validation on blur/input with visual feedback (green check, red X)
+- Built email invitation system at /settings/team with accept/reject flow
+- Crypto.randomBytes(32) tokens, 7-day expiry, branded HTML emails
+- Built financial-reports.js module with 8 routes
+- P&L Statement, Balance Sheet, Cash Flow, A/R Aging reports
+- CSV export on all reports, print CSS, chart API endpoints
+- All syntax checks passed, committed as 2e89869
+
+Stage Summary:
+- PWA install root cause fixed (SW overwrite by marketplace module)
+- MTN MoMo now configurable per-tenant via admin UI
+- All 5 remaining gap items implemented and committed
+- 2 commits ahead of origin/main (blocked by GitHub account suspension)
+- GitHub account needs to be restored or new account created to push

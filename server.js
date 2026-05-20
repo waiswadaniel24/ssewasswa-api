@@ -766,7 +766,7 @@ const VALID_TABLES = new Set([
   'org_attachments', 'meeting_action_items', 'org_health_scores',
   'org_meeting_minutes', 'org_surveys', 'org_survey_responses',
   'org_discussions', 'org_discussion_replies', 'org_email_templates',
-  'org_broadcasts', 'org_data_backups', 'user_invitations'
+  'org_broadcasts', 'org_data_backups', 'user_invitations', 'saved_filters'
 ]);
 const validateTable = (table) => {
   if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
@@ -3818,6 +3818,7 @@ ${user ? `<script>
 </script>` : ''}
 <script src="/ui-foundation.js"></script>
 <script src="/form-validator.js"></script>
+<script src="/saved-filters.js"></script>
 </body></html>`;
 };
 
@@ -4655,6 +4656,7 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">Visitors</h3><a href="/school/visitors" class="btn btn-sm">Gate Pass</a></div>
       <div class="card"><h3>API & Webhooks</h3><a href="/api-keys" class="btn btn-sm">Manage Keys</a></div>
       <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Document Library</a><a href="/documents/upload" class="btn btn-sm btn-green" style="margin-top:8px">Upload File</a></div>
+      <div class="card" style="background:#eef2ff;border:2px solid #6366f1"><h3 style="color:#6366f1">&#128230; Import Data</h3><p class="muted" style="font-size:12px">Bulk CSV import for students, staff & more</p><a href="/import" class="btn btn-sm" style="background:#6366f1;color:white">Start Import</a></div>
     `)}
     ${ds('🏫', 'Campus', `
       ${hasTransport ? `<div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Transport</h3><a href="/school/transport" class="btn btn-sm">Bus Routes</a></div>` : lockCard(`<div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Transport</h3><a href="/school/transport" class="btn btn-sm">Bus Routes</a></div>`, 'Basic Plan')}
@@ -7094,6 +7096,7 @@ ${ds('👥','Congregation',`
         <a href="/church/birthdays" class="btn btn-sm btn-green">Birthday SMS</a>
       </div>
       <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Member Portal</h3><a href="/church/login" class="btn btn-sm">Member Login</a><a href="/church/members/generate-passwords" class="btn btn-sm btn-green" style="margin-top:8px">Gen Passwords</a></div>
+      <div class="card" style="background:#eef2ff;border:2px solid #6366f1"><h3 style="color:#6366f1">&#128230; Import Data</h3><p class="muted" style="font-size:12px">Bulk CSV import for members & more</p><a href="/import" class="btn btn-sm" style="background:#6366f1;color:white">Start Import</a></div>
 `)}
 ${ds('⛪','Worship & Ministry',`
       <div class="card"><h3>Services</h3>
@@ -7557,6 +7560,7 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
       ${hasReports ? `<div class="card"><h3>Reports</h3><a href="/business/monthly-report" class="btn btn-gold btn-sm">Monthly Report</a></div>` : lockCard(`<div class="card"><h3>Reports</h3><a href="/business/monthly-report" class="btn btn-gold btn-sm">Monthly Report</a></div>`, 'Basic Plan')}
       <div class="card"><h3>API</h3><a href="/api-keys" class="btn btn-sm">API Keys</a></div>
       <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Library</a></div>
+      <div class="card" style="background:#eef2ff;border:2px solid #6366f1"><h3 style="color:#6366f1">&#128230; Import Data</h3><p class="muted" style="font-size:12px">Bulk CSV import for clients & invoices</p><a href="/import" class="btn btn-sm" style="background:#6366f1;color:white">Start Import</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #6366f1"><h3 style="color:#6366f1">NEW: Projects</h3><a href="/business/projects" class="btn btn-sm">PM Board</a></div>
       <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">NEW: CRM</h3><a href="/business/crm" class="btn btn-sm">Lead Pipeline</a></div>
     </div>`)}
@@ -8265,6 +8269,7 @@ app.get('/portal/health', requireAuth, requireNotBanned, ah(async (req, res) => 
       ${hasPatientEHR ? `<div class="card" style="border-left:4px solid #65a30d"><h3>&#128203; Electronic Health Records</h3><p class="muted">Patient history, vitals, allergies</p><a href="/clinic/ehr-search" class="btn btn-sm">Search EHR</a></div>` : lockCard(`<div class="card" style="border-left:4px solid #65a30d"><h3>&#128203; Electronic Health Records</h3><p class="muted">Patient history, vitals, allergies</p><a href="/clinic/ehr-search" class="btn btn-sm">Search EHR</a></div>`, 'Pro Plan')}
       <div class="card" style="border-left:4px solid #f97316"><h3>&#128197; Appointments</h3><p class="muted">${apptToday} appointments today</p><a href="/clinic/appointments" class="btn btn-sm">All Appointments</a><a href="/clinic/appointments/today" class="btn btn-sm" style="margin-top:6px">Today</a><a href="/clinic/appointments/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Book</a></div>
       <div class="card" style="border-left:4px solid #dc2626"><h3>&#127973; Bed Management</h3><p class="muted">${bedsOccupied}/${bedsTotal} beds occupied</p><a href="/clinic/beds" class="btn btn-sm">View Beds</a><a href="/clinic/beds/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Add Bed</a></div>
+      <div class="card" style="background:#eef2ff;border:2px solid #6366f1"><h3 style="color:#6366f1">&#128230; Import Data</h3><p class="muted" style="font-size:12px">Bulk CSV import for patients & staff</p><a href="/import" class="btn btn-sm" style="background:#6366f1;color:white">Start Import</a></div>
     </div>`)}
 
     ${ds('\u{1F9EA}', 'Diagnostics', `<div class="grid">
@@ -15471,25 +15476,115 @@ app.post('/status/admin/incident', requireAuth, requireSuperAdmin, ah(async (req
 // UNIFIED SETTINGS PAGE
 // ============================================================
 app.get('/settings', requireAuth, ah(async (req, res) => {
+  const dark = req.session.user?.dark_mode || false;
   res.send(renderPage('Settings', `
+    <style>
+      .settings-search-wrap{position:relative;max-width:600px;margin:0 auto 24px}
+      .settings-search-input{width:100%;padding:14px 20px 14px 48px;border:2px solid var(--border);border-radius:14px;font-size:15px;background:var(--input-bg);color:var(--text);transition:all 0.25s ease}
+      .settings-search-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(99,102,241,0.1)}
+      .settings-search-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);font-size:18px;color:var(--text-muted);pointer-events:none}
+      .settings-search-results{position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--bg-card);border:1px solid var(--border);border-radius:14px;box-shadow:0 16px 48px rgba(0,0,0,0.15);z-index:100;max-height:380px;overflow-y:auto;display:none;animation:ssFadeIn 0.2s cubic-bezier(0.16,1,0.3,1)}
+      .settings-search-results.ss-visible{display:block}
+      .ss-result{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;transition:all 0.15s ease;border-bottom:1px solid var(--border-light)}
+      .ss-result:last-child{border-bottom:none}
+      .ss-result:hover{background:var(--bg-card-hover)}
+      .ss-result-icon{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,rgba(99,102,241,0.1),rgba(6,182,212,0.08));display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+      .ss-result-text{flex:1;min-width:0}
+      .ss-result-title{font-size:13px;font-weight:600;color:var(--text)}
+      .ss-result-desc{font-size:11px;color:var(--text-muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .ss-result-arrow{font-size:14px;color:var(--text-dim)}
+      .ss-empty{padding:20px;text-align:center;color:var(--text-muted);font-size:13px}
+      @keyframes ssFadeIn{from{opacity:0;transform:translateY(-8px) scale(0.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+    </style>
     <div class="hero"><h1>Settings</h1><p>Configure your platform</p></div>
-    <div class="grid">
-      <div class="card"><h3>Profile</h3><p>Change password, email</p><a href="/settings/profile" class="btn btn-sm">Manage</a></div>
-      <div class="card" style="border:2px solid #8b5cf6"><h3>Switch Portal</h3><p>School, Church, Clinic, Business & more</p><a href="/switch-portal" class="btn btn-sm" style="background:#8b5cf6;color:white">Switch Now</a></div>
-      <div class="card"><h3>Theme</h3><p>Colors, fonts, CSS</p><a href="/settings/theme" class="btn btn-sm">Customize</a></div>
-      <div class="card"><h3>2FA Security</h3><p>Two-factor authentication</p><a href="/settings/2fa" class="btn btn-sm">Configure</a></div>
-      <div class="card"><h3>Billing</h3><p>Plans & payments</p><a href="/billing" class="btn btn-sm btn-gold">Manage</a></div>
-      <div class="card"><h3>API Keys</h3><p>API access & webhooks</p><a href="/api-keys" class="btn btn-sm">Manage</a></div>
-      <div class="card"><h3>Branding</h3><p>Logo, favicon, subdomain</p><a href="/settings/branding" class="btn btn-sm">Customize</a></div>
-      <div class="card"><h3>Language</h3><p>Translations & locale</p><a href="/settings/theme" class="btn btn-sm">Change</a></div>
-      <div class="card"><h3>Currency</h3><p>UGX, KES, TZS, RWF</p><a href="/settings/currency" class="btn btn-sm">Change</a></div>
-      <div class="card"><h3>Integrations</h3><p>Flutterwave, SMS, Cloudinary</p><a href="/integrations" class="btn btn-sm">Configure</a></div>
-      <div class="card"><h3>Payment API</h3><p>MTN MoMo, Airtel, DPO keys</p><a href="/settings/payments" class="btn btn-sm">Configure</a></div>
-      <div class="card"><h3>Backup</h3><p>Export/Import data</p><a href="/settings/backup" class="btn btn-sm">Backup</a></div>
-      <div class="card"><h3>Compliance</h3><p>Audit & data protection</p><a href="/compliance" class="btn btn-sm">View</a></div>
-      <div class="card" style="border:2px solid #059669"><h3>Team & Invitations</h3><p>Invite members, manage access</p><a href="/settings/team" class="btn btn-sm" style="background:#059669;color:white">Manage</a></div>
-      <div class="card"><h3>Status Page</h3><p>Platform health</p><a href="/status" class="btn btn-sm">View</a></div>
+    <div class="settings-search-wrap">
+      <span class="settings-search-icon">🔍</span>
+      <input type="text" class="settings-search-input" id="settingsSearchInput" placeholder="Search settings... (e.g. password, billing, theme)" autocomplete="off">
+      <div class="settings-search-results" id="settingsSearchResults"></div>
     </div>
+    <div class="grid">
+      <div class="card"><h3>👤 Profile</h3><p>Change password, email</p><a href="/settings/profile" class="btn btn-sm">Manage</a></div>
+      <div class="card" style="border:2px solid #8b5cf6"><h3>🌍 Switch Portal</h3><p>School, Church, Clinic, Business & more</p><a href="/switch-portal" class="btn btn-sm" style="background:#8b5cf6;color:white">Switch Now</a></div>
+      <div class="card"><h3>🎨 Theme</h3><p>Colors, fonts, CSS</p><a href="/settings/theme" class="btn btn-sm">Customize</a></div>
+      <div class="card"><h3>🛡️ 2FA Security</h3><p>Two-factor authentication</p><a href="/settings/2fa" class="btn btn-sm">Configure</a></div>
+      <div class="card"><h3>💳 Billing</h3><p>Plans & payments</p><a href="/billing" class="btn btn-sm btn-gold">Manage</a></div>
+      <div class="card"><h3>🔑 API Keys</h3><p>API access & webhooks</p><a href="/api-keys" class="btn btn-sm">Manage</a></div>
+      <div class="card"><h3>🏷️ Branding</h3><p>Logo, favicon, subdomain</p><a href="/settings/branding" class="btn btn-sm">Customize</a></div>
+      <div class="card"><h3>🌐 Language</h3><p>Translations & locale</p><a href="/settings/theme" class="btn btn-sm">Change</a></div>
+      <div class="card"><h3>💰 Currency</h3><p>UGX, KES, TZS, RWF</p><a href="/settings/currency" class="btn btn-sm">Change</a></div>
+      <div class="card"><h3>🔌 Integrations</h3><p>Flutterwave, SMS, Cloudinary</p><a href="/integrations" class="btn btn-sm">Configure</a></div>
+      <div class="card"><h3>📱 Payment API</h3><p>MTN MoMo, Airtel, DPO keys</p><a href="/settings/payments" class="btn btn-sm">Configure</a></div>
+      <div class="card"><h3>💾 Backup</h3><p>Export/Import data</p><a href="/settings/backup" class="btn btn-sm">Backup</a></div>
+      <div class="card"><h3>📋 Compliance</h3><p>Audit & data protection</p><a href="/compliance" class="btn btn-sm">View</a></div>
+      <div class="card" style="border:2px solid #059669"><h3>👥 Team & Invitations</h3><p>Invite members, manage access</p><a href="/settings/team" class="btn btn-sm" style="background:#059669;color:white">Manage</a></div>
+      <div class="card"><h3>📊 Status Page</h3><p>Platform health</p><a href="/status" class="btn btn-sm">View</a></div>
+    </div>
+    <script>
+    (function(){
+      var input = document.getElementById('settingsSearchInput');
+      var results = document.getElementById('settingsSearchResults');
+      if (!input || !results) return;
+      var debounceTimer = null;
+      var icons = {
+        'Profile': '👤', 'Organization': '🏢', 'Team & Invitations': '👥', 'Payments': '📱',
+        'Billing & Plans': '💳', 'Security & 2FA': '🛡️', 'Notifications': '🔔', 'Integrations': '🔌',
+        'API Keys': '🔑', 'Data & Backup': '💾', 'School Settings': '🏫', 'Church Settings': '⛪',
+        'Currency': '💰', 'Language': '🌐', 'Theme & Appearance': '🎨', 'Switch Portal': '🌍',
+        'Compliance & Audit': '📋', 'Status Page': '📊', 'Custom Domains': '🔗', 'SSO & Authentication': '🔐',
+        'CDN & Performance': '⚡', 'Email Branding': '✉️', 'Dashboard Customization': '🎛️', 'Password': '🔒'
+      };
+      input.addEventListener('input', function(){
+        var q = this.value.trim();
+        clearTimeout(debounceTimer);
+        if (q.length < 2) { results.classList.remove('ss-visible'); return; }
+        debounceTimer = setTimeout(function(){
+          fetch('/settings/search?q=' + encodeURIComponent(q))
+            .then(function(r){ return r.json(); })
+            .then(function(data){
+              if (!data.success || !data.results || !data.results.length) {
+                results.innerHTML = '<div class="ss-empty">No settings found for "' + q.replace(/</g,'&lt;') + '"</div>';
+                results.classList.add('ss-visible');
+                return;
+              }
+              var html = data.results.map(function(r){
+                var icon = icons[r.title] || '⚙️';
+                return '<div class="ss-result" onclick="window.location.href=\\'' + r.link + '\\'">' +
+                  '<div class="ss-result-icon">' + icon + '</div>' +
+                  '<div class="ss-result-text">' +
+                    '<div class="ss-result-title">' + r.title.replace(/</g,'&lt;') + '</div>' +
+                    '<div class="ss-result-desc">' + r.description.replace(/</g,'&lt;') + '</div>' +
+                  '</div>' +
+                  '<span class="ss-result-arrow">→</span>' +
+                '</div>';
+              }).join('');
+              results.innerHTML = html;
+              results.classList.add('ss-visible');
+            })
+            .catch(function(){
+              results.innerHTML = '<div class="ss-empty">Error searching settings</div>';
+              results.classList.add('ss-visible');
+            });
+        }, 300);
+      });
+      // Close results on click outside
+      document.addEventListener('click', function(e){
+        if (!e.target.closest('.settings-search-wrap')) {
+          results.classList.remove('ss-visible');
+        }
+      });
+      // Close on Escape
+      input.addEventListener('keydown', function(e){
+        if (e.key === 'Escape') results.classList.remove('ss-visible');
+      });
+      // Focus input on / key
+      document.addEventListener('keydown', function(e){
+        if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+          e.preventDefault();
+          input.focus();
+        }
+      });
+    })();
+    </script>
   `, req.session.user));
 }));
 
@@ -41316,7 +41411,7 @@ try { const m = require('./accessibility-checker'); m(app, pool, _newModOpts); c
 // --- Data Management ---
 try { const m = require('./recycle-bin'); m(app, pool, _newModOpts); console.log('[RecycleBin] Recycle bin/soft delete loaded — 2 tables, 13 routes'); } catch(e) { console.warn('[RecycleBin] Error:', e.message); }
 try { const m = require('./audit-trail-export'); m(app, pool, _newModOpts); console.log('[AuditExport] Audit trail export loaded — 1 table, 12 routes'); } catch(e) { console.warn('[AuditExport] Error:', e.message); }
-try { const m = require('./bulk-import'); m(app, pool, _newModOpts); console.log('[BulkImport] Bulk user import loaded — routes'); } catch(e) { console.warn('[BulkImport] Error:', e.message); }
+try { const m = require('./bulk-import'); m(app, pool, requireAuth, ah, esc, renderPage, logger, audit); logger.info('[BulkImport] Module loaded'); } catch(e) { logger.error('[BulkImport] Failed:', e.message); }
 
 // --- Analytics & Intelligence ---
 try { const m = require('./communication-analytics'); m(app, pool, _newModOpts); console.log('[CommAnalytics] Communication analytics loaded — 2 tables, 14 routes'); } catch(e) { console.warn('[CommAnalytics] Error:', e.message); }
@@ -46157,6 +46252,142 @@ app.post('/invite/reject', ah(async (req, res) => {
 }));
 
 console.log('[Invitations] Enhanced email invitation system registered — /settings/team, /invite/reject');
+
+// ============================================================
+// SAVED FILTER PREFERENCES
+// ============================================================
+
+// Create saved_filters table on startup
+pool.query(`
+  CREATE TABLE IF NOT EXISTS saved_filters (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    page VARCHAR(100) NOT NULL,
+    filters JSONB NOT NULL,
+    is_default BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  )
+`).then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_saved_filters_user ON saved_filters(tenant_id, user_id)`))
+  .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_saved_filters_page ON saved_filters(tenant_id, user_id, page)`))
+  .catch(e => { if (!e.message.includes('already exists')) console.warn('[SavedFilters] Migration warning:', e.message); });
+
+// POST /api/filters/save — Save a filter combination
+app.post('/api/filters/save', requireAuth, ah(async (req, res) => {
+  const { name, page, filters, is_default } = req.body;
+  const tenantId = req.session.user.tenant_id;
+  const userId = req.session.user.id;
+  if (!name || !page || !filters) return res.status(400).json({ error: 'name, page, and filters are required' });
+  if (name.length > 100) return res.status(400).json({ error: 'name must be 100 characters or less' });
+  if (page.length > 100) return res.status(400).json({ error: 'page must be 100 characters or less' });
+  // If setting as default, clear any existing default for this page
+  if (is_default) {
+    await pool.query('UPDATE saved_filters SET is_default = false WHERE tenant_id = $1 AND user_id = $2 AND page = $3 AND is_default = true', [tenantId, userId, page]);
+  }
+  const result = await pool.query(
+    'INSERT INTO saved_filters(tenant_id, user_id, name, page, filters, is_default) VALUES($1, $2, $3, $4, $5, $6) RETURNING id, name, page, filters, is_default, created_at',
+    [tenantId, userId, name, page, JSON.stringify(filters), is_default || false]
+  );
+  res.json({ success: true, filter: result.rows[0] });
+}));
+
+// GET /api/filters/list?page=X — Get saved filters for current user + page
+app.get('/api/filters/list', requireAuth, ah(async (req, res) => {
+  const { page } = req.query;
+  const tenantId = req.session.user.tenant_id;
+  const userId = req.session.user.id;
+  let query = 'SELECT id, name, page, filters, is_default, created_at, updated_at FROM saved_filters WHERE tenant_id = $1 AND user_id = $2';
+  const params = [tenantId, userId];
+  if (page) { query += ' AND page = $3'; params.push(page); }
+  query += ' ORDER BY is_default DESC, created_at DESC';
+  const result = await pool.query(query, params);
+  res.json({ success: true, filters: result.rows });
+}));
+
+// POST /api/filters/apply/:id — Get a specific filter by ID
+app.post('/api/filters/apply/:id', requireAuth, ah(async (req, res) => {
+  const filterId = parseInt(req.params.id);
+  const tenantId = req.session.user.tenant_id;
+  const userId = req.session.user.id;
+  const result = await pool.query('SELECT id, name, page, filters, is_default FROM saved_filters WHERE id = $1 AND tenant_id = $2 AND user_id = $3', [filterId, tenantId, userId]);
+  if (!result.rows.length) return res.status(404).json({ error: 'Filter not found' });
+  res.json({ success: true, filter: result.rows[0] });
+}));
+
+// POST /api/filters/delete/:id — Delete a saved filter
+app.post('/api/filters/delete/:id', requireAuth, ah(async (req, res) => {
+  const filterId = parseInt(req.params.id);
+  const tenantId = req.session.user.tenant_id;
+  const userId = req.session.user.id;
+  const result = await pool.query('DELETE FROM saved_filters WHERE id = $1 AND tenant_id = $2 AND user_id = $3 RETURNING id', [filterId, tenantId, userId]);
+  if (!result.rows.length) return res.status(404).json({ error: 'Filter not found' });
+  res.json({ success: true });
+}));
+
+// POST /api/filters/default/:id — Set a filter as default for that page
+app.post('/api/filters/default/:id', requireAuth, ah(async (req, res) => {
+  const filterId = parseInt(req.params.id);
+  const tenantId = req.session.user.tenant_id;
+  const userId = req.session.user.id;
+  // Get the filter to find its page
+  const filter = await pool.query('SELECT page FROM saved_filters WHERE id = $1 AND tenant_id = $2 AND user_id = $3', [filterId, tenantId, userId]);
+  if (!filter.rows.length) return res.status(404).json({ error: 'Filter not found' });
+  const page = filter.rows[0].page;
+  // Clear existing default
+  await pool.query('UPDATE saved_filters SET is_default = false WHERE tenant_id = $1 AND user_id = $2 AND page = $3 AND is_default = true', [tenantId, userId, page]);
+  // Set new default
+  await pool.query('UPDATE saved_filters SET is_default = true, updated_at = NOW() WHERE id = $1 AND tenant_id = $2 AND user_id = $3', [filterId, tenantId, userId]);
+  res.json({ success: true });
+}));
+
+console.log('[SavedFilters] API routes registered — /api/filters/*');
+
+// ============================================================
+// SETTINGS SEARCH
+// ============================================================
+
+const SETTINGS_INDEX = [
+  { title: 'Profile', desc: 'Name, email, password, avatar', link: '/settings/profile', keywords: 'profile name email password avatar account personal' },
+  { title: 'Organization', desc: 'Name, logo, branding, favicon, colors', link: '/settings/branding', keywords: 'organization logo branding favicon colors theme custom css font' },
+  { title: 'Team & Invitations', desc: 'Users, invitations, roles, permissions, RBAC', link: '/settings/team', keywords: 'team users invitations roles permissions rbac access invite member staff' },
+  { title: 'Payments', desc: 'MTN MoMo, Airtel, DPO, API keys, mobile money', link: '/settings/payments', keywords: 'payments mtn momo airtel dpo api keys mobile money flutterwave pay' },
+  { title: 'Billing & Plans', desc: 'Invoices, subscriptions, plans, trial', link: '/billing', keywords: 'billing invoices subscriptions plans trial upgrade pricing payment' },
+  { title: 'Security & 2FA', desc: 'Two-factor auth, password, sessions, CSRF', link: '/settings/2fa', keywords: 'security 2fa two-factor authentication password sessions csrf totp authenticator' },
+  { title: 'Notifications', desc: 'Email, SMS, WhatsApp, alerts', link: '/settings/branding', keywords: 'notifications email sms whatsapp alerts notify reminders' },
+  { title: 'Integrations', desc: 'Webhooks, API, CSV, export', link: '/integrations', keywords: 'integrations webhooks api csv export third-party connect' },
+  { title: 'API Keys', desc: 'API access & webhooks management', link: '/api-keys', keywords: 'api keys webhooks access token developer endpoint' },
+  { title: 'Data & Backup', desc: 'Backup, import, export, privacy', link: '/settings/backup', keywords: 'data backup import export privacy download restore archive compliance gdpr' },
+  { title: 'School Settings', desc: 'Students, fees, classes, exams, timetable', link: '/school/students', keywords: 'school students fees classes exams timetable grades subjects curriculum' },
+  { title: 'Church Settings', desc: 'Members, tithes, sermons, groups', link: '/church/members', keywords: 'church members tithes sermons groups offerings donations service cell' },
+  { title: 'Currency', desc: 'UGX, KES, TZS, RWF settings', link: '/settings/currency', keywords: 'currency ugx kes tzs rwf money exchange rate symbol' },
+  { title: 'Language', desc: 'Translations & locale settings', link: '/settings/translations', keywords: 'language translations locale i18n luganda swahili french english' },
+  { title: 'Theme & Appearance', desc: 'Colors, fonts, CSS, dark mode', link: '/settings/theme', keywords: 'theme colors fonts css dark mode light appearance style customize design' },
+  { title: 'Switch Portal', desc: 'School, Church, Clinic, Business & more', link: '/switch-portal', keywords: 'portal switch school church clinic business organization type category' },
+  { title: 'Compliance & Audit', desc: 'Audit logs & data protection', link: '/compliance', keywords: 'compliance audit log data protection gdpr privacy regulation policy' },
+  { title: 'Status Page', desc: 'Platform health monitoring', link: '/status', keywords: 'status health monitoring uptime performance system page' },
+  { title: 'Custom Domains', desc: 'Custom domain & DNS settings', link: '/settings/domains', keywords: 'domains dns custom subdomain cname url website' },
+  { title: 'SSO & Authentication', desc: 'SAML, OIDC, single sign-on', link: '/settings/sso', keywords: 'sso saml oidc authentication single sign-on login federation' },
+  { title: 'CDN & Performance', desc: 'Content delivery & caching', link: '/settings/cdn', keywords: 'cdn performance caching content delivery speed optimize' },
+  { title: 'Email Branding', desc: 'Email templates & whitelabeling', link: '/settings/email-branding', keywords: 'email branding templates whitelabel custom footer signature' },
+  { title: 'Dashboard Customization', desc: 'Dashboard layout & widgets', link: '/settings/dashboard', keywords: 'dashboard customization layout widgets arrange preferences' },
+  { title: 'Password', desc: 'Change your password', link: '/settings/password', keywords: 'password change reset update security login' },
+];
+
+// GET /settings/search?q=term — Search across all settings
+app.get('/settings/search', requireAuth, ah(async (req, res) => {
+  const q = (req.query.q || '').toLowerCase().trim();
+  if (!q || q.length < 2) return res.json({ success: true, results: [], query: q });
+  const queryWords = q.split(/\s+/).filter(Boolean);
+  const results = SETTINGS_INDEX.filter(item => {
+    const searchText = (item.title + ' ' + item.desc + ' ' + item.keywords).toLowerCase();
+    return queryWords.every(w => searchText.includes(w));
+  }).map(item => ({ title: item.title, description: item.desc, link: item.link }));
+  res.json({ success: true, results, query: q });
+}));
+
+console.log('[SettingsSearch] API route registered — /settings/search');
 
 // ============================================================
 // PHASE 4 COMPLETE: All remaining gap analysis tasks implemented
