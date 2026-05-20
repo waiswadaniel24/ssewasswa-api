@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 ﻿const express = require('express');
 const session = require('express-session');
 const path = require('path');
@@ -652,3 +653,10 @@ process.on('SIGINT', async () => { try { await pool.end(); } catch(e) {} process
 process.on('unhandledRejection', (reason) => { console.error('Unhandled:', reason); });
 
 start().catch(err => { console.error('Startup failed:', err); process.exit(1); });
+=======
+cd / home / z / my - project
+rm - f.git / MERGE_HEAD.git / index.lock.git / REBASE_HEAD.git / MERGE_MSG
+rm - rf.git / rebase - merge.git / rebase - apply
+git read - tree--reset HEAD
+git stat
+>>>>>>> Stashed changes
