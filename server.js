@@ -29,7 +29,7 @@ const session = require('express-session');
 // connect-pg-simple for persistent sessions (optional — falls back to memory store)
 let pgSession;
 try { pgSession = require('connect-pg-simple')(session); } catch(e) { pgSession = null; console.warn('[Session] connect-pg-simple not available, using memory store'); }
-const { Pool } = require('pg');
+// Pool is now imported from ./db.js (shared connection pool configuration)
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 
@@ -242,20 +242,16 @@ if (process.env.SENTRY_DSN) {
 }
 
 const app = express();
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  // Always use rejectUnauthorized:false — Render/Heroku/Neon managed PostgreSQL uses self-signed CA certs.
-  // Using NODE_ENV check breaks when Render doesn't set NODE_ENV=production by default.
-  ssl: { rejectUnauthorized: false },
-  max: 5, // Reduced from 10 for Render free tier (97 connection limit shared across apps)
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 15000
-});
+const { createPool } = require('./db');
+const MigrationQueue = require('./migration-queue');
 
-// Handle pool-level errors to prevent crashes
-pool.on('error', (err) => {
-  console.error('[DB Pool] Unexpected error on idle client:', err.message);
-});
+const pool = createPool(); // Uses shared db.js: max=20, connectionTimeout=60s
+
+// === MIGRATION QUEUE (prevents connection pool exhaustion on startup) ===
+// Modules register their DB migrations with the queue instead of running them immediately.
+// After all modules are loaded, server calls migrationQueue.drain() to process them sequentially.
+const migrationQueue = new MigrationQueue(pool, 3); // 3 concurrent migrations max
+app.set('migrationQueue', migrationQueue);
 
 // === TENANT-AWARE QUERY (Phase 1 Security Fix: Row Level Security) ===
 // Provides defense-in-depth by enforcing tenant isolation at the database level.
@@ -43914,10 +43910,7 @@ CDN_URL=https://cdn.yourdomain.com</code></pre>
 // ============================================================
 // Read replica configuration
 const READ_REPLICA_URL = process.env.READ_REPLICA_URL || '';
-const READ_REPLICA_POOL = READ_REPLICA_URL ? new (require('pg').Pool)({
-  connectionString: READ_REPLICA_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-}) : null;
+const READ_REPLICA_POOL = READ_REPLICA_URL ? createPool(READ_REPLICA_URL, { max: 5 }) : null;
 
 // Helper: route read queries to replica, writes to primary
 const replicaQuery = async (text, params) => {
@@ -46414,11 +46407,29 @@ console.log('[SettingsSearch] API route registered — /settings/search');
 // ============================================================
 
 // === START SERVER (after all routes are registered) ===
-const PORT = process.env.PORT || 3000;
+// === PROCESS MIGRATION QUEUE (serialize all startup DB migrations) ===
+// This runs AFTER all modules have registered their migrations with the queue.
+// Processing them sequentially prevents connection pool exhaustion.
+(async () => {
+  try {
+    const mq = app.get('migrationQueue');
+    if (mq && mq.queue.length > 0) {
+      console.log(`[Startup] Processing ${mq.queue.length} queued migrations...`);
+      await mq.drain();
+    } else {
+      console.log('[Startup] No queued migrations (modules ran migrations directly)');
+    }
+  } catch (e) {
+    console.warn('[Startup] Migration queue drain error:', e.message);
+  }
+})();
+
+const PORT = process.env.PORT || 10000;
 const server = require('http').createServer(app);
 server.listen(PORT, () => {
   console.log(`Comfort Platform LIVE on ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`DB Pool: max=${pool.options?.max || 20}, timeout=${pool.options?.connectionTimeoutMillis || 60000}ms`);
 });
 
 // Deploy trigger 1779091065
