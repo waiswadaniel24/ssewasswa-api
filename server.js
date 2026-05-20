@@ -10016,6 +10016,15 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
           <a href="/status/admin" class="nav-tile"><div class="nt-icon" style="background:#fce7f3">&#128994;</div><div class="nt-label">Status Page</div></a>
         </div>
 
+        <h3>Dashboard Suite</h3>
+        <div class="nav-grid" style="margin-bottom:16px">
+          <a href="/tenant/dashboard" class="nav-tile"><div class="nt-icon" style="background:#dbeafe">&#127970;</div><div class="nt-label">Tenant Admin</div></a>
+          <a href="/dev/dashboard" class="nav-tile"><div class="nt-icon" style="background:#f5f3ff">&#128187;</div><div class="nt-label">Developer</div></a>
+          <a href="/security/dashboard" class="nav-tile"><div class="nt-icon" style="background:#fee2e2">&#128737;</div><div class="nt-label">Security</div></a>
+          <a href="/monitoring/dashboard" class="nav-tile"><div class="nt-icon" style="background:#dcfce7">&#128200;</div><div class="nt-label">Monitoring</div></a>
+          <a href="/governance/dashboard" class="nav-tile"><div class="nt-icon" style="background:#ede9fe">&#9878;</div><div class="nt-label">Governance</div></a>
+        </div>
+
         <h3>Portal Features</h3>
         <div class="nav-grid">
           <a href="/fundraising" class="nav-tile"><div class="nt-icon" style="background:#dcfce7">&#127873;</div><div class="nt-label">Fundraising</div></a>
@@ -10040,6 +10049,11 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       <div class="dev-section">
         <h2>Quick Actions</h2>
         <div class="action-grid">
+          <a href="/tenant/dashboard" class="action-item"><div class="ai-icon" style="background:#dbeafe">&#127970;</div><div><div class="ai-title">Tenant Admin</div><div class="ai-desc">Users, billing, branding, integrations</div></div></a>
+          <a href="/dev/dashboard" class="action-item"><div class="ai-icon" style="background:#f5f3ff">&#128187;</div><div><div class="ai-title">Developer Dashboard</div><div class="ai-desc">CI/CD, APIs, sandbox, marketplace</div></div></a>
+          <a href="/security/dashboard" class="action-item"><div class="ai-icon" style="background:#fee2e2">&#128737;</div><div><div class="ai-title">Security Dashboard</div><div class="ai-desc">Auth, threats, compliance, RBAC</div></div></a>
+          <a href="/monitoring/dashboard" class="action-item"><div class="ai-icon" style="background:#dcfce7">&#128200;</div><div><div class="ai-title">Monitoring Dashboard</div><div class="ai-desc">KPIs, events, performance, alerts</div></div></a>
+          <a href="/governance/dashboard" class="action-item"><div class="ai-icon" style="background:#ede9fe">&#9878;</div><div><div class="ai-title">Governance Dashboard</div><div class="ai-desc">Policies, compliance, data governance</div></div></a>
           <a href="/dev/settings" class="action-item"><div class="ai-icon" style="background:#fce7f3">&#9881;</div><div><div class="ai-title">Platform Settings</div><div class="ai-desc">Contacts, site name, social links</div></div></a>
           <a href="/dev/withdraw" class="action-item"><div class="ai-icon" style="background:#dcfce7">&#128176;</div><div><div class="ai-title">Withdraw Money</div><div class="ai-desc">Send earnings to mobile money</div></div></a>
           <a href="/dev/posts" class="action-item"><div class="ai-icon" style="background:#ffedd5">&#128227;</div><div><div class="ai-title">Public Posts</div><div class="ai-desc">Announcements &amp; updates</div></div></a>
@@ -41437,6 +41451,22 @@ try { const m = require('./content-moderation'); m(app, pool, _newModOpts); cons
 
 // ── v19: Cross-portal subscription feature gating ──
 try { const m = require('./subscription-gating'); m(app, pool, renderPage, esc); console.log('[SubGating] Cross-portal subscription gating loaded'); } catch(e) { console.warn('[SubGating] Error:', e.message); }
+
+// ── Phase 5: Unified Dashboard Suite ──
+// Tenant Admin Dashboard — multi-tenant management, billing, branding, integrations, audit, data mgmt, support
+try { const m = require('./tenant-admin-dashboard'); m(app, pool, _newModOpts); console.log('[TenantDash] Tenant admin dashboard loaded — 6 tables, 13 routes'); } catch(e) { console.warn('[TenantDash] Error:', e.message); }
+
+// Developer Dashboard — CI/CD, app lifecycle, sandbox, marketplace admin, event architecture, monitoring
+try { const m = require('./developer-dashboard'); m(app, pool, _newModOpts); console.log('[DevDash] Developer dashboard loaded — 8 tables, 11 routes'); } catch(e) { console.warn('[DevDash] Error:', e.message); }
+
+// Security & Auth Dashboard — unified auth, cross-portal, RBAC viz, threats, compliance, encryption, incidents
+try { const m = require('./security-auth-dashboard'); m(app, pool, _newModOpts); console.log('[SecDash] Security & auth dashboard loaded — 8 tables, 15 routes'); } catch(e) { console.warn('[SecDash] Error:', e.message); }
+
+// Monitoring & Analytics Dashboard — real-time KPIs, events, performance, alerts
+try { const m = require('./monitoring-analytics-dashboard'); m(app, pool, _newModOpts); console.log('[MonDash] Monitoring & analytics dashboard loaded — 6 tables, 13 routes'); } catch(e) { console.warn('[MonDash] Error:', e.message); }
+
+// Governance Dashboard — policies, compliance, data governance, workflows, user assistance
+try { const m = require('./governance-dashboard'); m(app, pool, _newModOpts); console.log('[GovDash] Governance dashboard loaded — 7 tables, 19 routes'); } catch(e) { console.warn('[GovDash] Error:', e.message); }
 
 console.log('[Deferred] All deferred modules loaded successfully');
 }; // end _deferModules
