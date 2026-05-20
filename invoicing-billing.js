@@ -287,11 +287,23 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
 
   // ── helper: form field ───────────────────────────────────
   function field(label, name, type, val, opts) {
-    const req = opts && opts.required ? ' required' : '';
+    opts = opts || {};
+    const attrs = [];
+    if (opts.required) attrs.push('required');
+    if (opts.minlength) attrs.push('minlength="' + opts.minlength + '"');
+    if (opts.maxlength) attrs.push('maxlength="' + opts.maxlength + '"');
+    if (opts.min !== undefined) attrs.push('min="' + opts.min + '"');
+    if (opts.max !== undefined) attrs.push('max="' + opts.max + '"');
+    if (opts.pattern) attrs.push('pattern="' + esc(opts.pattern) + '"');
+    if (opts['data-ugx']) attrs.push('data-ugx="true"');
+    if (opts['data-no-special']) attrs.push('data-no-special="true"');
+    if (opts['data-match']) attrs.push('data-match="' + esc(opts['data-match']) + '"');
+    if (opts['data-match-label']) attrs.push('data-match-label="' + esc(opts['data-match-label']) + '"');
+    const attrStr = attrs.length ? ' ' + attrs.join(' ') : '';
     return `<div><label style="font-size:13px;font-weight:600;color:#475569;display:block;margin-bottom:4px">${label}</label>
-      <input type="${type}" name="${name}" value="${esc(String(val || ''))}"${req}
+      <input type="${type}" name="${name}" value="${esc(String(val || ''))}"${attrStr}
         style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px"
-        ${opts && opts.placeholder ? 'placeholder="' + esc(opts.placeholder) + '"' : ''}></div>`;
+        ${opts.placeholder ? 'placeholder="' + esc(opts.placeholder) + '"' : ''}></div>`;
   }
 
   function selectField(label, name, options, val) {
@@ -434,7 +446,7 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
           <input type="hidden" name="_csrf" value="${esc(req.session.csrfToken || '')}">
           <h3 style="font-size:15px;color:#1e293b;margin-bottom:12px">Client Information</h3>
           <div class="form-grid">
-            ${field('Client Name *', 'client_name', 'text', '', { required: true, placeholder: 'Acme Corporation' })}
+            ${field('Client Name *', 'client_name', 'text', '', { required: true, placeholder: 'Acme Corporation', minlength: 2, 'data-no-special': true })}
             ${field('Email', 'client_email', 'email', '', { placeholder: 'billing@acme.com' })}
             ${field('Phone', 'client_phone', 'tel', '', { placeholder: '+256 700 000 000' })}
             ${field('Address', 'client_address', 'text', '', { placeholder: '123 Business Street' })}
@@ -444,8 +456,8 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
             ${field('Issue Date *', 'issue_date', 'date', today(), { required: true })}
             ${field('Due Date *', 'due_date', 'date', thirtyDays(), { required: true })}
             ${selectField('Currency', 'currency', [['UGX','UGX (Ugandan Shilling)'],['KES','KES (Kenyan Shilling)'],['TZS','TZS (Tanzanian Shilling)'],['USD','USD (US Dollar)'],['RWF','RWF (Rwandan Franc)']], 'UGX')}
-            ${field('Tax Rate (%)', 'tax_rate', 'number', '0', {})}
-            ${field('Discount', 'discount', 'number', '0', {})}
+            ${field('Tax Rate (%)', 'tax_rate', 'number', '0', { min: 0, max: 100 })}
+            ${field('Discount', 'discount', 'number', '0', { min: 0 })}
           </div>
           <h3 style="font-size:15px;color:#1e293b;margin:20px 0 12px">Line Items</h3>
           <div class="line-items">
@@ -1145,7 +1157,7 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
           <input type="hidden" name="_csrf" value="${esc(req.session.csrfToken || '')}">
           <h3 style="font-size:15px;color:#1e293b;margin-bottom:12px">Client Information</h3>
           <div class="form-grid">
-            ${field('Client Name *', 'client_name', 'text', '', { required: true, placeholder: 'Acme Corporation' })}
+            ${field('Client Name *', 'client_name', 'text', '', { required: true, placeholder: 'Acme Corporation', minlength: 2, 'data-no-special': true })}
             ${field('Email', 'client_email', 'email', '', { placeholder: 'billing@acme.com' })}
             ${field('Phone', 'client_phone', 'tel', '', { placeholder: '+256 700 000 000' })}
             ${field('Address', 'client_address', 'text', '', { placeholder: '123 Business Street' })}
@@ -1155,8 +1167,8 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
             ${selectField('Frequency *', 'frequency', [['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['quarterly','Quarterly'],['yearly','Yearly']], 'monthly')}
             ${field('First Invoice Date *', 'next_date', 'date', today(), { required: true })}
             ${selectField('Currency', 'currency', [['UGX','UGX'],['KES','KES'],['TZS','TZS'],['USD','USD'],['RWF','RWF']], 'UGX')}
-            ${field('Tax Rate (%)', 'tax_rate', 'number', '0', {})}
-            ${field('Discount', 'discount', 'number', '0', {})}
+            ${field('Tax Rate (%)', 'tax_rate', 'number', '0', { min: 0, max: 100 })}
+            ${field('Discount', 'discount', 'number', '0', { min: 0 })}
           </div>
           <h3 style="font-size:15px;color:#1e293b;margin:20px 0 12px">Line Items</h3>
           <div class="line-items">

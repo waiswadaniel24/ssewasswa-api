@@ -154,7 +154,19 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
     `CREATE INDEX IF NOT EXISTS idx_ptransactions_req ON payment_transactions(payment_request_id)`,
     `ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS mtn_reference_id VARCHAR(100)`,
     `ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS platform_fee NUMERIC(10,2) DEFAULT 0`,
-    `CREATE INDEX IF NOT EXISTS idx_prequests_mtn_ref ON payment_requests(mtn_reference_id)`
+    `CREATE INDEX IF NOT EXISTS idx_prequests_mtn_ref ON payment_requests(mtn_reference_id)`,
+    `CREATE TABLE IF NOT EXISTS payment_config (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      provider VARCHAR(50) NOT NULL,
+      is_active BOOLEAN DEFAULT false,
+      config JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(tenant_id, provider)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_payment_config_tenant ON payment_config(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_payment_config_tenant_provider ON payment_config(tenant_id, provider)`
   ];
 
   (async () => {
@@ -174,17 +186,74 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
   const MTN_API_KEY = process.env.MTN_COLLECTION_API_KEY || '';
   const MTN_ENV = process.env.MTN_MOMO_ENV || 'sandbox';
 
-  // Cache the OAuth token (MTN tokens are valid for ~3600s)
-  let _mtnTokenCache = { token: null, expires: 0 };
+  // Per-tenant config cache (keyed by tenantId)
+  let _mtnConfigCache = {};
 
-  async function getMtnAccessToken() {
-    if (_mtnTokenCache.token && Date.now() < _mtnTokenCache.expires) return _mtnTokenCache.token;
-    const auth = Buffer.from(`${MTN_USER_ID}:${MTN_API_KEY}`).toString('base64');
-    const resp = await fetch(`${MTN_BASE_URL}/collection/token/`, {
+  /**
+   * getMtnConfig(tenantId) — Returns MTN MoMo config for a tenant.
+   * Priority: payment_config table > process.env fallback
+   * Returns { baseUrl, primaryKey, userId, apiKey, env }
+   */
+  async function getMtnConfig(tenantId) {
+    if (!tenantId) return { baseUrl: MTN_BASE_URL, primaryKey: MTN_PRIMARY_KEY, userId: MTN_USER_ID, apiKey: MTN_API_KEY, env: MTN_ENV };
+
+    // Check in-memory cache (5 min TTL)
+    const cached = _mtnConfigCache[tenantId];
+    if (cached && Date.now() < cached.expires) return cached.config;
+
+    try {
+      const row = (await pool.query(
+        `SELECT config, is_active FROM payment_config WHERE tenant_id=$1 AND provider='mtn_momo'`, [tenantId]
+      )).rows[0];
+
+      if (row && row.is_active && row.config) {
+        const c = row.config;
+        const config = {
+          baseUrl: c.base_url || MTN_BASE_URL,
+          primaryKey: c.primary_key || MTN_PRIMARY_KEY,
+          userId: c.user_id || MTN_USER_ID,
+          apiKey: c.api_key || MTN_API_KEY,
+          env: c.environment || MTN_ENV
+        };
+        _mtnConfigCache[tenantId] = { config, expires: Date.now() + 300000 };
+        return config;
+      }
+    } catch (e) {
+      logger.warn({ msg: '[PaymentGateway] Failed to load MTN config from DB, falling back to env', error: e.message });
+    }
+
+    // Fallback to environment variables
+    const config = { baseUrl: MTN_BASE_URL, primaryKey: MTN_PRIMARY_KEY, userId: MTN_USER_ID, apiKey: MTN_API_KEY, env: MTN_ENV };
+    _mtnConfigCache[tenantId] = { config, expires: Date.now() + 300000 };
+    return config;
+  }
+
+  /**
+   * Check if MTN MoMo is configured (either in DB or env) for a tenant
+   */
+  async function isMtnConfigured(tenantId) {
+    const cfg = await getMtnConfig(tenantId);
+    return !!(cfg.primaryKey && cfg.userId && cfg.apiKey);
+  }
+
+  // Cache the OAuth token per-tenant (MTN tokens are valid for ~3600s)
+  let _mtnTokenCache = { token: null, expires: 0, tenantId: null };
+
+  async function getMtnAccessToken(tenantId) {
+    // If tenant-specific, always get fresh token (different tenants may have different creds)
+    const cfg = await getMtnConfig(tenantId);
+    const cacheKey = tenantId || '__global__';
+
+    if (_mtnTokenCache.tenantId === cacheKey && _mtnTokenCache.token && Date.now() < _mtnTokenCache.expires) {
+      return _mtnTokenCache.token;
+    }
+
+    const auth = Buffer.from(`${cfg.userId}:${cfg.apiKey}`).toString('base64');
+    const resp = await fetch(`${cfg.baseUrl}/collection/token/`, {
       method: 'POST',
       headers: {
         'Authorization': `Basic ${auth}`,
-        'Ocp-Apim-Subscription-Key': MTN_PRIMARY_KEY,
+        'Ocp-Apim-Subscription-Key': cfg.primaryKey,
         'Content-Type': 'application/json'
       }
     });
@@ -193,12 +262,13 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
       throw new Error(`MTN token request failed (${resp.status}): ${body}`);
     }
     const data = await resp.json();
-    _mtnTokenCache = { token: data.access_token, expires: Date.now() + ((data.expires_in || 3500) * 1000) };
+    _mtnTokenCache = { token: data.access_token, expires: Date.now() + ((data.expires_in || 3500) * 1000), tenantId: cacheKey };
     return data.access_token;
   }
 
   async function requestMtnPayment(phone, amount, reference, tenantId) {
-    const token = await getMtnAccessToken();
+    const cfg = await getMtnConfig(tenantId);
+    const token = await getMtnAccessToken(tenantId);
     // Format phone to MSISDN (256XXXXXXXXX)
     let msisdn = String(phone).replace(/[^0-9]/g, '');
     if (msisdn.startsWith('0')) msisdn = '256' + msisdn.substring(1);
@@ -206,13 +276,13 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
     else if (!msisdn.startsWith('256')) msisdn = '256' + msisdn;
 
     const xRef = reference.replace(/[^a-zA-Z0-9-]/g, '').substring(0, 36);
-    const resp = await fetch(`${MTN_BASE_URL}/collection/v1_0/requesttopay`, {
+    const resp = await fetch(`${cfg.baseUrl}/collection/v1_0/requesttopay`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'X-Reference-Id': xRef,
-        'X-Target-Environment': MTN_ENV,
-        'Ocp-Apim-Subscription-Key': MTN_PRIMARY_KEY,
+        'X-Target-Environment': cfg.env,
+        'Ocp-Apim-Subscription-Key': cfg.primaryKey,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -230,14 +300,15 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
     throw new Error(`MTN requesttopay failed (${resp.status}): ${body}`);
   }
 
-  async function checkMtnPaymentStatus(referenceId) {
-    const token = await getMtnAccessToken();
-    const resp = await fetch(`${MTN_BASE_URL}/collection/v1_0/requesttopay/${referenceId}`, {
+  async function checkMtnPaymentStatus(referenceId, tenantId) {
+    const cfg = await getMtnConfig(tenantId);
+    const token = await getMtnAccessToken(tenantId);
+    const resp = await fetch(`${cfg.baseUrl}/collection/v1_0/requesttopay/${referenceId}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
-        'X-Target-Environment': MTN_ENV,
-        'Ocp-Apim-Subscription-Key': MTN_PRIMARY_KEY
+        'X-Target-Environment': cfg.env,
+        'Ocp-Apim-Subscription-Key': cfg.primaryKey
       }
     });
     if (!resp.ok) {
@@ -303,6 +374,7 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
       <a href="/payments/transactions">📋 Transactions</a>
       <a href="/payments/methods">⚙ Methods</a>
       <a href="/payments/reconcile">🔍 Reconcile</a>
+      <a href="/settings/payments">🔌 API Settings</a>
     </div>`;
 
     const html = PG_CSS + `
@@ -355,7 +427,7 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
 
     const navHtml = `<div class="pg-nav">
       <a href="/payments">📊 Dashboard</a><a href="/payments/collect" class="active">💳 Collect</a>
-      <a href="/payments/transactions">📋 Transactions</a><a href="/payments/methods">⚙ Methods</a><a href="/payments/reconcile">🔍 Reconcile</a>
+      <a href="/payments/transactions">📋 Transactions</a><a href="/payments/methods">⚙ Methods</a><a href="/payments/reconcile">🔍 Reconcile</a><a href="/settings/payments">🔌 API Settings</a>
     </div>`;
 
     const html = PG_CSS + `
@@ -432,7 +504,7 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
       return res.send(renderPage('Error', '<div class="card" style="text-align:center;padding:40px"><p style="color:#dc2626;font-size:16px">Phone number is required for MTN MoMo payments.</p><a href="/payments/collect" class="pg-btn pg-btn-primary" style="margin-top:16px">← Try Again</a></div>', user));
     }
 
-    const isMtnMomo = provider === 'mtn' && MTN_PRIMARY_KEY && MTN_USER_ID && MTN_API_KEY;
+    const isMtnMomo = provider === 'mtn' && (await isMtnConfigured(tid));
     const initialStatus = isMtnMomo ? 'pending_momo' : 'pending';
 
     const result = await pool.query(
@@ -474,7 +546,7 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
     // If status is pending_momo, poll the MTN API for the current status
     if (pr.status === 'pending_momo' && pr.mtn_reference_id) {
       try {
-        const mtnStatus = await checkMtnPaymentStatus(pr.mtn_reference_id);
+        const mtnStatus = await checkMtnPaymentStatus(pr.mtn_reference_id, tid);
         logger.info({ msg: '[PaymentGateway] MoMo status poll', ref, mtnRefId: pr.mtn_reference_id, status: mtnStatus.status });
 
         if (mtnStatus.status === 'SUCCESSFUL') {
@@ -610,7 +682,7 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
 
     const navHtml = `<div class="pg-nav">
       <a href="/payments">📊 Dashboard</a><a href="/payments/collect">💳 Collect</a>
-      <a href="/payments/transactions">📋 Transactions</a><a href="/payments/methods" class="active">⚙ Methods</a><a href="/payments/reconcile">🔍 Reconcile</a>
+      <a href="/payments/transactions">📋 Transactions</a><a href="/payments/methods" class="active">⚙ Methods</a><a href="/payments/reconcile">🔍 Reconcile</a><a href="/settings/payments">🔌 API Settings</a>
     </div>`;
 
     const methodRows = methods.map(m => `<tr>
@@ -720,7 +792,7 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
 
     const navHtml = `<div class="pg-nav">
       <a href="/payments">📊 Dashboard</a><a href="/payments/collect">💳 Collect</a>
-      <a href="/payments/transactions" class="active">📋 Transactions</a><a href="/payments/methods">⚙ Methods</a><a href="/payments/reconcile">🔍 Reconcile</a>
+      <a href="/payments/transactions" class="active">📋 Transactions</a><a href="/payments/methods">⚙ Methods</a><a href="/payments/reconcile">🔍 Reconcile</a><a href="/settings/payments">🔌 API Settings</a>
     </div>`;
 
     const html = PG_CSS + `
@@ -788,7 +860,7 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
     const user = req.session.user, tid = user.tenant_id;
     const navHtml = `<div class="pg-nav">
       <a href="/payments">📊 Dashboard</a><a href="/payments/collect">💳 Collect</a>
-      <a href="/payments/transactions">📋 Transactions</a><a href="/payments/methods">⚙ Methods</a><a href="/payments/reconcile" class="active">🔍 Reconcile</a>
+      <a href="/payments/transactions">📋 Transactions</a><a href="/payments/methods">⚙ Methods</a><a href="/payments/reconcile" class="active">🔍 Reconcile</a><a href="/settings/payments">🔌 API Settings</a>
     </div>`;
 
     const summary = (await pool.query(
@@ -854,7 +926,7 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
 
     const navHtml = `<div class="pg-nav">
       <a href="/payments">📊 Dashboard</a><a href="/payments/collect">💳 Collect</a>
-      <a href="/payments/transactions">📋 Transactions</a><a href="/payments/methods">⚙ Methods</a><a href="/payments/reconcile" class="active">🔍 Reconcile</a>
+      <a href="/payments/transactions">📋 Transactions</a><a href="/payments/methods">⚙ Methods</a><a href="/payments/reconcile" class="active">🔍 Reconcile</a><a href="/settings/payments">🔌 API Settings</a>
     </div>`;
 
     const html = PG_CSS + `
@@ -1061,5 +1133,418 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
 
     res.status(200).json({ status: 'ok' });
   }));
+
+  // ============================================================
+  // ROUTE 14: GET /settings/payments — Payment API Settings Page
+  // ============================================================
+  app.get('/settings/payments', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+
+    // Load all payment_config rows for this tenant
+    const configs = (await pool.query(
+      `SELECT * FROM payment_config WHERE tenant_id=$1 ORDER BY provider`, [tid]
+    )).rows;
+
+    // Build a map for easy access
+    const cfgMap = {};
+    for (const c of configs) cfgMap[c.provider] = c;
+
+    // Ensure entries exist in the map even if not in DB
+    const mtnCfg = cfgMap['mtn_momo'] || { is_active: false, config: {} };
+    const airtelCfg = cfgMap['airtel_money'] || { is_active: false, config: {} };
+    const dpoCfg = cfgMap['dpo'] || { is_active: false, config: {} };
+
+    // Check environment variable fallbacks
+    const mtnEnvConfigured = !!(MTN_PRIMARY_KEY && MTN_USER_ID && MTN_API_KEY);
+    const mtnActive = mtnCfg.is_active || mtnEnvConfigured;
+
+    // Recent transactions
+    const recentTx = (await pool.query(
+      `SELECT pt.*, pr.reference as req_ref, pr.payer_name FROM payment_transactions pt
+       JOIN payment_requests pr ON pr.id = pt.payment_request_id
+       WHERE pt.tenant_id=$1 ORDER BY pt.created_at DESC LIMIT 10`, [tid]
+    )).rows;
+
+    // Platform fees this month
+    const feesThisMonth = (await pool.query(
+      `SELECT COALESCE(SUM(platform_fee),0) as total_fees, COUNT(*) as tx_count FROM payment_transactions WHERE tenant_id=$1 AND created_at >= date_trunc('month', NOW())`, [tid]
+    )).rows[0];
+
+    const txRows = recentTx.map(t => `<tr>
+      <td style="font-weight:600;font-family:monospace;font-size:12px">${esc(t.req_ref || '—')}</td>
+      <td>${formatCurrency(t.amount)}</td>
+      <td>${esc(t.provider || '—')}</td>
+      <td>${statusBadge(t.status)}</td>
+      <td style="color:#94a3b8;font-size:12px">${formatDateTime(t.created_at)}</td>
+    </tr>`).join('');
+
+    // Connection status indicators
+    const statusDot = (active, label) => `<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600">
+      <span style="width:10px;height:10px;border-radius:50%;background:${active ? '#22c55e' : '#ef4444'};display:inline-block"></span>
+      <span style="color:${active ? '#16a34a' : '#dc2626'}">${active ? 'Connected' : 'Not Configured'}</span>
+    </span>`;
+
+    const navHtml = `<div class="pg-nav">
+      <a href="/payments">📊 Dashboard</a><a href="/payments/collect">💳 Collect</a>
+      <a href="/payments/transactions">📋 Transactions</a><a href="/payments/methods">⚙ Methods</a>
+      <a href="/payments/reconcile">🔍 Reconcile</a><a href="/settings/payments" class="active">🔌 API Settings</a>
+    </div>`;
+
+    const html = PG_CSS + `<style>
+      .pc-card{background:#fff;border:2px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;transition:.2s}
+      .pc-card:hover{box-shadow:0 4px 20px rgba(0,0,0,.06)}
+      .pc-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:10px}
+      .pc-card-title{font-size:18px;font-weight:700;color:#1e293b;display:flex;align-items:center;gap:10px}
+      .pc-toggle{position:relative;width:52px;height:28px;cursor:pointer}
+      .pc-toggle input{opacity:0;width:0;height:0}
+      .pc-toggle .slider{position:absolute;top:0;left:0;right:0;bottom:0;background:#cbd5e1;border-radius:28px;transition:.3s}
+      .pc-toggle .slider:before{content:'';position:absolute;height:22px;width:22px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.3s}
+      .pc-toggle input:checked+.slider{background:#4f46e5}
+      .pc-toggle input:checked+.slider:before{transform:translateX(24px)}
+      .pc-field{margin-bottom:14px}
+      .pc-field label{display:block;font-size:12px;font-weight:600;color:#64748b;margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px}
+      .pc-field input,.pc-field select{width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px;background:#fff;transition:.15s;box-sizing:border-box}
+      .pc-field input:focus,.pc-field select:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+      .pc-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+      .pc-env-badge{display:inline-block;padding:3px 10px;border-radius:6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px}
+      @media(max-width:768px){.pc-row{grid-template-columns:1fr}.pc-card-header{flex-direction:column;align-items:flex-start}}
+    </style>
+    <div style="max-width:1000px;margin:0 auto">
+      ${navHtml}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+        <div>
+          <h1 style="font-size:24px;color:#1e293b">🔌 Payment API Settings</h1>
+          <p style="font-size:13px;color:#94a3b8;margin-top:2px">Configure payment gateway API keys and connections</p>
+        </div>
+        <a href="/settings" style="font-size:13px;color:#64748b;text-decoration:none">← All Settings</a>
+      </div>
+
+      <div class="pg-stats" style="margin-bottom:24px">
+        <div class="pg-stat">
+          <div class="pg-stat-val" style="color:#4f46e5;font-size:20px">${statusDot(mtnActive)}</div>
+          <div class="pg-stat-lbl">MTN MoMo</div>
+        </div>
+        <div class="pg-stat">
+          <div class="pg-stat-val" style="font-size:20px">${statusDot(airtelCfg.is_active)}</div>
+          <div class="pg-stat-lbl">Airtel Money</div>
+        </div>
+        <div class="pg-stat">
+          <div class="pg-stat-val" style="font-size:20px">${statusDot(dpoCfg.is_active)}</div>
+          <div class="pg-stat-lbl">DPO Group</div>
+        </div>
+        <div class="pg-stat">
+          <div class="pg-stat-val" style="color:#059669">${formatCurrency(feesThisMonth.total_fees)}</div>
+          <div class="pg-stat-lbl">Platform Fees (This Month)</div>
+        </div>
+      </div>
+
+      <form method="POST" action="/settings/payments/save" id="paymentSettingsForm">
+
+      <!-- MTN MoMo Card -->
+      <div class="pc-card" id="card-mtn_momo" style="border-color:${mtnCfg.is_active ? '#4f46e5' : '#e2e8f0'}">
+        <div class="pc-card-header">
+          <div class="pc-card-title">
+            <span style="font-size:28px">📱</span> MTN MoMo
+            ${mtnEnvConfigured ? '<span class="pc-env-badge" style="background:#fef9c3;color:#a16207">ENV VARS SET</span>' : ''}
+            ${mtnCfg.is_active ? '<span class="pc-env-badge" style="background:#dcfce7;color:#16a34a">ACTIVE</span>' : ''}
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            ${statusDot(mtnActive)}
+            <label class="pc-toggle">
+              <input type="checkbox" name="mtn_momo_active" value="true" ${mtnCfg.is_active ? 'checked' : ''} onchange="document.getElementById('card-mtn_momo').style.borderColor=this.checked?'#4f46e5':'#e2e8f0'">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <p style="font-size:12px;color:#94a3b8;margin-bottom:16px">MTN Mobile Money Collection API — requires API user credentials from the MoMo developer portal.</p>
+        <div class="pc-row">
+          <div class="pc-field">
+            <label>Primary Key (Ocp-Apim-Subscription-Key)</label>
+            <input type="password" name="mtn_momo_primary_key" value="${esc(mtnCfg.config.primary_key || '')}" placeholder="Enter your MTN primary key" autocomplete="off">
+          </div>
+          <div class="pc-field">
+            <label>User ID</label>
+            <input type="text" name="mtn_momo_user_id" value="${esc(mtnCfg.config.user_id || '')}" placeholder="API User ID">
+          </div>
+        </div>
+        <div class="pc-row">
+          <div class="pc-field">
+            <label>API Key</label>
+            <input type="password" name="mtn_momo_api_key" value="${esc(mtnCfg.config.api_key || '')}" placeholder="API Key secret" autocomplete="off">
+          </div>
+          <div class="pc-field">
+            <label>Environment</label>
+            <select name="mtn_momo_environment">
+              <option value="sandbox" ${(mtnCfg.config.environment || 'sandbox') === 'sandbox' ? 'selected' : ''}>Sandbox (Testing)</option>
+              <option value="production" ${mtnCfg.config.environment === 'production' ? 'selected' : ''}>Production (Live)</option>
+            </select>
+          </div>
+        </div>
+        <div class="pc-field">
+          <label>Base URL</label>
+          <input type="text" name="mtn_momo_base_url" value="${esc(mtnCfg.config.base_url || 'https://momodeveloper.mtn.com')}" placeholder="https://momodeveloper.mtn.com">
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+          <button type="button" class="pg-btn pg-btn-secondary" onclick="testProvider('mtn_momo')">🧪 Test Connection</button>
+        </div>
+        ${mtnEnvConfigured ? '<div style="margin-top:12px;padding:10px 14px;background:#fef9c3;border-radius:8px;font-size:12px;color:#a16207"><strong>Note:</strong> Environment variables (MTN_COLLECTION_*) are also set. Database config takes priority when active.</div>' : ''}
+      </div>
+
+      <!-- Airtel Money Card -->
+      <div class="pc-card" id="card-airtel_money" style="border-color:${airtelCfg.is_active ? '#f59e0b' : '#e2e8f0'}">
+        <div class="pc-card-header">
+          <div class="pc-card-title">
+            <span style="font-size:28px">📱</span> Airtel Money
+            ${airtelCfg.is_active ? '<span class="pc-env-badge" style="background:#dcfce7;color:#16a34a">ACTIVE</span>' : ''}
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            ${statusDot(airtelCfg.is_active)}
+            <label class="pc-toggle">
+              <input type="checkbox" name="airtel_money_active" value="true" ${airtelCfg.is_active ? 'checked' : ''} onchange="document.getElementById('card-airtel_money').style.borderColor=this.checked?'#f59e0b':'#e2e8f0'">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <p style="font-size:12px;color:#94a3b8;margin-bottom:16px">Airtel Money Collections API — configure your Airtel Money merchant credentials.</p>
+        <div class="pc-row">
+          <div class="pc-field">
+            <label>Client ID</label>
+            <input type="text" name="airtel_money_client_id" value="${esc(airtelCfg.config.client_id || '')}" placeholder="Airtel Money Client ID">
+          </div>
+          <div class="pc-field">
+            <label>Client Secret</label>
+            <input type="password" name="airtel_money_client_secret" value="${esc(airtelCfg.config.client_secret || '')}" placeholder="Client Secret" autocomplete="off">
+          </div>
+        </div>
+        <div class="pc-row">
+          <div class="pc-field">
+            <label>Environment</label>
+            <select name="airtel_money_environment">
+              <option value="sandbox" ${(airtelCfg.config.environment || 'sandbox') === 'sandbox' ? 'selected' : ''}>Sandbox (Testing)</option>
+              <option value="production" ${airtelCfg.config.environment === 'production' ? 'selected' : ''}>Production (Live)</option>
+            </select>
+          </div>
+          <div class="pc-field">
+            <label>Base URL</label>
+            <input type="text" name="airtel_money_base_url" value="${esc(airtelCfg.config.base_url || 'https://openapi.airtel.africa')}" placeholder="https://openapi.airtel.africa">
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+          <button type="button" class="pg-btn pg-btn-secondary" onclick="testProvider('airtel_money')">🧪 Test Connection</button>
+        </div>
+        <div style="margin-top:12px;padding:10px 14px;background:#f1f5f9;border-radius:8px;font-size:12px;color:#64748b"><strong>Coming Soon:</strong> Airtel Money API integration is under development. Configure your credentials now and we will enable it automatically.</div>
+      </div>
+
+      <!-- DPO Group Card -->
+      <div class="pc-card" id="card-dpo" style="border-color:${dpoCfg.is_active ? '#8b5cf6' : '#e2e8f0'}">
+        <div class="pc-card-header">
+          <div class="pc-card-title">
+            <span style="font-size:28px">💳</span> DPO Group
+            ${dpoCfg.is_active ? '<span class="pc-env-badge" style="background:#dcfce7;color:#16a34a">ACTIVE</span>' : ''}
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            ${statusDot(dpoCfg.is_active)}
+            <label class="pc-toggle">
+              <input type="checkbox" name="dpo_active" value="true" ${dpoCfg.is_active ? 'checked' : ''} onchange="document.getElementById('card-dpo').style.borderColor=this.checked?'#8b5cf6':'#e2e8f0'">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <p style="font-size:12px;color:#94a3b8;margin-bottom:16px">DPO Group (Direct Pay Online) — card and mobile money payments across Africa.</p>
+        <div class="pc-row">
+          <div class="pc-field">
+            <label>Company Token</label>
+            <input type="password" name="dpo_company_token" value="${esc(dpoCfg.config.company_token || '')}" placeholder="DPO Company Token" autocomplete="off">
+          </div>
+          <div class="pc-field">
+            <label>Service Type</label>
+            <input type="text" name="dpo_service_type" value="${esc(dpoCfg.config.service_type || '')}" placeholder="e.g., 3854">
+          </div>
+        </div>
+        <div class="pc-field">
+          <label>Base URL</label>
+          <input type="text" name="dpo_base_url" value="${esc(dpoCfg.config.base_url || 'https://secure.3gdirectpay.com')}" placeholder="https://secure.3gdirectpay.com">
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+          <button type="button" class="pg-btn pg-btn-secondary" onclick="testProvider('dpo')">🧪 Test Connection</button>
+        </div>
+        <div style="margin-top:12px;padding:10px 14px;background:#f1f5f9;border-radius:8px;font-size:12px;color:#64748b"><strong>Coming Soon:</strong> DPO Group API integration is under development. Configure your credentials now and we will enable it automatically.</div>
+      </div>
+
+      <div style="display:flex;gap:12px;margin-bottom:30px;flex-wrap:wrap">
+        <button type="submit" class="pg-btn pg-btn-primary" style="padding:14px 32px;font-size:15px">💾 Save All Settings</button>
+        <a href="/payments" class="pg-btn pg-btn-secondary">← Back to Payments</a>
+      </div>
+
+      </form>
+
+      <!-- Recent Transactions -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <h3 style="margin:0;font-size:16px;color:#1e293b">Recent Payment Transactions</h3>
+          <a href="/payments/transactions" style="font-size:13px;color:#4f46e5;text-decoration:none">View All →</a>
+        </div>
+        <div style="overflow-x:auto"><table class="pg-table">
+          <thead><tr><th>Reference</th><th>Amount</th><th>Provider</th><th>Status</th><th>Date</th></tr></thead>
+          <tbody>${txRows || '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:30px">No transactions yet</td></tr>'}</tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <script>
+    function testProvider(provider) {
+      const btn = event.target;
+      const origText = btn.innerHTML;
+      btn.innerHTML = '⏳ Testing...';
+      btn.disabled = true;
+      fetch('/settings/payments/test/' + provider, {method:'POST', headers:{'Content-Type':'application/json'}})
+        .then(r => r.json())
+        .then(data => {
+          btn.innerHTML = origText;
+          btn.disabled = false;
+          if (data.success) {
+            btn.innerHTML = '✅ Connected!';
+            btn.className = 'pg-btn pg-btn-success';
+            setTimeout(() => { btn.innerHTML = origText; btn.className = 'pg-btn pg-btn-secondary'; }, 3000);
+          } else {
+            btn.innerHTML = '❌ Failed';
+            btn.className = 'pg-btn pg-btn-danger';
+            alert('Connection failed: ' + (data.message || 'Unknown error'));
+            setTimeout(() => { btn.innerHTML = origText; btn.className = 'pg-btn pg-btn-secondary'; }, 3000);
+          }
+        })
+        .catch(err => {
+          btn.innerHTML = origText;
+          btn.disabled = false;
+          alert('Test failed: ' + err.message);
+        });
+    }
+    </script>`;
+    res.send(renderPage('Payment API Settings', html, user));
+  }));
+
+  // ============================================================
+  // ROUTE 15: POST /settings/payments/save — Save Payment Config
+  // ============================================================
+  app.post('/settings/payments/save', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const body = req.body;
+
+    // Define the providers and their field mappings
+    const providers = [
+      {
+        provider: 'mtn_momo',
+        isActive: body.mtn_momo_active === 'true',
+        config: {
+          primary_key: (body.mtn_momo_primary_key || '').trim(),
+          user_id: (body.mtn_momo_user_id || '').trim(),
+          api_key: (body.mtn_momo_api_key || '').trim(),
+          environment: body.mtn_momo_environment || 'sandbox',
+          base_url: (body.mtn_momo_base_url || '').trim() || 'https://momodeveloper.mtn.com'
+        }
+      },
+      {
+        provider: 'airtel_money',
+        isActive: body.airtel_money_active === 'true',
+        config: {
+          client_id: (body.airtel_money_client_id || '').trim(),
+          client_secret: (body.airtel_money_client_secret || '').trim(),
+          environment: body.airtel_money_environment || 'sandbox',
+          base_url: (body.airtel_money_base_url || '').trim() || 'https://openapi.airtel.africa'
+        }
+      },
+      {
+        provider: 'dpo',
+        isActive: body.dpo_active === 'true',
+        config: {
+          company_token: (body.dpo_company_token || '').trim(),
+          service_type: (body.dpo_service_type || '').trim(),
+          base_url: (body.dpo_base_url || '').trim() || 'https://secure.3gdirectpay.com'
+        }
+      }
+    ];
+
+    for (const p of providers) {
+      try {
+        await pool.query(
+          `INSERT INTO payment_config (tenant_id, provider, is_active, config, updated_at)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (tenant_id, provider)
+           DO UPDATE SET is_active = $3, config = $4, updated_at = NOW()`,
+          [tid, p.provider, p.isActive, p.config]
+        );
+      } catch (dbErr) {
+        logger.error({ msg: '[PaymentGateway] Failed to save payment config', provider: p.provider, error: dbErr.message });
+      }
+    }
+
+    // Clear the MTN config cache so new settings are picked up immediately
+    _mtnConfigCache = {};
+
+    audit(user.email, 'payment_config_updated', `Updated payment API settings for tenant ${tid}: MTN=${providers[0].isActive}, Airtel=${providers[1].isActive}, DPO=${providers[2].isActive}`, tid);
+    logger.info({ msg: '[PaymentGateway] Payment config saved', tenantId: tid, by: user.email });
+
+    res.redirect('/settings/payments');
+  }));
+
+  // ============================================================
+  // ROUTE 16: POST /settings/payments/test/:provider — Test Connection
+  // ============================================================
+  app.post('/settings/payments/test/:provider', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const provider = req.params.provider;
+
+    if (provider === 'mtn_momo') {
+      try {
+        // Force refresh — clear cache first
+        _mtnConfigCache = {};
+        _mtnTokenCache = { token: null, expires: 0, tenantId: null };
+        const token = await getMtnAccessToken(tid);
+        audit(user.email, 'payment_config_test', `MTN MoMo connection test SUCCEEDED for tenant ${tid}`, tid);
+        logger.info({ msg: '[PaymentGateway] MTN MoMo connection test succeeded', tenantId: tid, by: user.email });
+        return res.json({ success: true, message: 'MTN MoMo connection successful! Access token obtained.' });
+      } catch (err) {
+        audit(user.email, 'payment_config_test_failed', `MTN MoMo connection test FAILED for tenant ${tid}: ${err.message}`, tid);
+        logger.warn({ msg: '[PaymentGateway] MTN MoMo connection test failed', tenantId: tid, error: err.message });
+        return res.json({ success: false, message: err.message });
+      }
+    }
+
+    if (provider === 'airtel_money') {
+      const cfg = (await pool.query(
+        `SELECT config, is_active FROM payment_config WHERE tenant_id=$1 AND provider='airtel_money'`, [tid]
+      )).rows[0];
+      const hasConfig = cfg && cfg.is_active && (cfg.config.client_id || cfg.config.client_secret);
+      if (!hasConfig) {
+        return res.json({ success: false, message: 'Airtel Money is not configured. Please enter your Client ID and Client Secret first.' });
+      }
+      return res.json({ success: false, message: 'Airtel Money API integration is not yet implemented. Your credentials have been saved and will be used when the integration is ready.' });
+    }
+
+    if (provider === 'dpo') {
+      const cfg = (await pool.query(
+        `SELECT config, is_active FROM payment_config WHERE tenant_id=$1 AND provider='dpo'`, [tid]
+      )).rows[0];
+      const hasConfig = cfg && cfg.is_active && cfg.config.company_token;
+      if (!hasConfig) {
+        return res.json({ success: false, message: 'DPO Group is not configured. Please enter your Company Token first.' });
+      }
+      return res.json({ success: false, message: 'DPO Group API integration is not yet implemented. Your credentials have been saved and will be used when the integration is ready.' });
+    }
+
+    res.json({ success: false, message: `Unknown provider: ${esc(provider)}` });
+  }));
+
+  // ============================================================
+  // EXPOSE PAYMENT FUNCTIONS TO OTHER MODULES
+  // This allows qr-payments.js and other modules to call
+  // requestMtnPayment / checkMtnPaymentStatus via app.get()
+  // ============================================================
+  app.set('requestMtnPayment', requestMtnPayment);
+  app.set('checkMtnPaymentStatus', checkMtnPaymentStatus);
+  app.set('getMtnAccessToken', getMtnAccessToken);
+  app.set('getMtnConfig', getMtnConfig);
+  app.set('isMtnConfigured', isMtnConfigured);
+  logger.info('[PaymentGateway] Payment functions exposed via app.set()');
 
 };

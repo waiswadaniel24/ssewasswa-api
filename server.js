@@ -452,7 +452,7 @@ app.get('/favicon.ico', async (req, res, next) => {
   next(); // Fall through to default favicon in public/
 });
 
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // === CSRF PROTECTION (Double-Submit Cookie Pattern) ===
 // Works with Render multi-instance deployment — no server-side token storage needed.
@@ -561,7 +561,7 @@ const CSRF_EXEMPT_PATHS = [
   '/api/webhook/', '/ipn/', '/pesapal/ipn', '/flutterwave/webhook',
   '/mtn-momo/callback', '/dpo/callback', '/api/public/', '/stripe/webhook',
   '/auth/google', '/auth/microsoft', '/auth/callback',
-  '/invite/accept', '/invite/decline'
+  '/invite/accept', '/invite/decline', '/invite/reject'
 ];
 const isCSRFExempt = (path) => CSRF_EXEMPT_PATHS.some(p => path.includes(p));
 
@@ -3817,6 +3817,7 @@ ${user ? `<script>
 })();
 </script>` : ''}
 <script src="/ui-foundation.js"></script>
+<script src="/form-validator.js"></script>
 </body></html>`;
 };
 
@@ -3880,8 +3881,8 @@ app.get('/login', (req, res) => {
           <div class="auth-subtitle">Sign in to your Comfort account</div>
         </div>
         <form method="POST" action="/login">
-          <input name="email" type="email" placeholder="Email address" required class="auth-input" data-validate="required,email">
-          <input name="password" type="password" placeholder="Password" required class="auth-input" data-validate="required">
+          <input name="email" type="email" placeholder="Email address" required class="auth-input">
+          <input name="password" type="password" placeholder="Password" required class="auth-input" minlength="1">
           <button type="submit" class="auth-btn">Login</button>
         </form>
         <div class="auth-links">No account? <a href="/register">Create one</a></div>
@@ -4101,8 +4102,8 @@ app.get('/register', (req, res) => {
           <div class="auth-subtitle">Join Comfort Zone — All-in-one management platform for Africa</div>
         </div>
         <form method="POST" action="/register" id="regForm">
-          <input name="name" placeholder="Your Full Name" required class="auth-input" data-validate="required,minLength:2">
-          <input name="org_name" placeholder="Organization / Institution / Business Name" required class="auth-input" data-validate="required,minLength:2">
+          <input name="name" placeholder="Your Full Name" required minlength="2" class="auth-input" data-no-special="true">
+          <input name="org_name" placeholder="Organization / Institution / Business Name" required minlength="2" class="auth-input">
           <label class="auth-label">Portal Type *</label>
           <select name="type" id="regType" required onchange="toggleBizSubtype()" class="auth-select">
             <option value="">-- Select Portal Type --</option>
@@ -4118,10 +4119,10 @@ app.get('/register', (req, res) => {
           </div>
           <label class="auth-label">Subscription Plan *</label>
           ${planRadios}
-          <input name="email" type="email" placeholder="Your Email" required class="auth-input" data-validate="required,email">
-          <input name="phone" placeholder="Phone +256..." required class="auth-input" data-validate="required,phone">
-          <input name="password" type="password" placeholder="Choose a Password (min 8 chars)" minlength="8" required class="auth-input" data-validate="required,minLength:8">
-          <input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required class="auth-input">
+          <input name="email" type="email" placeholder="Your Email" required class="auth-input">
+          <input name="phone" type="tel" placeholder="Phone +256..." required class="auth-input">
+          <input name="password" id="regPassword" type="password" placeholder="Choose a Password (min 8 chars)" minlength="8" required class="auth-input">
+          <input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required class="auth-input" data-match="#regPassword" data-match-label="password">
           <button type="submit" class="auth-btn">Create Account &rarr;</button>
         </form>
         <div class="auth-links">Already have an account? <a href="/login">Login here</a></div>
@@ -4635,6 +4636,7 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Scholarships</h3><a href="/school/scholarships" class="btn btn-sm">Bursaries</a></div>
       <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">Fee Reminders</h3><a href="/school/fee-reminders" class="btn btn-sm btn-red">Send Reminders</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Online Payments</h3><a href="/billing" class="btn btn-sm">Pay/Subscribe</a></div>
+      <div class="card" style="background:#ecfdf5;border:2px solid #059669"><h3 style="color:#059669">&#128200; Financial Reports</h3><a href="/financial-reports" class="btn btn-sm">P&L / Balance Sheet / Cash Flow</a></div>
     `)}
     ${ds('👥', 'People', `
       <div class="card"><h3>Staff</h3><a href="/school/staff" class="btn btn-sm">Manage Staff</a><a href="/school/staff/new" class="btn btn-sm" style="margin-top:8px">Add Staff</a></div>
@@ -4793,22 +4795,22 @@ app.get('/school/students/new', requireAuth, requireNotBanned, ah(async (req, re
   res.send(renderPage('Add Student', `
     <div class="card" style="max-width:600px;margin:40px auto"><h3>Add New Student</h3>
       <form method="POST" action="/school/students/save">
-        <input name="admission_no" placeholder="Admission Number" required data-validate="required">
-        <input name="name" placeholder="Full Name" required data-validate="required,minLength:2">
+        <input name="admission_no" placeholder="Admission Number" required class="auth-input" maxlength="50">
+        <input name="name" placeholder="Full Name" required minlength="2" maxlength="200" class="auth-input" data-no-special="true">
         <select name="class" onchange="var o=this.nextElementSibling;o.style.display=this.value==='__other'?'block':'none';if(this.value!=='__other')o.value=''">
           <option value="">Select Class</option>
           ${classes.rows.map(c => '<option>'+esc(c.class)+'</option>').join('')}
           <option value="__other">+ Other</option>
         </select>
-        <input name="class_other" style="display:none" class="form-control" placeholder="Enter new class">
+        <input name="class_other" style="display:none" class="form-control" placeholder="Enter new class" maxlength="50">
         <select name="stream" onchange="var o=this.nextElementSibling;o.style.display=this.value==='__other'?'block':'none';if(this.value!=='__other')o.value=''">
           <option value="">Select Stream</option>
           ${streams.rows.map(s => '<option>'+esc(s.stream)+'</option>').join('')}
           <option value="__other">+ Other</option>
         </select>
-        <input name="stream_other" style="display:none" class="form-control" placeholder="Enter new stream">
-        <input name="guardian_name" placeholder="Guardian/Parent Name">
-        <input name="guardian_phone" placeholder="Guardian Phone +256..." data-validate="phone">
+        <input name="stream_other" style="display:none" class="form-control" placeholder="Enter new stream" maxlength="50">
+        <input name="guardian_name" placeholder="Guardian/Parent Name" maxlength="200" class="auth-input" data-no-special="true">
+        <input name="guardian_phone" placeholder="Guardian Phone +256..." type="tel" maxlength="20" class="auth-input">
         <button class="btn btn-green">Add Student</button>
       </form>
     </div>
@@ -6390,6 +6392,7 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       </div>
       <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">Budget</h3><a href="/org/finance/categories" class="btn btn-sm">Budget vs Actual</a></div>
       <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Budget</h3><a href="/org/budget" class="btn btn-sm">Budget vs Actual</a></div>
+      <div class="card" style="background:#ecfdf5;border:2px solid #059669"><h3 style="color:#059669">&#128200; Financial Reports</h3><a href="/financial-reports" class="btn btn-sm">P&L / Balance Sheet / Cash Flow</a></div>
       </div>
     `)}
     ${ds('📣', 'Communication', `
@@ -7126,6 +7129,7 @@ ${ds('💰','Finance',`
         <a href="/billing" class="btn btn-sm">Subscriptions</a>
       </div>
       <div class="card" style="background:#d1fae5;border:2px solid #059669"><h3 style="color:#059669">🎯 Fundraising</h3><a href="/fundraising" class="btn btn-sm">Campaigns</a></div>
+      <div class="card" style="background:#ecfdf5;border:2px solid #059669"><h3 style="color:#059669">&#128200; Financial Reports</h3><a href="/financial-reports" class="btn btn-sm">P&L / Balance Sheet / Cash Flow</a></div>
 `)}
 ${ds('📅','Events & Communication',`
       <div class="card"><h3>Events</h3>
@@ -7542,6 +7546,7 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
       <div class="card"><h3>Tax (VAT/URA)</h3><a href="/business/tax" class="btn btn-sm">Tax Reports</a></div>
       <div class="card"><h3>Bills</h3><a href="/bill-reminders" class="btn btn-sm btn-red">Bill Reminders</a></div>
       <div class="card"><h3>Purchase Orders</h3><a href="/business/purchase-orders" class="btn btn-sm">Manage POs</a></div>
+      <div class="card" style="background:#ecfdf5;border:2px solid #059669"><h3 style="color:#059669">&#128200; Financial Reports</h3><a href="/financial-reports" class="btn btn-sm">P&L / Balance Sheet / Cash Flow</a></div>
     </div>`)}
     ${ds('👥', 'People', `<div class="grid">
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
@@ -15479,8 +15484,10 @@ app.get('/settings', requireAuth, ah(async (req, res) => {
       <div class="card"><h3>Language</h3><p>Translations & locale</p><a href="/settings/theme" class="btn btn-sm">Change</a></div>
       <div class="card"><h3>Currency</h3><p>UGX, KES, TZS, RWF</p><a href="/settings/currency" class="btn btn-sm">Change</a></div>
       <div class="card"><h3>Integrations</h3><p>Flutterwave, SMS, Cloudinary</p><a href="/integrations" class="btn btn-sm">Configure</a></div>
+      <div class="card"><h3>Payment API</h3><p>MTN MoMo, Airtel, DPO keys</p><a href="/settings/payments" class="btn btn-sm">Configure</a></div>
       <div class="card"><h3>Backup</h3><p>Export/Import data</p><a href="/settings/backup" class="btn btn-sm">Backup</a></div>
       <div class="card"><h3>Compliance</h3><p>Audit & data protection</p><a href="/compliance" class="btn btn-sm">View</a></div>
+      <div class="card" style="border:2px solid #059669"><h3>Team & Invitations</h3><p>Invite members, manage access</p><a href="/settings/team" class="btn btn-sm" style="background:#059669;color:white">Manage</a></div>
       <div class="card"><h3>Status Page</h3><p>Platform health</p><a href="/status" class="btn btn-sm">View</a></div>
     </div>
   `, req.session.user));
@@ -26341,7 +26348,7 @@ function renderPatientPage(title, content, patient, subdomain, activePage) {
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} | Patient Portal</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<meta name="theme-color" content="#0d9488">
+<meta name="theme-color" content="#059669">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0fdfa;color:#1e293b;line-height:1.6}
@@ -41315,6 +41322,7 @@ try { const m = require('./bulk-import'); m(app, pool, _newModOpts); console.log
 try { const m = require('./communication-analytics'); m(app, pool, _newModOpts); console.log('[CommAnalytics] Communication analytics loaded — 2 tables, 14 routes'); } catch(e) { console.warn('[CommAnalytics] Error:', e.message); }
 try { const m = require('./funnel-analytics'); m(app, pool, _newModOpts); console.log('[FunnelAnalytics] Funnel analytics loaded — routes'); } catch(e) { console.warn('[FunnelAnalytics] Error:', e.message); }
 try { const m = require('./financial-forecast'); m(app, pool, _newModOpts); console.log('[FinForecast] Financial forecast loaded — routes'); } catch(e) { console.warn('[FinForecast] Error:', e.message); }
+try { const m = require('./financial-reports'); m(app, pool, _newModOpts); console.log('[FinReports] Per-tenant financial reports loaded'); } catch(e) { console.warn('[FinReports] Error:', e.message); }
 try { const m = require('./visual-report-builder'); m(app, pool, _newModOpts); console.log('[ReportBuilder] Visual report builder loaded — routes'); } catch(e) { console.warn('[ReportBuilder] Error:', e.message); }
 try { const m = require('./user-segmentation'); m(app, pool, _newModOpts); console.log('[UserSegmentation] User segmentation engine loaded — routes'); } catch(e) { console.warn('[UserSegmentation] Error:', e.message); }
 
@@ -45319,16 +45327,16 @@ app.post('/team/invite-email', requireAuth, requireNotBanned, requireRole('admin
   res.redirect('/team?msg=' + encodeURIComponent(`Invitation sent to ${email}`));
 }));
 
-// GET /invite/accept?token=xxx — Show invitation acceptance form
+// GET /invite/accept?token=xxx — Show invitation acceptance form (enhanced)
 app.get('/invite/accept', ah(async (req, res) => {
   const { token } = req.query;
   if (!token) {
     return res.send(renderPage('Invalid Invitation', '<div class="card"><div class="alert alert-error"><h2>Invalid Invitation</h2><p>This invitation link is invalid. Please contact your organization admin for a new invitation.</p></div></div>', null));
   }
 
-  // Validate token
+  // Validate token — fetch invitation with inviter name
   const inv = (await pool.query(
-    'SELECT ui.*, t.name as org_name FROM user_invitations ui LEFT JOIN tenants t ON ui.tenant_id=t.id WHERE ui.token=$1',
+    'SELECT ui.*, t.name as org_name, u.name as inviter_name FROM user_invitations ui LEFT JOIN tenants t ON ui.tenant_id=t.id LEFT JOIN users u ON ui.invited_by=u.id WHERE ui.token=$1',
     [token]
   )).rows[0];
 
@@ -45336,48 +45344,85 @@ app.get('/invite/accept', ah(async (req, res) => {
     return res.send(renderPage('Invalid Invitation', '<div class="card"><div class="alert alert-error"><h2>Invalid Invitation</h2><p>This invitation link is invalid or has been revoked.</p></div></div>', null));
   }
 
-  if (inv.accepted_at) {
+  // Check status (supports both new status column and legacy accepted_at/declined_at)
+  const status = inv.status || (inv.accepted_at ? 'accepted' : inv.declined_at ? 'rejected' : 'pending');
+
+  if (status === 'accepted') {
     return res.send(renderPage('Already Accepted', '<div class="card"><div class="alert alert-success"><h2>Invitation Already Accepted</h2><p>You have already accepted this invitation. <a href="/login">Log in</a> to continue.</p></div></div>', null));
   }
 
-  if (inv.declined_at) {
+  if (status === 'rejected') {
     return res.send(renderPage('Invitation Declined', '<div class="card"><div class="alert alert-error"><h2>Invitation Declined</h2><p>You have already declined this invitation. Contact your organization admin if you changed your mind.</p></div></div>', null));
   }
 
+  if (status === 'cancelled') {
+    return res.send(renderPage('Invitation Cancelled', '<div class="card"><div class="alert alert-error"><h2>Invitation Cancelled</h2><p>This invitation has been cancelled by the organization admin.</p></div></div>', null));
+  }
+
   if (new Date(inv.expires_at) < new Date()) {
+    // Mark as expired if not already
+    await pool.query("UPDATE user_invitations SET status='expired' WHERE id=$1 AND status='pending'", [inv.id]).catch(() => {});
     return res.send(renderPage('Invitation Expired', '<div class="card"><div class="alert alert-error"><h2>Invitation Expired</h2><p>This invitation has expired. Please contact your organization admin for a new invitation.</p></div></div>', null));
   }
 
+  // Check if user already has an account with this email (in ANY tenant)
+  const existingUser = (await pool.query('SELECT id, name, tenant_id FROM users WHERE email=$1 LIMIT 1', [inv.email])).rows[0];
+  // Check if user already exists in THIS tenant
+  const existingInTenant = (await pool.query('SELECT id FROM users WHERE email=$1 AND tenant_id=$2', [inv.email, inv.tenant_id])).rows[0];
+
+  if (existingInTenant) {
+    return res.send(renderPage('Already a Member', '<div class="card"><div class="alert alert-info"><h2>Already a Team Member</h2><p>You are already a member of this organization. <a href="/login">Log in</a> to continue.</p></div></div>', null));
+  }
+
+  const inviterDisplay = inv.inviter_name || 'A team member';
+
   res.send(renderPage('Accept Invitation', `
     <style>
-      .invite-wrapper{max-width:480px;margin:32px auto}
-      .invite-card{background:var(--bg-card);border-radius:16px;padding:32px;box-shadow:var(--shadow-lg);border:1px solid var(--border)}
-      .invite-header{text-align:center;margin-bottom:24px}
-      .invite-icon{display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;font-size:24px;margin-bottom:12px}
-      .invite-header h2{margin:0;font-size:22px;font-weight:700}
-      .invite-header p{color:var(--text-muted);font-size:14px;margin-top:4px}
-      .invite-details{background:var(--bg-body);border-radius:12px;padding:16px;margin:16px 0}
-      .invite-details dt{font-weight:600;margin-top:8px}
+      .invite-wrapper{max-width:500px;margin:32px auto}
+      .invite-card{background:var(--bg-card);border-radius:20px;padding:36px;box-shadow:var(--shadow-lg);border:1px solid var(--border)}
+      .invite-header{text-align:center;margin-bottom:28px}
+      .invite-icon{display:inline-flex;align-items:center;justify-content:center;width:64px;height:64px;border-radius:20px;background:linear-gradient(135deg,#059669,#10b981);color:white;font-size:28px;margin-bottom:14px}
+      .invite-header h2{margin:0;font-size:24px;font-weight:800;color:#1e293b}
+      .invite-header p{color:var(--text-muted);font-size:14px;margin-top:6px}
+      .invite-details{background:var(--bg-body);border-radius:14px;padding:18px;margin:18px 0}
+      .invite-details dt{font-weight:700;margin-top:10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px}
       .invite-details dt:first-child{margin-top:0}
-      .invite-details dd{color:var(--text-muted);margin:2px 0 0}
-      .invite-form label{display:block;font-weight:600;margin-top:14px;margin-bottom:4px}
-      .invite-form input{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box;background:var(--input-bg);color:var(--text)}
-      .invite-form input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(79,70,229,0.1)}
-      .invite-btn{width:100%;padding:12px;border:none;border-radius:8px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;font-size:15px;font-weight:700;cursor:pointer;margin-top:20px}
-      .invite-btn:hover{opacity:0.95}
+      .invite-details dd{color:var(--text);margin:2px 0 0;font-size:15px}
+      .invite-msg{background:#fffbeb;border-left:4px solid #f59e0b;border-radius:0 10px 10px 0;padding:14px 18px;margin:18px 0;font-size:14px;color:#78350f;line-height:1.6}
+      .invite-msg-label{font-size:11px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px}
+      .invite-form label{display:block;font-weight:600;margin-top:16px;margin-bottom:4px;font-size:13px}
+      .invite-form input{width:100%;padding:11px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;box-sizing:border-box;background:var(--input-bg);color:var(--text)}
+      .invite-form input:focus{outline:none;border-color:#059669;box-shadow:0 0 0 3px rgba(5,150,105,0.1)}
+      .invite-btn{width:100%;padding:14px;border:none;border-radius:10px;background:linear-gradient(135deg,#059669,#10b981);color:white;font-size:16px;font-weight:800;cursor:pointer;margin-top:22px;letter-spacing:0.3px}
+      .invite-btn:hover{opacity:0.95;transform:translateY(-1px);transition:all 0.15s}
+      .invite-btn-existing{background:linear-gradient(135deg,#4f46e5,#7c3aed)}
+      .decline-link{display:block;text-align:center;margin-top:14px;color:#ef4444;font-size:13px;text-decoration:none}
+      .decline-link:hover{text-decoration:underline}
+      .expires-note{text-align:center;margin-top:12px;font-size:12px;color:#94a3b8}
     </style>
     <div class="invite-wrapper">
       <div class="invite-card">
         <div class="invite-header">
-          <div class="invite-icon">&#128279;</div>
+          <div class="invite-icon">&#128640;</div>
           <h2>You're Invited!</h2>
-          <p>Join your team on Ssewasswa Platform</p>
+          <p>${esc(inviterDisplay)} invited you to join their team</p>
         </div>
         <div class="invite-details">
-          <dt>Organization</dt><dd>${esc(inv.org_name || 'Ssewasswa Platform')}</dd>
+          <dt>Organization</dt><dd>${esc(inv.org_name || 'Comfort Zone')}</dd>
           <dt>Your Email</dt><dd>${esc(inv.email)}</dd>
-          <dt>Your Role</dt><dd>${esc(inv.role)}</dd>
+          <dt>Your Role</dt><dd><span style="display:inline-block;padding:2px 12px;border-radius:9999px;background:#ede9fe;color:#6d28d9;font-weight:600;font-size:13px">${esc(inv.role)}</span></dd>
         </div>
+        ${inv.message ? `<div class="invite-msg"><div class="invite-msg-label">Personal message from ${esc(inviterDisplay)}</div>${esc(inv.message)}</div>` : ''}
+        ${existingUser ? `
+        <!-- Existing user — just join the tenant -->
+        <form class="invite-form" method="POST" action="/invite/accept?token=${esc(token)}">
+          <input type="hidden" name="token" value="${esc(token)}">
+          <input type="hidden" name="existing_user" value="true">
+          <p style="font-size:14px;color:var(--text-muted);margin:12px 0">We found an existing account for <strong>${esc(inv.email)}</strong>. Click below to join <strong>${esc(inv.org_name || 'the organization')}</strong>.</p>
+          <button type="submit" class="invite-btn invite-btn-existing">Accept & Join Organization</button>
+        </form>
+        ` : `
+        <!-- New user — create account -->
         <form class="invite-form" method="POST" action="/invite/accept?token=${esc(token)}">
           <input type="hidden" name="token" value="${esc(token)}">
           <label>Full Name</label>
@@ -45388,40 +45433,99 @@ app.get('/invite/accept', ah(async (req, res) => {
           <input type="password" name="password" required placeholder="Create a password (min 8 chars)" autocomplete="new-password" minlength="8">
           <button type="submit" class="invite-btn">Accept & Create Account</button>
         </form>
-        <p style="text-align:center;margin-top:12px"><a href="/invite/decline?token=${esc(token)}" style="color:#ef4444;font-size:13px">Decline this invitation</a></p>
+        `}
+        <a href="/invite/decline?token=${esc(token)}" class="decline-link">Decline this invitation</a>
+        <p class="expires-note">&#9200; This invitation expires in 7 days</p>
       </div>
     </div>
   `, null));
 }));
 
-// POST /invite/accept — Process invitation acceptance
+// POST /invite/accept — Process invitation acceptance (enhanced)
 app.post('/invite/accept', ah(async (req, res) => {
-  const { token, name, phone, password } = req.body;
+  const { token, name, phone, password, existing_user } = req.body;
 
   if (!token) {
     return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Invalid invitation token.</div></div>', null));
   }
 
-  // Validate password
-  if (!password || password.length < 8) {
-    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error"><h2>Password Too Short</h2><p>Password must be at least 8 characters long.</p><a href="/invite/accept?token=' + esc(token) + '" class="btn">Go Back</a></div></div>', null));
-  }
-
   // Validate invitation
   const inv = (await pool.query(
-    'SELECT ui.*, t.name as org_name FROM user_invitations ui LEFT JOIN tenants t ON ui.tenant_id=t.id WHERE ui.token=$1',
+    'SELECT ui.*, t.name as org_name, u.name as inviter_name, u.email as inviter_email FROM user_invitations ui LEFT JOIN tenants t ON ui.tenant_id=t.id LEFT JOIN users u ON ui.invited_by=u.id WHERE ui.token=$1',
     [token]
   )).rows[0];
 
-  if (!inv || inv.accepted_at || inv.declined_at || new Date(inv.expires_at) < new Date()) {
+  const status = inv?.status || (inv?.accepted_at ? 'accepted' : inv?.declined_at ? 'rejected' : 'pending');
+
+  if (!inv || status === 'cancelled' || status === 'expired') {
     return res.send(renderPage('Invalid Invitation', '<div class="card"><div class="alert alert-error"><h2>Invalid or Expired Invitation</h2><p>This invitation is no longer valid. Please contact your organization admin.</p></div></div>', null));
+  }
+
+  if (status === 'accepted') {
+    return res.redirect('/login');
+  }
+
+  if (status === 'rejected') {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error"><h2>Invitation Already Declined</h2><p>You previously declined this invitation. Contact the admin for a new one.</p></div></div>', null));
+  }
+
+  if (new Date(inv.expires_at) < new Date()) {
+    await pool.query("UPDATE user_invitations SET status='expired' WHERE id=$1", [inv.id]).catch(() => {});
+    return res.send(renderPage('Expired', '<div class="card"><div class="alert alert-error"><h2>Invitation Expired</h2><p>This invitation has expired.</p></div></div>', null));
+  }
+
+  // Handle existing user joining a new tenant
+  if (existing_user === 'true' || existing_user === true) {
+    const existingAccount = (await pool.query('SELECT id, name FROM users WHERE email=$1 LIMIT 1', [inv.email])).rows[0];
+    if (existingAccount) {
+      // Add user to this tenant with the invited role
+      const displayName = existingAccount.name || inv.email.split('@')[0];
+      const result = await pool.query(
+        'INSERT INTO users(tenant_id, email, password, role, approved, is_active, permissions, name) VALUES($1,$2,$3,$4,true,true,$5,$6) RETURNING id, email, role, tenant_id, approved, is_active',
+        [inv.tenant_id, inv.email, '', inv.role, '', displayName]
+      ).catch(async (e) => {
+        // If user already exists in this tenant, just update role
+        if (e.code === '23505') {
+          return await pool.query(
+            'UPDATE users SET role=$1, is_active=true WHERE email=$2 AND tenant_id=$3 RETURNING id, email, role, tenant_id, approved, is_active',
+            [inv.role, inv.email, inv.tenant_id]
+          );
+        }
+        throw e;
+      });
+
+      // Mark invitation as accepted
+      await pool.query("UPDATE user_invitations SET status='accepted', accepted_at=NOW() WHERE id=$1", [inv.id]);
+
+      // Auto-login the user
+      const newUser = result.rows[0];
+      const tenantRow = (await pool.query('SELECT name, type FROM tenants WHERE id=$1', [inv.tenant_id])).rows[0];
+      newUser.tenant_name = tenantRow?.name;
+      newUser.tenant_type = tenantRow?.type;
+      req.session.user = newUser;
+
+      await audit(inv.email, 'accept_invitation', `Accepted invitation to join ${inv.org_name || 'organization'} (existing user)`, inv.tenant_id, req);
+
+      // Notify inviter
+      if (inv.inviter_email) {
+        const notifyHtml = buildInviterNotificationEmail({ inviteeEmail: inv.email, action: 'accepted', orgName: inv.org_name || 'Comfort Zone' });
+        await sendEmail(inv.inviter_email, `${inv.email} accepted your invitation`, notifyHtml, inv.org_name, inv.tenant_id).catch(() => {});
+      }
+
+      return res.redirect('/dashboard?msg=' + encodeURIComponent(`Welcome to ${inv.org_name || 'Comfort Zone'}!`));
+    }
+    // If existing_user flag but no account found, fall through to new user creation
+  }
+
+  // New user — validate password
+  if (!password || password.length < 8) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error"><h2>Password Too Short</h2><p>Password must be at least 8 characters long.</p><a href="/invite/accept?token=' + esc(token) + '" class="btn">Go Back</a></div></div>', null));
   }
 
   // Check if user already exists with this email in the tenant
   const existingUser = (await pool.query('SELECT id FROM users WHERE email=$1 AND tenant_id=$2', [inv.email, inv.tenant_id])).rows[0];
   if (existingUser) {
-    // Mark invitation as accepted and redirect to login
-    await pool.query('UPDATE user_invitations SET accepted_at=NOW() WHERE id=$1', [inv.id]);
+    await pool.query("UPDATE user_invitations SET status='accepted', accepted_at=NOW() WHERE id=$1", [inv.id]);
     return res.redirect('/login');
   }
 
@@ -45434,11 +45538,10 @@ app.post('/invite/accept', ah(async (req, res) => {
   );
 
   // Mark invitation as accepted
-  await pool.query('UPDATE user_invitations SET accepted_at=NOW() WHERE id=$1', [inv.id]);
+  await pool.query("UPDATE user_invitations SET status='accepted', accepted_at=NOW() WHERE id=$1", [inv.id]);
 
   // Auto-login the new user
   const newUser = result.rows[0];
-  // Enrich session with tenant info like login route does
   const tenantRow = (await pool.query('SELECT name, type FROM tenants WHERE id=$1', [inv.tenant_id])).rows[0];
   newUser.tenant_name = tenantRow?.name;
   newUser.tenant_type = tenantRow?.type;
@@ -45446,7 +45549,15 @@ app.post('/invite/accept', ah(async (req, res) => {
 
   await audit(inv.email, 'accept_invitation', `Accepted invitation to join ${inv.org_name || 'organization'}`, inv.tenant_id, req);
 
-  res.redirect('/dashboard?msg=' + encodeURIComponent(`Welcome to ${inv.org_name || 'Ssewasswa Platform'}!`));
+  // Notify inviter
+  if (inv.inviter_email) {
+    const notifyHtml = buildInviterNotificationEmail({ inviteeEmail: inv.email, action: 'accepted', orgName: inv.org_name || 'Comfort Zone' });
+    await sendEmail(inv.inviter_email, `${inv.email} accepted your invitation`, notifyHtml, inv.org_name, inv.tenant_id).catch(() => {});
+  }
+
+  logger.info('Invitation accepted', { email: inv.email, tenant_id: inv.tenant_id });
+
+  res.redirect('/dashboard?msg=' + encodeURIComponent(`Welcome to ${inv.org_name || 'Comfort Zone'}!`));
 }));
 
 // GET /invite/decline?token=xxx — Show decline confirmation page
@@ -45564,6 +45675,488 @@ app.get('/team/invite/cancel/:id', requireAuth, requireNotBanned, requireRole('a
 }));
 
 console.log('[Invitations] Email-based user invitation routes registered — /team/invite-email, /invite/accept, /invite/decline');
+
+// ============================================================
+// ENHANCED EMAIL-BASED USER INVITATION SYSTEM — /settings/team
+// Features: personal message, resend, cancel, status tracking,
+//   beautiful branded emails, existing-user join flow, audit logging
+// ============================================================
+
+// --- Auto-migrate: add status, message, rejected_at columns if missing ---
+(async () => {
+  try {
+    const cols = (await pool.query(`
+      SELECT column_name FROM information_schema.columns WHERE table_name='user_invitations'
+    `)).rows.map(r => r.column_name);
+    if (!cols.includes('status')) {
+      await pool.query(`ALTER TABLE user_invitations ADD COLUMN status VARCHAR(20) DEFAULT 'pending'`);
+      // Backfill existing rows based on accepted_at / declined_at
+      await pool.query(`UPDATE user_invitations SET status='accepted' WHERE accepted_at IS NOT NULL`);
+      await pool.query(`UPDATE user_invitations SET status='rejected' WHERE declined_at IS NOT NULL`);
+      await pool.query(`UPDATE user_invitations SET status='expired' WHERE accepted_at IS NULL AND declined_at IS NULL AND expires_at < NOW()`);
+      console.log('[Invitations] Added status column to user_invitations');
+    }
+    if (!cols.includes('message')) {
+      await pool.query(`ALTER TABLE user_invitations ADD COLUMN message TEXT`);
+      console.log('[Invitations] Added message column to user_invitations');
+    }
+    if (!cols.includes('rejected_at')) {
+      await pool.query(`ALTER TABLE user_invitations ADD COLUMN rejected_at TIMESTAMPTZ`);
+      console.log('[Invitations] Added rejected_at column to user_invitations');
+    }
+    // Add unique constraint if missing (one active invite per email per tenant)
+    try {
+      await pool.query(`
+        ALTER TABLE user_invitations DROP CONSTRAINT IF EXISTS user_invitations_tenant_email_status_key;
+        ALTER TABLE user_invitations ADD CONSTRAINT user_invitations_tenant_email_status_key UNIQUE (tenant_id, email, status)
+      `);
+    } catch (e) {
+      // Constraint may already exist or data conflict — non-fatal
+      console.warn('[Invitations] Unique constraint on (tenant_id, email, status):', e.message);
+    }
+    // Add index on email if missing
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_invitations_email ON user_invitations(email)`); } catch(e) {}
+  } catch (e) {
+    console.warn('[Invitations] Migration warning:', e.message);
+  }
+})();
+
+// --- Helper: invitation status badge HTML ---
+const inviteBadge = (status) => {
+  const map = {
+    pending: { bg: '#fef3c7', color: '#92400e', label: 'Pending' },
+    accepted: { bg: '#d1fae5', color: '#065f46', label: 'Accepted' },
+    rejected: { bg: '#fee2e2', color: '#991b1b', label: 'Declined' },
+    expired: { bg: '#f1f5f9', color: '#64748b', label: 'Expired' },
+    cancelled: { bg: '#f1f5f9', color: '#64748b', label: 'Cancelled' },
+  };
+  const s = map[status] || map.pending;
+  return `<span style="display:inline-block;padding:3px 10px;border-radius:9999px;font-size:12px;font-weight:600;background:${s.bg};color:${s.color}">${s.label}</span>`;
+};
+
+// --- Helper: build beautiful branded invitation email HTML ---
+const buildInvitationEmailHtml = ({ inviterName, orgName, role, message, acceptUrl, declineUrl, baseUrl }) => {
+  const bodyHtml = `
+    <div style="text-align:center;margin-bottom:24px">
+      <h2 style="margin:0;color:#1e293b;font-size:22px">You're Invited to Join ${escHtml(orgName)}</h2>
+      <p style="color:#64748b;margin-top:6px;font-size:15px">${escHtml(inviterName)} has invited you to collaborate</p>
+    </div>
+    <div style="background:#f8fafc;border-radius:12px;padding:20px;margin:20px 0">
+      <table style="width:100%;font-size:14px;color:#334155">
+        <tr><td style="padding:6px 0;font-weight:600;width:110px;color:#64748b">Organization</td><td>${escHtml(orgName)}</td></tr>
+        <tr><td style="padding:6px 0;font-weight:600;color:#64748b">Invited by</td><td>${escHtml(inviterName)}</td></tr>
+        <tr><td style="padding:6px 0;font-weight:600;color:#64748b">Your Role</td><td><span style="display:inline-block;padding:2px 10px;border-radius:9999px;background:#ede9fe;color:#6d28d9;font-weight:600;font-size:13px">${escHtml(role)}</span></td></tr>
+      </table>
+    </div>
+    ${message ? `
+    <div style="background:#fffbeb;border-left:4px solid #f59e0b;border-radius:0 8px 8px 0;padding:14px 18px;margin:20px 0">
+      <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:0.5px">Personal Message</p>
+      <p style="margin:0;color:#78350f;font-size:14px;line-height:1.6">${escHtml(message)}</p>
+    </div>` : ''}
+    <div style="text-align:center;margin:28px 0">
+      <a href="${acceptUrl}" style="display:inline-block;padding:14px 36px;background:linear-gradient(135deg,#059669,#10b981);color:white;border-radius:10px;font-weight:700;font-size:16px;text-decoration:none;letter-spacing:0.3px">Accept Invitation</a>
+    </div>
+    <p style="text-align:center;margin:12px 0 0"><a href="${declineUrl}" style="color:#ef4444;font-size:13px;text-decoration:none">Decline this invitation</a></p>
+    <div style="margin-top:24px;padding:14px;background:#f1f5f9;border-radius:8px;font-size:12px;color:#64748b">
+      <p style="margin:0 0 6px"><strong>Can't click the button?</strong> Copy and paste this link into your browser:</p>
+      <p style="margin:0;word-break:break-all;color:#4f46e5">${acceptUrl}</p>
+    </div>
+    <p style="text-align:center;margin-top:16px;font-size:12px;color:#94a3b8">&#9200; This invitation expires in 7 days</p>
+  `;
+  return renderEmailTemplate('You\'re Invited!', bodyHtml, orgName, '#059669');
+};
+
+// --- Helper: build confirmation email for inviter when invitee accepts/rejects ---
+const buildInviterNotificationEmail = ({ inviteeEmail, action, orgName }) => {
+  const isAccept = action === 'accepted';
+  const bodyHtml = `
+    <div style="text-align:center;margin-bottom:20px">
+      <h2 style="margin:0;color:${isAccept ? '#059669' : '#ef4444'};font-size:20px">${isAccept ? '✓ Invitation Accepted' : '✕ Invitation Declined'}</h2>
+    </div>
+    <p style="font-size:15px;color:#334155"><strong>${escHtml(inviteeEmail)}</strong> has ${isAccept ? 'accepted' : 'declined'} your invitation to join <strong>${escHtml(orgName)}</strong>.</p>
+    ${isAccept ? '<p style="color:#64748b;font-size:14px">They are now part of your team and can access the platform based on their assigned role.</p>' : '<p style="color:#64748b;font-size:14px">You may want to reach out to them directly or send a new invitation.</p>'}
+    <div style="text-align:center;margin:24px 0">
+      <a href="${PLATFORM_CONFIG.baseUrl}/settings/team" style="display:inline-block;padding:12px 28px;background:#4f46e5;color:white;border-radius:8px;font-weight:600;text-decoration:none">View Team</a>
+    </div>
+  `;
+  return renderEmailTemplate(isAccept ? 'Invitation Accepted' : 'Invitation Declined', bodyHtml, orgName, isAccept ? '#059669' : '#ef4444');
+};
+
+// === GET /settings/team — Enhanced Team Management Page ===
+app.get('/settings/team', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const msg = req.query.msg ? `<div class="alert alert-success" style="margin-bottom:16px">&#10003; ${esc(req.query.msg)}</div>` : '';
+  const err = req.query.err ? `<div class="alert alert-error" style="margin-bottom:16px">&#9888; ${esc(req.query.err)}</div>` : '';
+
+  // Fetch team members, all invitations, and tenant info
+  const [users, allInvitations, tenant] = await Promise.all([
+    pool.query('SELECT u.id, u.name, u.email, u.role, u.is_active, u.created_at FROM users u WHERE u.tenant_id=$1 ORDER BY u.created_at DESC', [t]),
+    pool.query('SELECT ui.*, u.name as inviter_name FROM user_invitations ui LEFT JOIN users u ON ui.invited_by = u.id WHERE ui.tenant_id=$1 ORDER BY ui.created_at DESC', [t]),
+    pool.query('SELECT name, type FROM tenants WHERE id=$1', [t])
+  ]);
+
+  const orgName = tenant?.rows[0]?.name || 'Organization';
+  const isAdmin = ['admin', 'super_admin'].includes(req.session.user.role);
+  const csrfToken = req.csrfToken || req.cookies?.['CSRF-TOKEN'] || '';
+
+  // Categorize invitations
+  const pending = allInvitations.rows.filter(i => i.status === 'pending' && new Date(i.expires_at) > new Date());
+  const expiredPending = allInvitations.rows.filter(i => i.status === 'pending' && new Date(i.expires_at) <= new Date());
+  const accepted = allInvitations.rows.filter(i => i.status === 'accepted');
+  const rejected = allInvitations.rows.filter(i => i.status === 'rejected');
+  const cancelled = allInvitations.rows.filter(i => i.status === 'cancelled');
+
+  // Mark expired pending invitations
+  if (expiredPending.length > 0) {
+    const expiredIds = expiredPending.map(i => i.id);
+    await pool.query(`UPDATE user_invitations SET status='expired' WHERE id=ANY($1) AND status='pending'`, [expiredIds]).catch(() => {});
+  }
+
+  res.send(renderPage('Team & Invitations', `
+    ${msg}${err}
+    <style>
+      .team-hero{background:linear-gradient(135deg,#059669,#10b981);padding:28px 32px;border-radius:16px;margin-bottom:24px;color:white}
+      .team-hero h1{margin:0;font-size:26px;font-weight:800}
+      .team-hero p{margin:6px 0 0;opacity:0.9;font-size:15px}
+      .team-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:24px}
+      .team-stat{background:var(--bg-card);border-radius:12px;padding:16px;text-align:center;border:1px solid var(--border)}
+      .team-stat .num{font-size:28px;font-weight:800;color:var(--primary)}
+      .team-stat .label{font-size:12px;color:var(--text-muted);margin-top:2px}
+      .invite-form-card{background:var(--bg-card);border-radius:16px;padding:24px;border:2px solid #d1fae5;margin-bottom:24px}
+      .invite-form-card h3{margin:0 0 16px;font-size:18px;color:#059669}
+      .invite-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;align-items:end}
+      @media(max-width:768px){.invite-grid{grid-template-columns:1fr}}
+      .invite-grid label{display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px}
+      .invite-grid input,.invite-grid select,.invite-grid textarea{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box;background:var(--input-bg);color:var(--text)}
+      .invite-grid input:focus,.invite-grid select:focus,.invite-grid textarea:focus{outline:none;border-color:#059669;box-shadow:0 0 0 3px rgba(5,150,105,0.1)}
+      .msg-field{grid-column:1/-1}
+      .msg-field textarea{min-height:60px;resize:vertical}
+      .send-btn{padding:10px 24px;background:linear-gradient(135deg,#059669,#10b981);color:white;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap}
+      .send-btn:hover{opacity:0.9}
+      .invite-table{width:100%;border-collapse:collapse;font-size:13px}
+      .invite-table th{text-align:left;padding:10px 8px;border-bottom:2px solid var(--border);color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px}
+      .invite-table td{padding:10px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+      .invite-table tr:hover{background:var(--bg-body)}
+      .invite-actions{display:flex;gap:6px;flex-wrap:wrap}
+      .btn-resend{padding:4px 12px;background:#3b82f6;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-decoration:none;display:inline-block}
+      .btn-cancel{padding:4px 12px;background:#ef4444;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-decoration:none;display:inline-block}
+      .member-table{width:100%;border-collapse:collapse;font-size:13px}
+      .member-table th{text-align:left;padding:10px 8px;border-bottom:2px solid var(--border);color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px}
+      .member-table td{padding:10px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+      .member-table tr:hover{background:var(--bg-body)}
+      .role-tag{display:inline-block;padding:2px 10px;border-radius:9999px;font-size:12px;font-weight:600}
+      .role-admin{background:#ede9fe;color:#6d28d9}.role-manager{background:#dbeafe;color:#1e40af}
+      .role-staff{background:#e0e7ff;color:#3730a3}.role-viewer{background:#f1f5f9;color:#475569}
+      .role-teacher{background:#fef3c7;color:#92400e}.role-accountant{background:#d1fae5;color:#065f46}
+      .role-nurse{background:#fce7f3;color:#9d174d}.role-librarian{background:#e0f2fe;color:#075985}
+      .section-title{font-size:18px;font-weight:700;margin:28px 0 12px;display:flex;align-items:center;gap:8px}
+      .section-title .count{background:#e0e7ff;color:#4338ca;font-size:13px;padding:2px 10px;border-radius:9999px;font-weight:600}
+      .empty-state{text-align:center;padding:32px;color:var(--text-muted)}
+      .empty-state .icon{font-size:32px;margin-bottom:8px}
+      .history-row{opacity:0.6}
+    </style>
+
+    <div class="team-hero">
+      <h1>&#128101; Team & Invitations</h1>
+      <p>Manage who has access to ${esc(orgName)}</p>
+    </div>
+
+    <div class="team-stats">
+      <div class="team-stat"><div class="num">${users.rows.length}</div><div class="label">Team Members</div></div>
+      <div class="team-stat"><div class="num" style="color:#f59e0b">${pending.length}</div><div class="label">Pending Invites</div></div>
+      <div class="team-stat"><div class="num" style="color:#059669">${accepted.length}</div><div class="label">Accepted</div></div>
+      <div class="team-stat"><div class="num" style="color:#ef4444">${rejected.length}</div><div class="label">Declined</div></div>
+    </div>
+
+    ${isAdmin ? `
+    <!-- Invite Form -->
+    <div class="invite-form-card">
+      <h3>&#9993; Invite a New Team Member</h3>
+      <form method="POST" action="/settings/team/invite">
+        <input type="hidden" name="_csrf" value="${esc(csrfToken)}">
+        <div class="invite-grid">
+          <div>
+            <label>Email Address *</label>
+            <input type="email" name="email" required placeholder="colleague@example.com">
+          </div>
+          <div>
+            <label>Role *</label>
+            <select name="role">
+              <option value="staff">Staff</option>
+              <option value="admin">Admin</option>
+              <option value="manager">Manager</option>
+              <option value="viewer">Viewer</option>
+              <option value="teacher">Teacher</option>
+              <option value="accountant">Accountant</option>
+              <option value="nurse">Nurse</option>
+              <option value="librarian">Librarian</option>
+            </select>
+          </div>
+          <div>
+            <button type="submit" class="send-btn" style="width:100%;height:42px">Send Invitation</button>
+          </div>
+          <div class="msg-field">
+            <label>Personal Message (optional)</label>
+            <textarea name="message" placeholder="Add a personal note to your invitation..." maxlength="500"></textarea>
+          </div>
+        </div>
+      </form>
+    </div>
+    ` : ''}
+
+    <!-- Pending Invitations -->
+    <div class="section-title">&#9203; Pending Invitations <span class="count">${pending.length}</span></div>
+    ${pending.length > 0 ? `
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="invite-table">
+        <tr><th>Email</th><th>Role</th><th>Invited By</th><th>Sent</th><th>Expires</th><th>Actions</th></tr>
+        ${pending.map(inv => `
+          <tr>
+            <td><strong>${esc(inv.email)}</strong></td>
+            <td><span class="role-tag role-${esc(inv.role)}">${esc(inv.role)}</span></td>
+            <td>${esc(inv.inviter_name || 'Unknown')}</td>
+            <td>${new Date(inv.created_at).toLocaleDateString()}</td>
+            <td>${new Date(inv.expires_at).toLocaleDateString()}</td>
+            <td class="invite-actions">
+              ${isAdmin ? `
+              <form method="POST" action="/settings/team/resend/${inv.id}" style="display:inline"><input type="hidden" name="_csrf" value="${esc(csrfToken)}"><button type="submit" class="btn-resend" onclick="return confirm('Resend invitation to ${esc(inv.email)}?')">Resend</button></form>
+              <form method="POST" action="/settings/team/cancel/${inv.id}" style="display:inline"><input type="hidden" name="_csrf" value="${esc(csrfToken)}"><button type="submit" class="btn-cancel" onclick="return confirm('Cancel invitation to ${esc(inv.email)}?')">Cancel</button></form>
+              ` : '—'}
+            </td>
+          </tr>
+        `).join('')}
+      </table>
+    </div>
+    ` : `<div class="card"><div class="empty-state"><div class="icon">&#128233;</div><p>No pending invitations</p></div></div>`}
+
+    <!-- Team Members -->
+    <div class="section-title">&#128100; Team Members <span class="count">${users.rows.length}</span></div>
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="member-table">
+        <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th></tr>
+        ${users.rows.map(u => `
+          <tr>
+            <td><strong>${esc(u.name || u.email.split('@')[0])}</strong></td>
+            <td>${esc(u.email)}</td>
+            <td><span class="role-tag role-${esc(u.role)}">${esc(u.role)}</span></td>
+            <td>${u.is_active !== false ? '<span style="color:#059669;font-weight:600">Active</span>' : '<span style="color:#dc2626;font-weight:600">Inactive</span>'}</td>
+            <td>${new Date(u.created_at).toLocaleDateString()}</td>
+          </tr>
+        `).join('')}
+      </table>
+    </div>
+
+    <!-- Invitation History -->
+    ${(accepted.length + rejected.length + cancelled.length + expiredPending.length) > 0 ? `
+    <div class="section-title">&#128221; Invitation History</div>
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="invite-table">
+        <tr><th>Email</th><th>Role</th><th>Status</th><th>Date</th></tr>
+        ${[...accepted, ...rejected, ...cancelled, ...expiredPending].map(inv => `
+          <tr class="history-row">
+            <td>${esc(inv.email)}</td>
+            <td><span class="role-tag role-${esc(inv.role)}">${esc(inv.role)}</span></td>
+            <td>${inviteBadge(inv.status || 'pending')}</td>
+            <td>${new Date(inv.accepted_at || inv.rejected_at || inv.created_at).toLocaleDateString()}</td>
+          </tr>
+        `).join('')}
+      </table>
+    </div>
+    ` : ''}
+  `, req.session.user, req));
+}));
+
+// === POST /settings/team/invite — Send enhanced invitation ===
+app.post('/settings/team/invite', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { email, role, message } = req.body;
+  const inviterName = req.session.user.name || req.session.user.email;
+  const validRoles = ['admin', 'manager', 'staff', 'viewer', 'teacher', 'accountant', 'nurse', 'librarian'];
+  const assignedRole = validRoles.includes(role) ? role : 'staff';
+
+  // Validate email
+  if (!email || !validateEmail(email)) {
+    return res.redirect('/settings/team?err=' + encodeURIComponent('Please enter a valid email address'));
+  }
+
+  // Check if user already exists in this tenant
+  const existingUser = (await pool.query('SELECT id, name FROM users WHERE email=$1 AND tenant_id=$2', [email, t])).rows[0];
+  if (existingUser) {
+    return res.redirect('/settings/team?err=' + encodeURIComponent('A user with this email already exists in your organization'));
+  }
+
+  // Check for existing pending invitation
+  const existingInvite = (await pool.query(
+    "SELECT id FROM user_invitations WHERE email=$1 AND tenant_id=$2 AND status='pending' AND expires_at > NOW()",
+    [email, t]
+  )).rows[0];
+  if (existingInvite) {
+    return res.redirect('/settings/team?err=' + encodeURIComponent('A pending invitation already exists for this email'));
+  }
+
+  // Generate unique token and set expiry (7 days)
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const baseUrl = PLATFORM_CONFIG.baseUrl || process.env.BASE_URL || 'https://ssewasswa.onrender.com';
+  const acceptUrl = `${baseUrl}/invite/accept?token=${token}`;
+  const declineUrl = `${baseUrl}/invite/decline?token=${token}`;
+
+  // Get tenant name
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const orgName = tenant?.name || 'Comfort Zone';
+
+  // Insert invitation record
+  await pool.query(
+    'INSERT INTO user_invitations(tenant_id, email, role, token, invited_by, expires_at, message, status) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+    [t, email, assignedRole, token, req.session.user.id, expiresAt, (message || '').trim().slice(0, 500) || null, 'pending']
+  );
+
+  // Build and send beautiful branded invitation email
+  const emailHtml = buildInvitationEmailHtml({
+    inviterName, orgName, role: assignedRole, message: message || '', acceptUrl, declineUrl, baseUrl
+  });
+  await sendEmail(email, `You're invited to join ${orgName}`, emailHtml, orgName, t);
+
+  // Audit log
+  await audit(inviterName, 'invite_user', `Invited ${email} as ${assignedRole} via email`, t, req);
+
+  logger.info('Invitation sent', { email, role: assignedRole, tenant_id: t, invited_by: req.session.user.id });
+
+  res.redirect('/settings/team?msg=' + encodeURIComponent(`Invitation sent to ${email}`));
+}));
+
+// === POST /settings/team/cancel/:id — Cancel invitation ===
+app.post('/settings/team/cancel/:id', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const invId = parseInt(req.params.id);
+
+  const inv = (await pool.query(
+    "SELECT * FROM user_invitations WHERE id=$1 AND tenant_id=$2 AND status='pending'",
+    [invId, t]
+  )).rows[0];
+
+  if (!inv) {
+    return res.redirect('/settings/team?err=' + encodeURIComponent('Invitation not found or already processed'));
+  }
+
+  await pool.query("UPDATE user_invitations SET status='cancelled' WHERE id=$1", [invId]);
+  await audit(req.session.user.email, 'cancel_invitation', `Cancelled invitation for ${inv.email}`, t, req);
+
+  logger.info('Invitation cancelled', { invitation_id: invId, email: inv.email, tenant_id: t });
+
+  res.redirect('/settings/team?msg=' + encodeURIComponent('Invitation cancelled'));
+}));
+
+// === POST /settings/team/resend/:id — Resend invitation ===
+app.post('/settings/team/resend/:id', requireAuth, requireNotBanned, requireRole('admin', 'super_admin'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const invId = parseInt(req.params.id);
+
+  const inv = (await pool.query(
+    "SELECT * FROM user_invitations WHERE id=$1 AND tenant_id=$2 AND status='pending'",
+    [invId, t]
+  )).rows[0];
+
+  if (!inv) {
+    return res.redirect('/settings/team?err=' + encodeURIComponent('Invitation not found or already processed'));
+  }
+
+  // Generate new token and extend expiry
+  const newToken = crypto.randomBytes(32).toString('hex');
+  const newExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const baseUrl = PLATFORM_CONFIG.baseUrl || process.env.BASE_URL || 'https://ssewasswa.onrender.com';
+  const acceptUrl = `${baseUrl}/invite/accept?token=${newToken}`;
+  const declineUrl = `${baseUrl}/invite/decline?token=${newToken}`;
+
+  await pool.query(
+    'UPDATE user_invitations SET token=$1, expires_at=$2 WHERE id=$3',
+    [newToken, newExpiry, invId]
+  );
+
+  // Get tenant name and inviter name
+  const [tenant, inviter] = await Promise.all([
+    pool.query('SELECT name FROM tenants WHERE id=$1', [t]),
+    pool.query('SELECT name FROM users WHERE id=$1', [inv.invited_by])
+  ]);
+  const orgName = tenant?.rows[0]?.name || 'Comfort Zone';
+  const inviterName = inviter?.rows[0]?.name || req.session.user.name || req.session.user.email;
+
+  // Resend the email with new token
+  const emailHtml = buildInvitationEmailHtml({
+    inviterName, orgName, role: inv.role, message: inv.message || '', acceptUrl, declineUrl, baseUrl
+  });
+  await sendEmail(inv.email, `Reminder: You're invited to join ${orgName}`, emailHtml, orgName, t);
+
+  await audit(req.session.user.email, 'resend_invitation', `Resent invitation to ${inv.email}`, t, req);
+  logger.info('Invitation resent', { invitation_id: invId, email: inv.email, tenant_id: t });
+
+  res.redirect('/settings/team?msg=' + encodeURIComponent(`Invitation resent to ${inv.email}`));
+}));
+
+// === POST /invite/reject — Process rejection (enhanced) ===
+app.post('/invite/reject', ah(async (req, res) => {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error"><h2>Invalid Request</h2><p>No invitation token provided.</p></div></div>', null));
+  }
+
+  const inv = (await pool.query(
+    'SELECT ui.*, t.name as org_name FROM user_invitations ui LEFT JOIN tenants t ON ui.tenant_id=t.id WHERE ui.token=$1',
+    [token]
+  )).rows[0];
+
+  if (!inv || inv.status === 'cancelled') {
+    return res.send(renderPage('Invalid Invitation', '<div class="card"><div class="alert alert-error"><h2>Invalid Invitation</h2><p>This invitation link is invalid or has been revoked.</p></div></div>', null));
+  }
+
+  if (inv.status === 'accepted') {
+    return res.redirect('/login');
+  }
+
+  if (inv.status === 'rejected') {
+    return res.send(renderPage('Already Declined', '<div class="card"><div class="alert alert-info"><h2>Invitation Already Declined</h2><p>You have already declined this invitation.</p></div></div>', null));
+  }
+
+  if (new Date(inv.expires_at) < new Date()) {
+    return res.send(renderPage('Invitation Expired', '<div class="card"><div class="alert alert-error"><h2>Invitation Expired</h2><p>This invitation has expired. Please contact your organization admin for a new one.</p></div></div>', null));
+  }
+
+  // Update status to rejected
+  await pool.query("UPDATE user_invitations SET status='rejected', rejected_at=NOW() WHERE id=$1", [inv.id]);
+
+  // Notify the inviter
+  if (inv.invited_by) {
+    const inviter = (await pool.query('SELECT email, name FROM users WHERE id=$1', [inv.invited_by])).rows[0];
+    if (inviter?.email) {
+      const orgName = inv.org_name || 'Comfort Zone';
+      const notifyHtml = buildInviterNotificationEmail({ inviteeEmail: inv.email, action: 'rejected', orgName });
+      await sendEmail(inviter.email, `${inv.email} declined your invitation`, notifyHtml, orgName, inv.tenant_id).catch(() => {});
+    }
+  }
+
+  await audit(inv.email, 'reject_invitation', `Rejected invitation to join ${inv.org_name || 'organization'}`, inv.tenant_id);
+
+  res.send(renderPage('Invitation Declined', `
+    <style>
+      .reject-wrapper{max-width:480px;margin:40px auto;text-align:center}
+      .reject-card{background:var(--bg-card);border-radius:16px;padding:40px;box-shadow:var(--shadow-lg);border:1px solid var(--border)}
+      .reject-icon{display:inline-flex;align-items:center;justify-content:center;width:64px;height:64px;border-radius:50%;background:#fee2e2;color:#ef4444;font-size:28px;margin-bottom:16px}
+      .reject-card h2{margin:0 0 8px;font-size:22px;font-weight:700;color:#1e293b}
+      .reject-card p{color:var(--text-muted);font-size:14px;line-height:1.6;margin:4px 0}
+    </style>
+    <div class="reject-wrapper">
+      <div class="reject-card">
+        <div class="reject-icon">&#10060;</div>
+        <h2>Invitation Declined</h2>
+        <p>You have declined the invitation to join <strong>${esc(inv.org_name || 'the organization')}</strong>.</p>
+        <p style="margin-top:12px">If you changed your mind, please contact the organization admin for a new invitation.</p>
+      </div>
+    </div>
+  `, null));
+}));
+
+console.log('[Invitations] Enhanced email invitation system registered — /settings/team, /invite/reject');
 
 // ============================================================
 // PHASE 4 COMPLETE: All remaining gap analysis tasks implemented

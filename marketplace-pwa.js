@@ -1886,6 +1886,18 @@ setInterval(function() {
   const writeServiceWorker = () => {
     try {
       const swPath = path.join(__dirname, 'public', 'sw.js');
+      // CRITICAL: Do NOT overwrite sw.js if it already exists with a newer version.
+      // The main sw.js (v9.0+) is the authoritative PWA service worker.
+      // This marketplace SW (v2.0) is older and would break PWA install.
+      if (fs.existsSync(swPath)) {
+        const existing = fs.readFileSync(swPath, 'utf8');
+        const existingVer = existing.match(/comfort-v(\d+\.\d+)/);
+        const thisVer = SERVICE_WORKER_CONTENT.match(/comfort-v(\d+\.\d+)/);
+        if (existingVer && thisVer && parseFloat(existingVer[1]) >= parseFloat(thisVer[1])) {
+          logger.info(`[Marketplace] Skipping SW write — existing v${existingVer[1]} >= marketplace v${thisVer[1]}`);
+          return true;
+        }
+      }
       fs.writeFileSync(swPath, SERVICE_WORKER_CONTENT.trim(), 'utf8');
       logger.info('[Marketplace] Service worker written to public/sw.js');
       return true;
@@ -1895,8 +1907,8 @@ setInterval(function() {
     }
   };
 
-  // Write the service worker on load
-  writeServiceWorker();
+  // Do NOT auto-write — let the main sw.js be the authority
+  // writeServiceWorker();
 
   // Also write the enhanced offline.html
   try {

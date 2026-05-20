@@ -345,7 +345,7 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
           <h3 style="margin:0 0 16px;color:#1e293b">Create Fee Structure</h3>
           <form method="POST" action="/fees/structures" style="display:flex;flex-direction:column;gap:14px">
             <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Name *</label>
-              <input type="text" name="name" required placeholder="e.g., Term 1 Tuition" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px"></div>
+              <input type="text" name="name" required minlength="2" maxlength="200" placeholder="e.g., Term 1 Tuition" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px"></div>
             <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Class</label>
               <select name="class_id" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">
                 <option value="">All Classes</option>
@@ -356,9 +356,9 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
                 <option value="Term 1">Term 1</option><option value="Term 2">Term 2</option><option value="Term 3">Term 3</option><option value="Annual">Annual</option>
               </select></div>
             <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Amount *</label>
-              <input type="number" name="total_amount" required min="0" step="0.01" placeholder="0.00" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px"></div>
+              <input type="number" name="total_amount" required min="0" step="0.01" placeholder="0.00" data-ugx="true" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px"></div>
             <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Description</label>
-              <textarea name="description" rows="2" placeholder="Optional description" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px;resize:vertical"></textarea></div>
+              <textarea name="description" rows="2" maxlength="500" placeholder="Optional description" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px;resize:vertical"></textarea></div>
             <button type="submit" class="fm-btn fm-btn-primary" style="justify-content:center">💾 Save Structure</button>
           </form>
         </div>
@@ -477,7 +477,7 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
           <form method="POST" action="/fees/collect" style="display:flex;flex-direction:column;gap:14px">
             <input type="hidden" name="student_id" value="${studentId}">
             <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Amount *</label>
-              <input type="number" name="amount" required min="0" step="0.01" placeholder="0.00" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px"></div>
+              <input type="number" name="amount" required min="0" step="0.01" placeholder="0.00" data-ugx="true" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px"></div>
             <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Fee Structure</label>
               <select name="fee_structure_id" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">
                 <option value="">Select (optional)</option>
@@ -488,13 +488,13 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
                 <option value="cash">Cash</option><option value="bank_transfer">Bank Transfer</option><option value="mobile_money">Mobile Money</option><option value="cheque">Cheque</option><option value="card">Card</option>
               </select></div>
             <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Reference</label>
-              <input type="text" name="reference" placeholder="Transaction reference" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px"></div>
+              <input type="text" name="reference" placeholder="Transaction reference" maxlength="100" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px"></div>
             <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Term</label>
               <select name="term" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">
                 <option value="Term 1">Term 1</option><option value="Term 2">Term 2</option><option value="Term 3">Term 3</option>
               </select></div>
             <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Notes</label>
-              <textarea name="notes" rows="2" placeholder="Optional notes" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px;resize:vertical"></textarea></div>
+              <textarea name="notes" rows="2" placeholder="Optional notes" maxlength="500" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px;resize:vertical"></textarea></div>
             <button type="submit" class="fm-btn fm-btn-success" style="padding:14px 28px;font-size:15px;justify-content:center">💰 Process Payment</button>
           </form>
         </div>
