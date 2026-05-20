@@ -411,11 +411,22 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         { name: 'WhatsApp Notifications', version: '1.0.4', description: 'Send donation confirmations via WhatsApp Business API', author: 'CommBridge', category: 'messaging', price: 14.99, downloads: 310, rating: 3.9, is_verified: false }
       ];
       for (const p of seedPlugins) {
-        await pool.query(
-          `INSERT INTO plugin_marketplace (name, version, description, author, category, price, downloads, rating, is_verified)
-           SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9 WHERE NOT EXISTS (SELECT 1 FROM plugin_marketplace WHERE name=$1 AND version=$2)`,
-          [p.name, p.version, p.description, p.author, p.category, p.price, p.downloads, p.rating, p.is_verified]
-        );
+        try {
+          await pool.query(
+            `INSERT INTO plugin_marketplace (name, version, description, author, category, price, downloads, rating, is_verified)
+             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9 WHERE NOT EXISTS (SELECT 1 FROM plugin_marketplace WHERE name=$1 AND version=$2)`,
+            [p.name, p.version, p.description, p.author, p.category, p.price, p.downloads, p.rating, p.is_verified]
+          );
+        } catch(e) {
+          // Price column might be INTEGER instead of NUMERIC — try with integer price
+          try {
+            await pool.query(
+              `INSERT INTO plugin_marketplace (name, version, description, author, category, price, downloads, rating, is_verified)
+               SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9 WHERE NOT EXISTS (SELECT 1 FROM plugin_marketplace WHERE name=$1 AND version=$2)`,
+              [p.name, p.version, p.description, p.author, p.category, Math.round(p.price), p.downloads, p.rating, p.is_verified]
+            );
+          } catch(e2) { /* skip duplicate or schema mismatch */ }
+        }
       }
 
       // Per-tenant seeds

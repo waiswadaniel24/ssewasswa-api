@@ -304,15 +304,18 @@ async function calculateTrending() {
   try {
     await pool.query(`
       INSERT INTO trending_content (content_id, content_type, category, title, score, views_24h, shares_24h, clicks_24h, calculated_at)
-      SELECT
-        sc.id, 'scraped', sc.category, sc.title,
-        (COALESCE(sc.view_count, 0) * 1.0 + COALESCE(sc.click_count, 0) * 3.0) / NULLIF(EXTRACT(EPOCH FROM (NOW() - sc.scraped_at)) / 3600, 1) AS score,
-        COALESCE(sc.view_count, 0), 0, COALESCE(sc.click_count, 0), NOW()
-      FROM scraped_content sc
-      WHERE sc.scraped_at >= NOW() - INTERVAL '7 days'
+      SELECT sub.id, sub.ctype, sub.cat, sub.ttl, sub.score, sub.views_24h, sub.shares_24h, sub.clicks_24h, sub.calculated_at
+      FROM (
+        SELECT
+          sc.id, 'scraped' AS ctype, sc.category AS cat, sc.title AS ttl,
+          (COALESCE(sc.view_count, 0) * 1.0 + COALESCE(sc.click_count, 0) * 3.0) / NULLIF(EXTRACT(EPOCH FROM (NOW() - sc.scraped_at)) / 3600, 1) AS score,
+          COALESCE(sc.view_count, 0) AS views_24h, 0 AS shares_24h, COALESCE(sc.click_count, 0) AS clicks_24h, NOW() AS calculated_at
+        FROM scraped_content sc
+        WHERE sc.scraped_at >= NOW() - INTERVAL '7 days'
+        ORDER BY score DESC LIMIT 100
+      ) sub
       ON CONFLICT (content_id, content_type) DO UPDATE
       SET score = EXCLUDED.score, views_24h = EXCLUDED.views_24h, clicks_24h = EXCLUDED.clicks_24h, calculated_at = NOW()
-      ORDER BY score DESC LIMIT 100)
     `);
   } catch(e) { console.warn('[ViralEngine] Trending calc error:', e.message); }
 }

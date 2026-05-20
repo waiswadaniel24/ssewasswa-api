@@ -1124,7 +1124,19 @@ const sendEmail = async (to, subject, html, tenantFromName, tenantId) => {
     return true;
   } catch (e) { console.warn('Email failed:', e.message); return false; }
 };
-const queueEmail = (tenantId, to, subject, body, isHtml = true) => pool.query('INSERT INTO email_queue(tenant_id,to_email,subject,body,html) VALUES($1,$2,$3,$4,$5)', [tenantId, to, subject, body, isHtml]).catch(e => console.error('[DB Error]', e.message));
+const queueEmail = (tenantId, to, subject, body, isHtml = true) => {
+  // Use NULL for tenant_id if it doesn't exist in tenants table (avoids FK violation)
+  const safeTid = tenantId || null;
+  return pool.query('INSERT INTO email_queue(tenant_id,to_email,subject,body,html) VALUES($1,$2,$3,$4,$5)', [safeTid, to, subject, body, isHtml])
+    .catch(e => {
+      // If FK violation, retry without tenant_id
+      if (e.message.includes('violates foreign key')) {
+        return pool.query('INSERT INTO email_queue(to_email,subject,body,html) VALUES($1,$2,$3,$4)', [to, subject, body, isHtml])
+          .catch(e2 => console.error('[DB Error] email_queue insert failed:', e2.message));
+      }
+      console.error('[DB Error]', e.message);
+    });
+};
 
 // === UNIFIED EMAIL TEMPLATE SYSTEM ===
 // Helper to escape HTML entities for safe email content
@@ -16715,6 +16727,9 @@ const apiAuthWithPlan = async (req, res, next) => {
 
 // 3.3: AUTO DAILY BACKUP (pg_dump to Cloudinary) — Phase 3: Enhanced with encryption + rotation
 const BACKUP_ENCRYPTION_KEY = process.env.BACKUP_ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
+// Ensure key is exactly 64 hex chars (32 bytes for AES-256). Pad or hash if env var is wrong length.
+const _backupKeyHex = BACKUP_ENCRYPTION_KEY.length === 64 ? BACKUP_ENCRYPTION_KEY : crypto.createHash('sha256').update(BACKUP_ENCRYPTION_KEY).digest('hex');
+const BACKUP_KEY_BUFFER = Buffer.from(_backupKeyHex, 'hex');
 const BACKUP_RETENTION_DAYS = 30;
 const runAutoBackup = async () => {
   try {
@@ -16734,7 +16749,7 @@ const runAutoBackup = async () => {
         const backupJson = JSON.stringify(backupData);
         // Phase 3: Encrypt backup data with AES-256
         const iv = crypto.randomBytes(16);
-        const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(BACKUP_ENCRYPTION_KEY.slice(0, 32), 'hex'), iv);
+        const cipher = crypto.createCipheriv('aes-256-cbc', BACKUP_KEY_BUFFER, iv);
         const encrypted = Buffer.concat([cipher.update(backupJson), cipher.final()]);
         const encryptedPayload = Buffer.concat([iv, encrypted]); // Prepend IV for decryption
         let backupUrl = null;
@@ -41549,8 +41564,10 @@ try {
 
         // Create policy: users can only see their own tenant's data
         // Super admin bypasses RLS by setting app.current_tenant_id = 'super_admin'
+        // NOTE: PostgreSQL does not support CREATE OR REPLACE POLICY — must DROP first
+        try { await pool.query(`DROP POLICY IF EXISTS tenant_isolation_${table} ON ${table}`); } catch(e) {}
         await pool.query(`
-          CREATE OR REPLACE POLICY tenant_isolation_${table}
+          CREATE POLICY tenant_isolation_${table}
           ON ${table}
           USING (
             tenant_id = CAST(NULLIF(current_setting('app.current_tenant_id', true), 'super_admin') AS INTEGER)
@@ -42786,6 +42803,9 @@ const processFeeReminders = async () => {
 // --- 3. RECURRING DONATIONS AUTO-PROCESSOR (every 2 hours) ---
 const processRecurringDonations = async () => {
   try {
+    // Safety check: ensure table exists before querying
+    const tableCheck = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name='recurring_donations'");
+    if (tableCheck.rows.length === 0) return;
     const due = (await pool.query("SELECT * FROM recurring_donations WHERE next_date <= CURRENT_DATE AND status = 'active'")).rows;
     if (due.length === 0) return;
     let processed = 0, errors = 0;
