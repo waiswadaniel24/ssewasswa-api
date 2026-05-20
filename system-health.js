@@ -22,10 +22,6 @@ module.exports = function (app, pool, opts) {
       )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS hm_tenant_time ON health_metrics(tenant_id, recorded_at)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS hm_name_time ON health_metrics(metric_name, recorded_at)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS hsq_tenant_dur ON health_slow_queries(tenant_id, duration_ms DESC)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS ha_tenant_resolved ON health_alerts(tenant_id, is_resolved)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS hcl_tenant_created ON health_cron_log(tenant_id, created_at DESC)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS hel_tenant_created ON health_error_log(tenant_id, created_at DESC)`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS health_slow_queries (
         id SERIAL PRIMARY KEY, tenant_id INT NOT NULL DEFAULT 0,
@@ -33,6 +29,7 @@ module.exports = function (app, pool, opts) {
         query_plan TEXT, called_by VARCHAR(120),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS hsq_tenant_dur ON health_slow_queries(tenant_id, duration_ms DESC)`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS health_alerts (
         id SERIAL PRIMARY KEY, tenant_id INT NOT NULL DEFAULT 0,
@@ -42,6 +39,7 @@ module.exports = function (app, pool, opts) {
         is_resolved BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), resolved_at TIMESTAMPTZ
       )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS ha_tenant_resolved ON health_alerts(tenant_id, is_resolved)`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS health_cron_log (
         id SERIAL PRIMARY KEY, tenant_id INT NOT NULL DEFAULT 0,
@@ -50,6 +48,7 @@ module.exports = function (app, pool, opts) {
         output TEXT, error TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS hcl_tenant_created ON health_cron_log(tenant_id, created_at DESC)`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS health_changelog (
         id SERIAL PRIMARY KEY, version VARCHAR(30) NOT NULL,

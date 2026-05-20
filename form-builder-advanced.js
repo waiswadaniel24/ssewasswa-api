@@ -185,7 +185,7 @@ module.exports = function(app, pool, opts) {
         require_login BOOLEAN DEFAULT false, limit_submissions BOOLEAN DEFAULT false,
         max_submissions INT DEFAULT 0, notification_email TEXT,
         is_active BOOLEAN DEFAULT true, published_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ DEFAULT NOW(), school_id INT DEFAULT 1
+        created_at TIMESTAMPTZ DEFAULT NOW(), tenant_id INT DEFAULT 1
       )`);
       await pool.query(`CREATE TABLE IF NOT EXISTS form_submissions (
         id SERIAL PRIMARY KEY, form_id INT REFERENCES custom_forms(id) ON DELETE CASCADE,
@@ -193,14 +193,14 @@ module.exports = function(app, pool, opts) {
         responses JSONB, status TEXT DEFAULT 'new',
         reviewed_by INT, reviewed_at TIMESTAMPTZ, notes TEXT,
         ip_address TEXT, user_agent TEXT,
-        created_at TIMESTAMPTZ DEFAULT NOW(), school_id INT DEFAULT 1
+        created_at TIMESTAMPTZ DEFAULT NOW(), tenant_id INT DEFAULT 1
       )`);
       await pool.query(`CREATE TABLE IF NOT EXISTS form_conditions (
         id SERIAL PRIMARY KEY, form_id INT REFERENCES custom_forms(id) ON DELETE CASCADE,
         field_id TEXT, operator TEXT, value TEXT, action TEXT,
         target_field_id TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_cfa_form ON custom_forms(school_id)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_cfa_form ON custom_forms(tenant_id)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_fs_form_id ON form_submissions(form_id)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_fs_status ON form_submissions(status)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_fc_form_id ON form_conditions(form_id)`);
@@ -216,11 +216,11 @@ module.exports = function(app, pool, opts) {
     const { rows: forms } = await pool.query(`
       SELECT f.*, (SELECT COUNT(*)::int FROM form_submissions WHERE form_id=f.id) as submission_count,
         (SELECT COUNT(*)::int FROM form_conditions WHERE form_id=f.id) as condition_count
-      FROM custom_forms f WHERE f.school_id=$1 ORDER BY f.created_at DESC`, [tid]);
+      FROM custom_forms f WHERE f.tenant_id=$1 ORDER BY f.created_at DESC`, [tid]);
     const totalForms = forms.length;
     const totalSubmissions = forms.reduce((s, f) => s + (f.submission_count || 0), 0);
     const publishedForms = forms.filter(f => f.is_active && f.published_at).length;
-    const recentSubs = (await pool.query(`SELECT COUNT(*)::int as c FROM form_submissions WHERE school_id=$1 AND created_at > NOW() - INTERVAL '7 days'`, [tid])).rows[0].c;
+    const recentSubs = (await pool.query(`SELECT COUNT(*)::int as c FROM form_submissions WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '7 days'`, [tid])).rows[0].c;
 
     const rows = forms.map(f => {
       const fieldCount = Array.isArray(f.fields) ? f.fields.length : 0;
@@ -269,7 +269,7 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const { rows } = await pool.query(`
       SELECT f.*, (SELECT COUNT(*)::int FROM form_submissions WHERE form_id=f.id) as submission_count
-      FROM custom_forms f WHERE f.school_id=$1 ORDER BY f.created_at DESC`, [tid]);
+      FROM custom_forms f WHERE f.tenant_id=$1 ORDER BY f.created_at DESC`, [tid]);
     res.json({ success: true, forms: rows, total: rows.length });
   }));
 
@@ -280,7 +280,7 @@ module.exports = function(app, pool, opts) {
     if (!title || !title.trim()) return res.redirect('/admin/form-builder/create');
 
     const { rows } = await pool.query(
-      `INSERT INTO custom_forms (school_id, title, description, theme, submit_button_text, success_message,
+      `INSERT INTO custom_forms (tenant_id, title, description, theme, submit_button_text, success_message,
         allow_file_upload, max_file_size_mb, require_login, limit_submissions, max_submissions, notification_email)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
       [tid, title.trim(), (description || '').trim(), theme || 'light', submit_button_text || 'Submit',
@@ -295,7 +295,7 @@ module.exports = function(app, pool, opts) {
   // ─── 4. GET /edit/:id - Edit form with drag-drop builder ───
   app.get('/admin/form-builder/edit/:id', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
-    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND school_id=$2`, [req.params.id, tid]);
+    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND tenant_id=$2`, [req.params.id, tid]);
     if (!form) return res.status(404).send('<div class="fb-empty"><div class="icon">❌</div><h3>Form not found</h3></div>');
 
     const fields = Array.isArray(form.fields) ? form.fields : [];
@@ -579,13 +579,13 @@ module.exports = function(app, pool, opts) {
     const { id } = req.params;
     const { title, description, theme, submit_button_text, success_message, allow_file_upload, max_file_size_mb, require_login, limit_submissions, max_submissions, notification_email, fields, conditions } = req.body;
 
-    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND school_id=$2`, [id, tid]);
+    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND tenant_id=$2`, [id, tid]);
     if (!form) return res.json({ success: false, error: 'Form not found' });
 
     await pool.query(
       `UPDATE custom_forms SET title=$1, description=$2, theme=$3, submit_button_text=$4, success_message=$5,
         allow_file_upload=$6, max_file_size_mb=$7, require_login=$8, limit_submissions=$9, max_submissions=$10,
-        notification_email=$11, fields=$12 WHERE id=$13 AND school_id=$14`,
+        notification_email=$11, fields=$12 WHERE id=$13 AND tenant_id=$14`,
       [title, description, theme, submit_button_text, success_message, allow_file_upload,
         parseInt(max_file_size_mb) || 10, require_login, limit_submissions, parseInt(max_submissions) || 0,
         notification_email, JSON.stringify(fields || []), id, tid]
@@ -611,7 +611,7 @@ module.exports = function(app, pool, opts) {
     const { id } = req.params;
     await pool.query(`DELETE FROM form_conditions WHERE form_id=$1`, [id]);
     await pool.query(`DELETE FROM form_submissions WHERE form_id=$1`, [id]);
-    const { rowCount } = await pool.query(`DELETE FROM custom_forms WHERE id=$1 AND school_id=$2`, [id, tid]);
+    const { rowCount } = await pool.query(`DELETE FROM custom_forms WHERE id=$1 AND tenant_id=$2`, [id, tid]);
     audit(req, 'form_delete', { id });
     res.json({ success: true, deleted: rowCount > 0 });
   }));
@@ -620,11 +620,11 @@ module.exports = function(app, pool, opts) {
   app.post('/admin/form-builder/:id/duplicate', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const { id } = req.params;
-    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND school_id=$2`, [id, tid]);
+    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND tenant_id=$2`, [id, tid]);
     if (!form) return res.redirect('/admin/form-builder');
 
     const { rows: [newForm] } = await pool.query(
-      `INSERT INTO custom_forms (school_id, title, description, fields, theme, submit_button_text, success_message,
+      `INSERT INTO custom_forms (tenant_id, title, description, fields, theme, submit_button_text, success_message,
         allow_file_upload, max_file_size_mb, require_login, limit_submissions, max_submissions, notification_email, is_active)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,false) RETURNING id`,
       [tid, (form.title || '') + ' (Copy)', form.description, form.fields, form.theme, form.submit_button_text,
@@ -646,11 +646,11 @@ module.exports = function(app, pool, opts) {
   app.post('/admin/form-builder/:id/publish', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const { id } = req.params;
-    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND school_id=$2`, [id, tid]);
+    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND tenant_id=$2`, [id, tid]);
     if (!form) return res.json({ success: false, error: 'Form not found' });
 
     const shouldPublish = !form.published_at;
-    await pool.query(`UPDATE custom_forms SET is_active=$1, published_at=$2 WHERE id=$3 AND school_id=$4`,
+    await pool.query(`UPDATE custom_forms SET is_active=$1, published_at=$2 WHERE id=$3 AND tenant_id=$4`,
       [shouldPublish, shouldPublish ? new Date() : null, id, tid]);
 
     audit(req, shouldPublish ? 'form_publish' : 'form_unpublish', { id });
@@ -665,10 +665,10 @@ module.exports = function(app, pool, opts) {
     const limit = 25;
     const offset = (parseInt(page) - 1) * limit;
 
-    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND school_id=$2`, [id, tid]);
+    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND tenant_id=$2`, [id, tid]);
     if (!form) return res.status(404).send('<div class="fb-empty"><div class="icon">❌</div><h3>Form not found</h3></div>');
 
-    let where = `WHERE s.form_id=$1 AND s.school_id=$2`;
+    let where = `WHERE s.form_id=$1 AND s.tenant_id=$2`;
     const params = [id, tid];
     if (status) { where += ` AND s.status=$${params.length + 1}`; params.push(status); }
     if (search) { where += ` AND (s.submitter_name ILIKE $${params.length + 1} OR s.submitter_email ILIKE $${params.length + 1})`; params.push('%' + search + '%'); }
@@ -778,10 +778,10 @@ module.exports = function(app, pool, opts) {
   app.get('/admin/form-builder/:id/submissions/export', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const { id } = req.params;
-    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND school_id=$2`, [id, tid]);
+    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND tenant_id=$2`, [id, tid]);
     if (!form) return res.redirect('/admin/form-builder');
 
-    const { rows: submissions } = await pool.query(`SELECT * FROM form_submissions WHERE form_id=$1 AND school_id=$2 ORDER BY created_at`, [id, tid]);
+    const { rows: submissions } = await pool.query(`SELECT * FROM form_submissions WHERE form_id=$1 AND tenant_id=$2 ORDER BY created_at`, [id, tid]);
     const allKeys = new Set();
     submissions.forEach(s => {
       const r = typeof s.responses === 'object' ? s.responses : (s.responses ? JSON.parse(s.responses) : {});
@@ -806,7 +806,7 @@ module.exports = function(app, pool, opts) {
   app.get('/admin/form-builder/:id/analytics', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const { id } = req.params;
-    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND school_id=$2`, [id, tid]);
+    const { rows: [form] } = await pool.query(`SELECT * FROM custom_forms WHERE id=$1 AND tenant_id=$2`, [id, tid]);
     if (!form) return res.status(404).send('<div class="fb-empty"><div class="icon">❌</div><h3>Form not found</h3></div>');
 
     const total = (await pool.query(`SELECT COUNT(*)::int FROM form_submissions WHERE form_id=$1`, [id])).rows[0].count;
@@ -1024,9 +1024,9 @@ module.exports = function(app, pool, opts) {
     const submitterEmail = req.body.submitter_email || (req.session?.user?.email || '');
 
     await pool.query(
-      `INSERT INTO form_submissions (form_id, school_id, submitter_id, submitter_name, submitter_email, responses, ip_address, user_agent)
+      `INSERT INTO form_submissions (form_id, tenant_id, submitter_id, submitter_name, submitter_email, responses, ip_address, user_agent)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [form.id, form.school_id, req.session?.user?.id || null, submitterName, submitterEmail,
+      [form.id, form.tenant_id, req.session?.user?.id || null, submitterName, submitterEmail,
         JSON.stringify(responses), req.ip || req.connection?.remoteAddress || '', req.headers['user-agent'] || '']
     );
 
@@ -1078,7 +1078,7 @@ module.exports = function(app, pool, opts) {
     if (!tmpl) return res.redirect('/admin/form-builder/templates');
 
     const { rows } = await pool.query(
-      `INSERT INTO custom_forms (school_id, title, description, fields, theme, submit_button_text, is_active)
+      `INSERT INTO custom_forms (tenant_id, title, description, fields, theme, submit_button_text, is_active)
       VALUES ($1,$2,$3,$4,'dark','Submit',false) RETURNING id`,
       [tid, tmpl.name, tmpl.desc, JSON.stringify(tmpl.fields)]
     );

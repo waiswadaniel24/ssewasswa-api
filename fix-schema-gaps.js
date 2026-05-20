@@ -389,6 +389,65 @@ module.exports = async function (pool) {
 
     // --- Fix notifications table missing tenant_id for RLS ---
     `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+
+    // --- Fix donor_loyalty_tiers missing columns (FATAL: column "min_points" does not exist) ---
+    `ALTER TABLE donor_loyalty_tiers ADD COLUMN IF NOT EXISTS min_points INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE donor_loyalty_tiers ADD COLUMN IF NOT EXISTS max_points INTEGER`,
+    `ALTER TABLE donor_loyalty_tiers ADD COLUMN IF NOT EXISTS badge_color TEXT DEFAULT '#6b7280'`,
+    `ALTER TABLE donor_loyalty_tiers ADD COLUMN IF NOT EXISTS benefits TEXT`,
+
+    // --- Fix currency_wallets missing column (FATAL: column "currency" does not exist) ---
+    `ALTER TABLE currency_wallets ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'UGX'`,
+    `ALTER TABLE currency_wallets ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0`,
+    `ALTER TABLE currency_wallets ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+
+    // --- Fix forum_categories_pro missing sort_order ---
+    `ALTER TABLE forum_categories_pro ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0`,
+
+    // --- Fix translations missing entity_type ---
+    `ALTER TABLE translations ADD COLUMN IF NOT EXISTS entity_type TEXT DEFAULT 'general'`,
+    `ALTER TABLE translations ADD COLUMN IF NOT EXISTS entity_id INTEGER`,
+
+    // --- Fix payment_gateways missing gateway_type ---
+    `ALTER TABLE payment_gateways ADD COLUMN IF NOT EXISTS gateway_type TEXT DEFAULT 'mtn_momo'`,
+
+    // --- Fix compliance_requirements missing regulation_reference ---
+    `ALTER TABLE compliance_requirements ADD COLUMN IF NOT EXISTS regulation_reference TEXT`,
+
+    // --- Fix thank_you_templates missing subject ---
+    `ALTER TABLE thank_you_templates ADD COLUMN IF NOT EXISTS subject TEXT DEFAULT 'Thank You'`,
+
+    // --- Fix reengagement_campaigns missing target_criteria ---
+    `ALTER TABLE reengagement_campaigns ADD COLUMN IF NOT EXISTS target_criteria JSONB DEFAULT '{}'`,
+
+    // --- Fix campaign_templates missing story_template ---
+    `ALTER TABLE campaign_templates ADD COLUMN IF NOT EXISTS story_template TEXT`,
+
+    // --- Fix tip_settings missing default_percentage ---
+    `ALTER TABLE tip_settings ADD COLUMN IF NOT EXISTS default_percentage NUMERIC DEFAULT 10`,
+
+    // --- Fix currency_display_settings missing supported_currencies_json ---
+    `ALTER TABLE currency_display_settings ADD COLUMN IF NOT EXISTS supported_currencies_json JSONB DEFAULT '[]'`,
+
+    // --- Fix email_verifications missing columns ---
+    `ALTER TABLE email_verifications ADD COLUMN IF NOT EXISTS code VARCHAR(10)`,
+    `ALTER TABLE email_verifications ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '24 hours'`,
+    `ALTER TABLE email_verifications ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT false`,
+    `ALTER TABLE email_verifications ADD COLUMN IF NOT EXISTS attempts INTEGER DEFAULT 0`,
+
+    // --- Fix session manager missing expires_at ---
+    `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`,
+    `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS tenant_id INT`,
+    `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS device_type VARCHAR(20)`,
+    `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS browser VARCHAR(50)`,
+    `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS os VARCHAR(50)`,
+    `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS location VARCHAR(100)`,
+    `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS is_current BOOLEAN DEFAULT false`,
+    `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS last_activity TIMESTAMPTZ DEFAULT NOW()`,
+    // --- Fix scraped_content missing view_count ---
+    `ALTER TABLE scraped_content ADD COLUMN IF NOT EXISTS view_count INTEGER DEFAULT 0`,
+    `ALTER TABLE scraped_content ADD COLUMN IF NOT EXISTS click_count INTEGER DEFAULT 0`,
+    `ALTER TABLE scraped_content ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
   ];
 
   for (const sql of fixStatements) {

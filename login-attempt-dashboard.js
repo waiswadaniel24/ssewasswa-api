@@ -5,10 +5,10 @@
  *
  * Tables:
  *   login_attempts    (id, username, email, ip_address, user_agent, success,
- *                      fail_reason, user_id, locked, created_at, school_id)
+ *                      fail_reason, user_id, locked, created_at, tenant_id)
  *   account_lockouts  (id, user_id, username, email, ip_address, lockout_reason,
  *                      locked_at, unlocked_at, unlocked_by, is_active,
- *                      failed_attempts, school_id)
+ *                      failed_attempts, tenant_id)
  */
 
 module.exports = function (app, pool, opts) {
@@ -21,18 +21,18 @@ module.exports = function (app, pool, opts) {
         id SERIAL PRIMARY KEY, username TEXT, email TEXT, ip_address TEXT,
         user_agent TEXT, success BOOLEAN DEFAULT false, fail_reason TEXT,
         user_id INT, locked BOOLEAN DEFAULT false,
-        created_at TIMESTAMPTZ DEFAULT NOW(), school_id INT DEFAULT 1
+        created_at TIMESTAMPTZ DEFAULT NOW(), tenant_id INT DEFAULT 1
       )`);
       await pool.query(`CREATE TABLE IF NOT EXISTS account_lockouts (
         id SERIAL PRIMARY KEY, user_id INT, username TEXT, email TEXT,
         ip_address TEXT, lockout_reason TEXT,
         locked_at TIMESTAMPTZ DEFAULT NOW(), unlocked_at TIMESTAMPTZ,
         unlocked_by INT, is_active BOOLEAN DEFAULT true,
-        failed_attempts INT DEFAULT 0, school_id INT DEFAULT 1
+        failed_attempts INT DEFAULT 0, tenant_id INT DEFAULT 1
       )`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_la_school ON login_attempts(school_id)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_la_tenant ON login_attempts(tenant_id)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_la_created ON login_attempts(created_at)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_al_school ON account_lockouts(school_id)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_al_tenant ON account_lockouts(tenant_id)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_al_active ON account_lockouts(is_active)`);
       console.log('[LoginSecurity] Tables ready');
     } catch(e) { console.warn('[LoginSecurity] Migration:', e.message); }
@@ -60,27 +60,27 @@ module.exports = function (app, pool, opts) {
   /* ------------------------------------------------------------------ */
   app.get('/admin/login-security/', async (req, res) => {
     try {
-      const schoolId = req.user?.school_id || 1;
+      const tenantId = req.user?.tenant_id || 1;
 
       /* KPI queries */
       const [[{ total_attempts }]] = await pool.query(
-        `SELECT COUNT(*) AS total_attempts FROM login_attempts WHERE school_id = ${esc(schoolId)}`
+        `SELECT COUNT(*) AS total_attempts FROM login_attempts WHERE tenant_id = ${esc(tenantId)}`
       );
       const [[{ successful }]] = await pool.query(
-        `SELECT COUNT(*) AS successful FROM login_attempts WHERE school_id = ${esc(schoolId)} AND success = true`
+        `SELECT COUNT(*) AS successful FROM login_attempts WHERE tenant_id = ${esc(tenantId)} AND success = true`
       );
       const [[{ failed }]] = await pool.query(
-        `SELECT COUNT(*) AS failed FROM login_attempts WHERE school_id = ${esc(schoolId)} AND success = false`
+        `SELECT COUNT(*) AS failed FROM login_attempts WHERE tenant_id = ${esc(tenantId)} AND success = false`
       );
       const [[{ active_lockouts }]] = await pool.query(
-        `SELECT COUNT(*) AS active_lockouts FROM account_lockouts WHERE school_id = ${esc(schoolId)} AND is_active = true`
+        `SELECT COUNT(*) AS active_lockouts FROM account_lockouts WHERE tenant_id = ${esc(tenantId)} AND is_active = true`
       );
       const [[{ unique_ips }]] = await pool.query(
-        `SELECT COUNT(DISTINCT ip_address) AS unique_ips FROM login_attempts WHERE school_id = ${esc(schoolId)}`
+        `SELECT COUNT(DISTINCT ip_address) AS unique_ips FROM login_attempts WHERE tenant_id = ${esc(tenantId)}`
       );
       const [[{ suspicious_ips }]] = await pool.query(
         `SELECT COUNT(DISTINCT ip_address) AS suspicious_ips FROM login_attempts
-          WHERE school_id = ${esc(schoolId)} AND success = false
+          WHERE tenant_id = ${esc(tenantId)} AND success = false
           GROUP BY ip_address HAVING COUNT(*) > ${esc(securitySettings.max_failed_attempts)}`
       );
       const successRate = total_attempts > 0 ? ((successful / total_attempts) * 100).toFixed(1) : '100.0';
@@ -92,28 +92,28 @@ module.exports = function (app, pool, opts) {
                 COUNT(*) FILTER (WHERE success = true)  AS ok,
                 COUNT(*) FILTER (WHERE success = false) AS fail
            FROM login_attempts
-          WHERE school_id = ${esc(schoolId)}
+          WHERE tenant_id = ${esc(tenantId)}
             AND created_at > NOW() - INTERVAL '24 hours'
           GROUP BY hr ORDER BY hr`
       );
 
       /* Recent 10 attempts */
       const [recent] = await pool.query(
-        `SELECT * FROM login_attempts WHERE school_id = ${esc(schoolId)}
+        `SELECT * FROM login_attempts WHERE tenant_id = ${esc(tenantId)}
           ORDER BY created_at DESC LIMIT 10`
       );
 
       /* Top 5 fail reasons */
       const [reasons] = await pool.query(
         `SELECT fail_reason, COUNT(*) AS cnt FROM login_attempts
-          WHERE school_id = ${esc(schoolId)} AND success = false AND fail_reason IS NOT NULL
+          WHERE tenant_id = ${esc(tenantId)} AND success = false AND fail_reason IS NOT NULL
           GROUP BY fail_reason ORDER BY cnt DESC LIMIT 5`
       );
 
       /* Top 5 IPs by failed attempts */
       const [topIPs] = await pool.query(
         `SELECT ip_address, COUNT(*) AS cnt FROM login_attempts
-          WHERE school_id = ${esc(schoolId)} AND success = false AND ip_address IS NOT NULL
+          WHERE tenant_id = ${esc(tenantId)} AND success = false AND ip_address IS NOT NULL
           GROUP BY ip_address ORDER BY cnt DESC LIMIT 5`
       );
 
@@ -279,10 +279,10 @@ module.exports = function (app, pool, opts) {
   /* ------------------------------------------------------------------ */
   app.get('/admin/login-security/data', async (req, res) => {
     try {
-      const schoolId = req.user?.school_id || 1;
+      const tenantId = req.user?.tenant_id || 1;
       const { page = 1, limit = 50, success, username, ip_address, from, to } = req.query;
       const offset = (page - 1) * limit;
-      let where = `WHERE school_id = ${esc(schoolId)}`;
+      let where = `WHERE tenant_id = ${esc(tenantId)}`;
       if (success !== undefined) where += ` AND success = ${esc(success === 'true')}`;
       if (username) where += ` AND username ILIKE ${esc('%' + username + '%')}`;
       if (ip_address) where += ` AND ip_address ILIKE ${esc('%' + ip_address + '%')}`;
@@ -305,9 +305,9 @@ module.exports = function (app, pool, opts) {
   /* ------------------------------------------------------------------ */
   app.get('/admin/login-security/lockouts', async (req, res) => {
     try {
-      const schoolId = req.user?.school_id || 1;
+      const tenantId = req.user?.tenant_id || 1;
       const { show_all } = req.query;
-      let where = `WHERE school_id = ${esc(schoolId)}`;
+      let where = `WHERE tenant_id = ${esc(tenantId)}`;
       if (show_all !== '1') where += ` AND is_active = true`;
 
       const [lockouts] = await pool.query(
@@ -479,7 +479,7 @@ module.exports = function (app, pool, opts) {
   /* ------------------------------------------------------------------ */
   app.get('/admin/login-security/suspicious', async (req, res) => {
     try {
-      const schoolId = req.user?.school_id || 1;
+      const tenantId = req.user?.tenant_id || 1;
       const threshold = securitySettings.max_failed_attempts;
 
       /* Suspicious IPs (>5 failed attempts) */
@@ -491,7 +491,7 @@ module.exports = function (app, pool, opts) {
                 COUNT(DISTINCT username) AS users_targeted,
                 BOOL_OR(locked) AS has_locked_account
            FROM login_attempts
-          WHERE school_id = ${esc(schoolId)} AND success = false AND ip_address IS NOT NULL
+          WHERE tenant_id = ${esc(tenantId)} AND success = false AND ip_address IS NOT NULL
           GROUP BY ip_address
          HAVING COUNT(*) > ${esc(threshold)}
           ORDER BY fail_count DESC`
@@ -505,7 +505,7 @@ module.exports = function (app, pool, opts) {
                 COUNT(DISTINCT ip_address) AS ips_used,
                 BOOL_OR(locked) AS is_locked
            FROM login_attempts
-          WHERE school_id = ${esc(schoolId)} AND success = false AND username IS NOT NULL
+          WHERE tenant_id = ${esc(tenantId)} AND success = false AND username IS NOT NULL
           GROUP BY username, email
          HAVING COUNT(*) > ${esc(threshold)}
           ORDER BY fail_count DESC`
@@ -612,14 +612,14 @@ module.exports = function (app, pool, opts) {
   /* ------------------------------------------------------------------ */
   app.get('/admin/login-security/stats', async (req, res) => {
     try {
-      const schoolId = req.user?.school_id || 1;
+      const tenantId = req.user?.tenant_id || 1;
 
       /* Success vs failure totals */
       const [[totals]] = await pool.query(
         `SELECT COUNT(*) AS total,
                 COUNT(*) FILTER (WHERE success = true)  AS successes,
                 COUNT(*) FILTER (WHERE success = false) AS failures
-           FROM login_attempts WHERE school_id = ${esc(schoolId)}`
+           FROM login_attempts WHERE tenant_id = ${esc(tenantId)}`
       );
 
       /* Daily trend (last 30 days) */
@@ -629,7 +629,7 @@ module.exports = function (app, pool, opts) {
                 COUNT(*) FILTER (WHERE success = true)  AS ok,
                 COUNT(*) FILTER (WHERE success = false) AS fail
            FROM login_attempts
-          WHERE school_id = ${esc(schoolId)} AND created_at > NOW() - INTERVAL '30 days'
+          WHERE tenant_id = ${esc(tenantId)} AND created_at > NOW() - INTERVAL '30 days'
           GROUP BY day ORDER BY day`
       );
 
@@ -637,7 +637,7 @@ module.exports = function (app, pool, opts) {
       const [peakHours] = await pool.query(
         `SELECT EXTRACT(HOUR FROM created_at)::int AS hr,
                 COUNT(*) AS cnt
-           FROM login_attempts WHERE school_id = ${esc(schoolId)}
+           FROM login_attempts WHERE tenant_id = ${esc(tenantId)}
           GROUP BY hr ORDER BY cnt DESC LIMIT 10`
       );
 
@@ -646,7 +646,7 @@ module.exports = function (app, pool, opts) {
         `SELECT EXTRACT(DOW FROM created_at)::int AS dow,
                 COUNT(*) AS cnt,
                 COUNT(*) FILTER (WHERE success = false) AS fail_cnt
-           FROM login_attempts WHERE school_id = ${esc(schoolId)}
+           FROM login_attempts WHERE tenant_id = ${esc(tenantId)}
           GROUP BY dow ORDER BY dow`
       );
 
@@ -654,13 +654,13 @@ module.exports = function (app, pool, opts) {
       const [[{ weekly_active }]] = await pool.query(
         `SELECT COUNT(DISTINCT COALESCE(username, email)) AS weekly_active
            FROM login_attempts
-          WHERE school_id = ${esc(schoolId)} AND success = true AND created_at > NOW() - INTERVAL '7 days'`
+          WHERE tenant_id = ${esc(tenantId)} AND success = true AND created_at > NOW() - INTERVAL '7 days'`
       );
 
       const [[{ monthly_active }]] = await pool.query(
         `SELECT COUNT(DISTINCT COALESCE(username, email)) AS monthly_active
            FROM login_attempts
-          WHERE school_id = ${esc(schoolId)} AND success = true AND created_at > NOW() - INTERVAL '30 days'`
+          WHERE tenant_id = ${esc(tenantId)} AND success = true AND created_at > NOW() - INTERVAL '30 days'`
       );
 
       res.send(opts.renderPage('Login Statistics', `
@@ -790,9 +790,9 @@ module.exports = function (app, pool, opts) {
   /* ------------------------------------------------------------------ */
   app.get('/admin/login-security/export', async (req, res) => {
     try {
-      const schoolId = req.user?.school_id || 1;
+      const tenantId = req.user?.tenant_id || 1;
       const { from, to, success, username, format } = req.query;
-      let where = `WHERE school_id = ${esc(schoolId)}`;
+      let where = `WHERE tenant_id = ${esc(tenantId)}`;
       if (from) where += ` AND created_at >= ${esc(from)}`;
       if (to) where += ` AND created_at <= ${esc(to)}`;
       if (success !== undefined) where += ` AND success = ${esc(success === 'true')}`;
@@ -800,7 +800,7 @@ module.exports = function (app, pool, opts) {
 
       const [rows] = await pool.query(
         `SELECT id, username, email, ip_address, user_agent, success, fail_reason,
-                user_id, locked, created_at, school_id
+                user_id, locked, created_at, tenant_id
            FROM login_attempts ${where} ORDER BY created_at DESC LIMIT 100000`
       );
 
@@ -815,7 +815,7 @@ module.exports = function (app, pool, opts) {
       const csvBody = rows.map(r =>
         [r.id, csvEscape(r.username), csvEscape(r.email), csvEscape(r.ip_address),
          csvEscape(r.user_agent), r.success, csvEscape(r.fail_reason),
-         r.user_id, r.locked, r.created_at, r.school_id].join(',')
+         r.user_id, r.locked, r.created_at, r.tenant_id].join(',')
       ).join('\n');
 
       res.setHeader('Content-Type', 'text/csv');
@@ -840,18 +840,18 @@ module.exports = function (app, pool, opts) {
   app.delete('/admin/login-security/cleanup', async (req, res) => {
     try {
       const { days = 90 } = req.body;
-      const schoolId = req.user?.school_id || 1;
+      const tenantId = req.user?.tenant_id || 1;
       const retainDays = Math.max(Number(days), 1);
 
       const [delAttempts] = await pool.query(
         `DELETE FROM login_attempts
-          WHERE school_id = ${esc(schoolId)}
+          WHERE tenant_id = ${esc(tenantId)}
             AND created_at < NOW() - INTERVAL '${esc(retainDays)} days'
           RETURNING id`
       );
       const [delLockouts] = await pool.query(
         `DELETE FROM account_lockouts
-          WHERE school_id = ${esc(schoolId)}
+          WHERE tenant_id = ${esc(tenantId)}
             AND is_active = false
             AND locked_at < NOW() - INTERVAL '${esc(retainDays)} days'
           RETURNING id`
@@ -1063,8 +1063,8 @@ module.exports = function (app, pool, opts) {
       /* Optional: persist to a blocked_ips table if it exists */
       try {
         await pool.query(
-          `INSERT INTO blocked_ips (ip_address, blocked_by, blocked_at, school_id)
-           VALUES (${esc(ip)}, ${esc(req.user?.id || 1)}, NOW(), ${esc(req.user?.school_id || 1)})
+          `INSERT INTO blocked_ips (ip_address, blocked_by, blocked_at, tenant_id)
+           VALUES (${esc(ip)}, ${esc(req.user?.id || 1)}, NOW(), ${esc(req.user?.tenant_id || 1)})
            ON CONFLICT (ip_address) DO NOTHING`
         );
       } catch (_) {
@@ -1074,8 +1074,8 @@ module.exports = function (app, pool, opts) {
       /* Log the blocking action */
       try {
         await pool.query(
-          `INSERT INTO login_attempts (username, ip_address, success, fail_reason, school_id)
-           VALUES ('SYSTEM', ${esc(ip)}, false, 'IP_BLOCKED', ${esc(req.user?.school_id || 1)})`
+          `INSERT INTO login_attempts (username, ip_address, success, fail_reason, tenant_id)
+           VALUES ('SYSTEM', ${esc(ip)}, false, 'IP_BLOCKED', ${esc(req.user?.tenant_id || 1)})`
         );
       } catch (_) { /* ignore */ }
 
@@ -1096,10 +1096,10 @@ module.exports = function (app, pool, opts) {
   /* ------------------------------------------------------------------ */
   app.get('/admin/login-security/timeline', async (req, res) => {
     try {
-      const schoolId = req.user?.school_id || 1;
+      const tenantId = req.user?.tenant_id || 1;
       const { username, user_id, email } = req.query;
 
-      let where = `WHERE school_id = ${esc(schoolId)}`;
+      let where = `WHERE tenant_id = ${esc(tenantId)}`;
       if (user_id) {
         where += ` AND user_id = ${esc(user_id)}`;
       } else if (username) {
@@ -1125,8 +1125,8 @@ module.exports = function (app, pool, opts) {
 
       /* Check for active lockout */
       const lockoutWhere = summary.username
-        ? `WHERE username = ${esc(username || '')} AND school_id = ${esc(schoolId)} AND is_active = true`
-        : `WHERE user_id = ${esc(user_id)} AND school_id = ${esc(schoolId)} AND is_active = true`;
+        ? `WHERE username = ${esc(username || '')} AND tenant_id = ${esc(tenantId)} AND is_active = true`
+        : `WHERE user_id = ${esc(user_id)} AND tenant_id = ${esc(tenantId)} AND is_active = true`;
       const [activeLockout] = await pool.query(
         `SELECT * FROM account_lockouts ${lockoutWhere} LIMIT 1`
       );
@@ -1241,12 +1241,12 @@ module.exports = function (app, pool, opts) {
   /* ------------------------------------------------------------------ */
   app.get('/admin/login-security/by-ip/:ip', async (req, res) => {
     try {
-      const schoolId = req.user?.school_id || 1;
+      const tenantId = req.user?.tenant_id || 1;
       const ipAddress = req.params.ip;
 
       const [attempts] = await pool.query(
         `SELECT * FROM login_attempts
-          WHERE school_id = ${esc(schoolId)} AND ip_address = ${esc(ipAddress)}
+          WHERE tenant_id = ${esc(tenantId)} AND ip_address = ${esc(ipAddress)}
           ORDER BY created_at DESC LIMIT 500`
       );
       const [[summary]] = await pool.query(
@@ -1258,7 +1258,7 @@ module.exports = function (app, pool, opts) {
                 MIN(created_at) AS first_seen,
                 MAX(created_at) AS last_seen
            FROM login_attempts
-          WHERE school_id = ${esc(schoolId)} AND ip_address = ${esc(ipAddress)}`
+          WHERE tenant_id = ${esc(tenantId)} AND ip_address = ${esc(ipAddress)}`
       );
 
       /* User agent breakdown */
@@ -1272,7 +1272,7 @@ module.exports = function (app, pool, opts) {
                 END AS device_type,
                 COUNT(*) AS cnt
            FROM login_attempts
-          WHERE school_id = ${esc(schoolId)} AND ip_address = ${esc(ipAddress)}
+          WHERE tenant_id = ${esc(tenantId)} AND ip_address = ${esc(ipAddress)}
           GROUP BY device_type ORDER BY cnt DESC`
       );
 
@@ -1391,7 +1391,7 @@ module.exports = function (app, pool, opts) {
   /* ------------------------------------------------------------------ */
   app.get('/admin/login-security/brute-force-alerts', async (req, res) => {
     try {
-      const schoolId = req.user?.school_id || 1;
+      const tenantId = req.user?.tenant_id || 1;
       const threshold = securitySettings.brute_force_threshold;
       const windowMin = securitySettings.brute_force_window_minutes;
 
@@ -1404,7 +1404,7 @@ module.exports = function (app, pool, opts) {
                 COUNT(DISTINCT username) AS users_targeted,
                 MAX(fail_reason) AS last_reason
            FROM login_attempts
-          WHERE school_id = ${esc(schoolId)}
+          WHERE tenant_id = ${esc(tenantId)}
             AND success = false
             AND created_at > NOW() - INTERVAL '${esc(windowMin)} minutes'
             AND ip_address IS NOT NULL
@@ -1422,7 +1422,7 @@ module.exports = function (app, pool, opts) {
                 COUNT(DISTINCT ip_address) AS ips_used,
                 BOOL_OR(locked) AS is_locked
            FROM login_attempts
-          WHERE school_id = ${esc(schoolId)}
+          WHERE tenant_id = ${esc(tenantId)}
             AND success = false
             AND created_at > NOW() - INTERVAL '${esc(windowMin)} minutes'
             AND username IS NOT NULL
@@ -1434,7 +1434,7 @@ module.exports = function (app, pool, opts) {
       /* Recent lockouts created in the window */
       const [recentLockouts] = await pool.query(
         `SELECT * FROM account_lockouts
-          WHERE school_id = ${esc(schoolId)}
+          WHERE tenant_id = ${esc(tenantId)}
             AND is_active = true
             AND locked_at > NOW() - INTERVAL '${esc(windowMin)} minutes'
           ORDER BY failed_attempts DESC`
@@ -1623,20 +1623,20 @@ module.exports = function (app, pool, opts) {
      * Record a login attempt and auto-lock if threshold exceeded.
      * @returns {{ allowed: boolean, locked: boolean, lockoutId: number|null, remainingAttempts: number }}
      */
-    async recordAttempt({ username, email, ip_address, user_agent, success, fail_reason, user_id, school_id = 1 }) {
+    async recordAttempt({ username, email, ip_address, user_agent, success, fail_reason, user_id, tenant_id = 1 }) {
       /* Check if IP is blocked */
       if (isIPBlocked(ip_address)) {
         await pool.query(
-          `INSERT INTO login_attempts (username, email, ip_address, user_agent, success, fail_reason, user_id, locked, school_id)
-           VALUES (${esc(username)}, ${esc(email)}, ${esc(ip_address)}, ${esc(user_agent)}, false, 'IP_BLOCKED', ${esc(user_id || null)}, false, ${esc(school_id)})`
+          `INSERT INTO login_attempts (username, email, ip_address, user_agent, success, fail_reason, user_id, locked, tenant_id)
+           VALUES (${esc(username)}, ${esc(email)}, ${esc(ip_address)}, ${esc(user_agent)}, false, 'IP_BLOCKED', ${esc(user_id || null)}, false, ${esc(tenant_id)})`
         );
         return { allowed: false, locked: false, lockoutId: null, remainingAttempts: 0, reason: 'IP_BLOCKED' };
       }
 
       /* Insert the attempt */
       await pool.query(
-        `INSERT INTO login_attempts (username, email, ip_address, user_agent, success, fail_reason, user_id, school_id)
-         VALUES (${esc(username)}, ${esc(email)}, ${esc(ip_address)}, ${esc(user_agent)}, ${esc(success)}, ${esc(fail_reason)}, ${esc(user_id || null)}, ${esc(school_id)})`
+        `INSERT INTO login_attempts (username, email, ip_address, user_agent, success, fail_reason, user_id, tenant_id)
+         VALUES (${esc(username)}, ${esc(email)}, ${esc(ip_address)}, ${esc(user_agent)}, ${esc(success)}, ${esc(fail_reason)}, ${esc(user_id || null)}, ${esc(tenant_id)})`
       );
 
       if (success) {
@@ -1644,7 +1644,7 @@ module.exports = function (app, pool, opts) {
         if (user_id) {
           await pool.query(
             `UPDATE account_lockouts SET is_active = false, unlocked_at = NOW(), unlocked_by = NULL
-              WHERE user_id = ${esc(user_id)} AND is_active = true AND school_id = ${esc(school_id)}`
+              WHERE user_id = ${esc(user_id)} AND is_active = true AND tenant_id = ${esc(tenant_id)}`
           );
         }
         return { allowed: true, locked: false, lockoutId: null, remainingAttempts: securitySettings.max_failed_attempts };
@@ -1656,7 +1656,7 @@ module.exports = function (app, pool, opts) {
       if (userKey) {
         const [[{ cnt }]] = await pool.query(
           `SELECT COUNT(*) AS cnt FROM login_attempts
-            WHERE school_id = ${esc(school_id)}
+            WHERE tenant_id = ${esc(tenant_id)}
               AND (username = ${esc(userKey)} OR email = ${esc(userKey)})
               AND success = false
               AND created_at > NOW() - INTERVAL '${esc(securitySettings.lockout_duration_minutes * 2)} minutes'`
@@ -1671,7 +1671,7 @@ module.exports = function (app, pool, opts) {
         /* Check for existing active lockout */
         const [existing] = await pool.query(
           `SELECT id FROM account_lockouts
-            WHERE school_id = ${esc(school_id)}
+            WHERE tenant_id = ${esc(tenant_id)}
               AND (username = ${esc(userKey)} OR email = ${esc(userKey)})
               AND is_active = true
             LIMIT 1`
@@ -1680,9 +1680,9 @@ module.exports = function (app, pool, opts) {
         if (existing.length === 0) {
           /* Create new lockout */
           const [inserted] = await pool.query(
-            `INSERT INTO account_lockouts (user_id, username, email, ip_address, lockout_reason, failed_attempts, school_id)
+            `INSERT INTO account_lockouts (user_id, username, email, ip_address, lockout_reason, failed_attempts, tenant_id)
              VALUES (${esc(user_id || null)}, ${esc(username)}, ${esc(email)}, ${esc(ip_address)},
-                     ${esc('Exceeded max failed attempts')}, ${esc(recentFailures)}, ${esc(school_id)})
+                     ${esc('Exceeded max failed attempts')}, ${esc(recentFailures)}, ${esc(tenant_id)})
              RETURNING id`
           );
 
@@ -1690,7 +1690,7 @@ module.exports = function (app, pool, opts) {
           if (user_id) {
             await pool.query(
               `UPDATE login_attempts SET locked = true
-                WHERE user_id = ${esc(user_id)} AND school_id = ${esc(school_id)}`
+                WHERE user_id = ${esc(user_id)} AND tenant_id = ${esc(tenant_id)}`
             );
           }
 
@@ -1704,8 +1704,8 @@ module.exports = function (app, pool, opts) {
     },
 
     /** Check if a user is currently locked out */
-    async isLockedOut({ username, email, user_id, school_id = 1 }) {
-      let where = `WHERE school_id = ${esc(school_id)} AND is_active = true`;
+    async isLockedOut({ username, email, user_id, tenant_id = 1 }) {
+      let where = `WHERE tenant_id = ${esc(tenant_id)} AND is_active = true`;
       if (user_id) where += ` AND user_id = ${esc(user_id)}`;
       else if (username) where += ` AND username = ${esc(username)}`;
       else if (email) where += ` AND email = ${esc(email)}`;

@@ -274,11 +274,18 @@ module.exports = function (app, pool, opts) {
         require_mfa_for_new_device BOOLEAN DEFAULT true,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    // Performance indexes
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_us_tenant_active ON user_sessions(tenant_id, expires_at)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_us_tenant_email ON user_sessions(tenant_id, user_email)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_lh_tenant_created ON login_history(tenant_id, created_at DESC)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sl_tenant_wl ON suspicious_logins(tenant_id, is_whitelisted)`);
+    // Performance indexes (add missing columns first in case table was created by another module)
+    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`).catch(()=>{});
+    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS tenant_id INT`).catch(()=>{});
+    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS device_type VARCHAR(20)`).catch(()=>{});
+    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS browser VARCHAR(50)`).catch(()=>{});
+    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS os VARCHAR(50)`).catch(()=>{});
+    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS location VARCHAR(100)`).catch(()=>{});
+    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS last_activity TIMESTAMPTZ DEFAULT NOW()`).catch(()=>{});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_us_tenant_active ON user_sessions(tenant_id, expires_at)`).catch(()=>{});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_us_tenant_email ON user_sessions(tenant_id, user_email)`).catch(()=>{});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_lh_tenant_created ON login_history(tenant_id, created_at DESC)`).catch(()=>{});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sl_tenant_wl ON suspicious_logins(tenant_id, is_whitelisted)`).catch(()=>{});
   })().catch((err) => console.error('[session-manager] Table creation error:', err));
 
   // ===========================================================================

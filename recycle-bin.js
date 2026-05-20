@@ -281,7 +281,7 @@ module.exports = function(app, pool, opts) {
       await pool.query(`
         INSERT INTO recycle_bin_settings (school_id, entity_type, retention_days, auto_purge, max_items)
         VALUES (1, $1, 30, false, 1000)
-        ON CONFLICT (school_id, entity_type) DO NOTHING)
+        ON CONFLICT (school_id, entity_type) DO NOTHING
       `, [et.type]);
     }
     console.log('[recycle-bin] Tables & settings ready');
