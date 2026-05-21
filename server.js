@@ -41468,6 +41468,77 @@ try { const m = require('./monitoring-analytics-dashboard'); m(app, pool, _newMo
 // Governance Dashboard — policies, compliance, data governance, workflows, user assistance
 try { const m = require('./governance-dashboard'); m(app, pool, _newModOpts); console.log('[GovDash] Governance dashboard loaded — 7 tables, 19 routes'); } catch(e) { console.warn('[GovDash] Error:', e.message); }
 
+// ============================================================
+// === PHASE 6: 29 ADDITIONAL MODULES WIRING ===
+// === AI, Education, Campus, Communication, Student Life ===
+// ============================================================
+
+// --- AI & Education ---
+try { const m = require('./ai-auto-grading'); m(app, pool, _newModOpts); console.log('[AIGrading] AI auto-grading module loaded'); } catch(e) { console.warn('[AIGrading] Error:', e.message); }
+try { const m = require('./ai-lesson-plans'); m(app, pool, _newModOpts); console.log('[AILessonPlans] AI lesson plan generator loaded'); } catch(e) { console.warn('[AILessonPlans] Error:', e.message); }
+
+// --- Campus Life ---
+try { const m = require('./anti-bullying'); m(app, pool, _newModOpts); console.log('[AntiBullying] Anti-bullying module loaded'); } catch(e) { console.warn('[AntiBullying] Error:', e.message); }
+try { const m = require('./canteen-preorder'); m(app, pool, _newModOpts); console.log('[Canteen] Canteen pre-order system loaded'); } catch(e) { console.warn('[Canteen] Error:', e.message); }
+try { const m = require('./career-guidance'); m(app, pool, _newModOpts); console.log('[CareerGuidance] Career guidance module loaded'); } catch(e) { console.warn('[CareerGuidance] Error:', e.message); }
+try { const m = require('./digital-signatures'); m(app, pool, _newModOpts); console.log('[DigitalSignatures] Digital signatures module loaded'); } catch(e) { console.warn('[DigitalSignatures] Error:', e.message); }
+try { const m = require('./emergency-alerts'); m(app, pool, _newModOpts); console.log('[EmergencyAlerts] Emergency alert system loaded'); } catch(e) { console.warn('[EmergencyAlerts] Error:', e.message); }
+try { const m = require('./exam-seating'); m(app, pool, _newModOpts); console.log('[ExamSeating] Exam seating module loaded'); } catch(e) { console.warn('[ExamSeating] Error:', e.message); }
+try { const m = require('./gate-pass'); m(app, pool, _newModOpts); console.log('[GatePass] Digital gate pass module loaded'); } catch(e) { console.warn('[GatePass] Error:', e.message); }
+try { const m = require('./lost-found'); m(app, pool, _newModOpts); console.log('[LostFound] Lost & found module loaded'); } catch(e) { console.warn('[LostFound] Error:', e.message); }
+try { const m = require('./mental-health'); m(app, pool, _newModOpts); console.log('[MentalHealth] Mental health & wellness module loaded'); } catch(e) { console.warn('[MentalHealth] Error:', e.message); }
+try { const m = require('./school-elections'); m(app, pool, _newModOpts); console.log('[SchoolElections] School elections module loaded'); } catch(e) { console.warn('[SchoolElections] Error:', e.message); }
+try { const m = require('./school-merch'); m(app, pool, _newModOpts); console.log('[SchoolMerch] School merch store loaded'); } catch(e) { console.warn('[SchoolMerch] Error:', e.message); }
+try { const m = require('./smart-hostel'); m(app, pool, _newModOpts); console.log('[SmartHostel] Smart hostel module loaded'); } catch(e) { console.warn('[SmartHostel] Error:', e.message); }
+try { const m = require('./staff-performance'); m(app, pool, _newModOpts); console.log('[StaffPerf] Staff performance module loaded'); } catch(e) { console.warn('[StaffPerf] Error:', e.message); }
+try { const m = require('./student-portfolio'); m(app, pool, _newModOpts); console.log('[StudentPortfolio] Student portfolio module loaded'); } catch(e) { console.warn('[StudentPortfolio] Error:', e.message); }
+try { const m = require('./teacher-substitution'); m(app, pool, _newModOpts); console.log('[TeacherSub] Teacher substitution module loaded'); } catch(e) { console.warn('[TeacherSub] Error:', e.message); }
+try { const m = require('./uniform-shop'); m(app, pool, _newModOpts); console.log('[UniformShop] Uniform shop module loaded'); } catch(e) { console.warn('[UniformShop] Error:', e.message); }
+try { const m = require('./university-tracker'); m(app, pool, _newModOpts); console.log('[UniTracker] University application tracker loaded'); } catch(e) { console.warn('[UniTracker] Error:', e.message); }
+
+// --- Communication & Engagement ---
+try { const m = require('./parent-teacher-chat'); m(app, pool, _newModOpts); console.log('[PTChat] Parent-teacher chat module loaded'); } catch(e) { console.warn('[PTChat] Error:', e.message); }
+try { const m = require('./peer-tutoring'); m(app, pool, _newModOpts); console.log('[PeerTutoring] Peer tutoring module loaded'); } catch(e) { console.warn('[PeerTutoring] Error:', e.message); }
+try { const m = require('./referral-rewards'); m(app, pool, _newModOpts); console.log('[ReferralRewards] Referral rewards module loaded'); } catch(e) { console.warn('[ReferralRewards] Error:', e.message); }
+try { const m = require('./gamification-engine'); m(app, pool, _newModOpts); console.log('[Gamification] Gamification engine loaded'); } catch(e) { console.warn('[Gamification] Error:', e.message); }
+
+// --- Email Digest (custom signature: app, pool, requireAuth, ah, esc, renderPage, audit, notify, sendEmail, logger) ---
+try { const m = require('./email-digest'); m(app, pool, requireAuth, ah, esc, renderPage, audit, notify, sendEmail, logger); console.log('[EmailDigest] Email digest system loaded'); } catch(e) { console.warn('[EmailDigest] Error:', e.message); }
+
+// --- Self-Executing Modules (use global.app, global.pool bridge) ---
+loadSelfExec('migrate', 'Migrate');
+loadSelfExec('school-v18-upgrade', 'V18Upgrade');
+loadSelfExec('school-v18-b', 'V18B');
+loadSelfExec('v14-v17-routes', 'V14V17Routes');
+loadSelfExec('worker', 'Worker');
+
+console.log('[Phase6] 29 additional modules wired — 24 function-export + 5 self-exec');
+
+// ============================================================
+// === 3-TIER ARCHITECTURE MODULES (Hub → B2B → Engagement) ==
+// ============================================================
+
+// --- TIER 1: OPEN HUB (Public Marketplace & Discovery) ---
+try { const m = require('./hub-routes'); m(app, pool, _newModOpts); console.log('[Hub] Open Hub marketplace loaded'); } catch(e) { console.warn('[Hub] Error:', e.message); }
+try { const m = require('./content-aggregation-routes'); m(app, pool, _newModOpts); console.log('[ContentAgg] iPaaS content aggregation loaded'); } catch(e) { console.warn('[ContentAgg] Error:', e.message); }
+try { const m = require('./navigation-routes'); m(app, pool, _newModOpts); console.log('[Nav] Unified navigation system loaded'); } catch(e) { console.warn('[Nav] Error:', e.message); }
+try { const m = require('./pricing-routes'); m(app, pool, _newModOpts); console.log('[Pricing] Plans & pricing module loaded'); } catch(e) { console.warn('[Pricing] Error:', e.message); }
+
+// --- TIER 2: B2B TENANT PORTALS (Unified SSO + Subdomains + Onboarding) ---
+try { const m = require('./sso-auth'); m(app, pool, _newModOpts); console.log('[SSO] Unified single sign-on loaded — 5 tables, 10 routes'); } catch(e) { console.warn('[SSO] Error:', e.message); }
+try { const m = require('./mfa-routes'); m(app, pool, _newModOpts); console.log('[MFA] Multi-method MFA routes loaded — 4 tables, 12 routes'); } catch(e) { console.warn('[MFA] Error:', e.message); }
+try { const m = require('./onboarding-routes'); m(app, pool, _newModOpts); console.log('[Onboarding] Tenant onboarding wizard loaded'); } catch(e) { console.warn('[Onboarding] Error:', e.message); }
+try { const m = require('./subdomain-routes'); m(app, pool, _newModOpts); console.log('[Subdomain] Custom subdomain & branding loaded'); } catch(e) { console.warn('[Subdomain] Error:', e.message); }
+try { const m = require('./financial-suite-routes'); m(app, pool, _newModOpts); console.log('[FinSuite] Financial suite loaded — 5 tables, 11 routes'); } catch(e) { console.warn('[FinSuite] Error:', e.message); }
+try { const m = require('./communication-hub-routes'); m(app, pool, _newModOpts); console.log('[CommsHub] Communication hub loaded — 6 tables, 15 routes'); } catch(e) { console.warn('[CommsHub] Error:', e.message); }
+try { const m = require('./dev-portal-routes'); m(app, pool, _newModOpts); console.log('[DevPortal] Developer portal loaded — 4 tables, 12 routes'); } catch(e) { console.warn('[DevPortal] Error:', e.message); }
+try { const m = require('./analytics-routes'); m(app, pool, _newModOpts); console.log('[Analytics] Analytics engine loaded — 4 tables, 11 routes'); } catch(e) { console.warn('[Analytics] Error:', e.message); }
+
+// --- TIER 3: ENGAGEMENT HUB (B2C Members + Unified Fundraising) ---
+try { const m = require('./engagement-hub-routes'); m(app, pool, _newModOpts); console.log('[EngagementHub] B2C engagement hub loaded — 4 tables, 7 routes'); } catch(e) { console.warn('[EngagementHub] Error:', e.message); }
+try { const m = require('./fundraising-unified-routes'); m(app, pool, _newModOpts); console.log('[FundUnified] Unified fundraising loaded — 5 tables, 14 routes'); } catch(e) { console.warn('[FundUnified] Error:', e.message); }
+
+console.log('[3Tier] 14 architecture modules loaded — Hub/B2B/Engagement tiers complete');
 console.log('[Deferred] All deferred modules loaded successfully');
 }; // end _deferModules
 
@@ -41480,6 +41551,23 @@ console.log('[Phase4] 27 additional feature modules deferred — will load 2s af
 // === REFERRAL & INVITE SYSTEM — Invite & Earn, Growth Loop ===
 // ============================================================
 ['referral_codes', 'referral_signups', 'referral_rewards'].forEach(t => VALID_TABLES.add(t));
+
+// 3-Tier Architecture tables
+['hub_public_profiles','hub_categories','hub_reviews','hub_search_log',
+ 'engagement_communities','engagement_members','engagement_posts','engagement_events_hub',
+ 'nav_favorites','nav_recent',
+ 'sso_sessions','sso_login_log','sso_password_resets','sso_email_verifications','sso_portal_access',
+ 'mfa_sms_codes','mfa_email_codes','mfa_recovery_requests','mfa_user_preferences',
+ 'onboarding_progress','onboarding_invitations','onboarding_settings',
+ 'pricing_plans','pricing_subscriptions','pricing_usage','pricing_invoices','pricing_enterprise_requests',
+ 'subdomain_config','subdomain_branding','subdomain_domain_verification',
+ 'fin_invoices','fin_invoice_items','fin_expenses','fin_transactions','fin_categories',
+ 'comms_messages','comms_sms_log','comms_sms_templates','comms_email_log','comms_notifications','comms_announcements',
+ 'content_sources','content_sync_queue','content_sync_log','content_published',
+ 'analytics_events','analytics_daily','analytics_funnels','analytics_saved_reports',
+ 'dev_api_keys','dev_webhooks','dev_webhook_deliveries','dev_api_usage',
+ 'fr_campaigns','fr_donations','fr_donors','fr_recurring','fr_goals'
+].forEach(t => VALID_TABLES.add(t));
 try {
   const m = require('./referral-system');
   m(app, pool, requireAuth, ah, esc, renderPage, audit, notify, sendEmail, logger);
