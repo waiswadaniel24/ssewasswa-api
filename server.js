@@ -244,8 +244,16 @@ if (process.env.SENTRY_DSN) {
 const app = express();
 const { createPool } = require('./db');
 const MigrationQueue = require('./migration-queue');
+const createJWTAuth = require('./jwt-auth');
 
 const pool = createPool(); // Uses shared db.js: max=20, connectionTimeout=60s
+
+// JWT Authentication System (alongside existing session auth)
+let jwtAuth;
+try {
+  jwtAuth = createJWTAuth(pool, PLATFORM_CONFIG);
+  createJWTAuth.ensureTable(pool).then(() => console.log('[JWT] Refresh token table ready')).catch(e => console.warn('[JWT] Migration error:', e.message));
+} catch(e) { console.warn('[JWT] Failed to initialize:', e.message); }
 
 // === MIGRATION QUEUE (prevents connection pool exhaustion on startup) ===
 // Modules register their DB migrations with the queue instead of running them immediately.
@@ -3152,6 +3160,11 @@ const renderPage = (title, content, user, csrfTokenOrReq) => {
   const lang = user?.language || 'en';
   const siteName = platformSettings?.site_name || 'Comfort';
   const siteDesc = platformSettings?.site_tagline || 'The Operating System for African Institutions';
+  // Portal type for navigation awareness
+  const uTenantType = user?.tenant_type || '';
+  const validNavTypes = ['school','church','organization','health','business','individual'];
+  const uPortalType = validNavTypes.includes(uTenantType) ? uTenantType : '';
+  const uPortalHref = uPortalType ? '/portal/' + uPortalType : '/dashboard';
   // Resolve branding from either req.session.tenantBranding or user._branding
   const branding = (typeof csrfTokenOrReq === 'object' && csrfTokenOrReq?.session?.tenantBranding)
     || user?._branding
@@ -3584,19 +3597,71 @@ ${user && user._trial_days && user._trial_days > 0 ? `<div id="trial-banner" sty
           </div>
         </div>
       </div>
-      <a href="/dashboard">${esc(uiT('nav.dashboard'))}</a>
+      <a href="${uPortalHref}">${esc(uiT('nav.dashboard'))}</a>
       <a href="/admin/overview" style="font-size:12px;font-weight:600;color:var(--accent)">&#9878; Admin KPI</a>
       <div class="dd" id="ddModules">
         <button class="dd-btn" onclick="toggleDD('ddModules')">${esc(uiT('nav.modules'))} <span class="dd-arrow">▾</span></button>
         <div class="dd-menu">
-          <div class="dd-header">Modules</div>
+          ${uPortalType === 'school' ? `
+            <div class="dd-header">School Modules</div>
+            <a href="/school/students"><span class="dd-icon">🎓</span><span class="dd-label">Students</span></a>
+            <a href="/school/fees"><span class="dd-icon">💰</span><span class="dd-label">Fees</span></a>
+            <a href="/school/exams"><span class="dd-icon">📝</span><span class="dd-label">Exams</span></a>
+            <a href="/school/attendance"><span class="dd-icon">📋</span><span class="dd-label">Attendance</span></a>
+            <a href="/school/timetable"><span class="dd-icon">📅</span><span class="dd-label">Timetable</span></a>
+            <a href="/school/staff"><span class="dd-icon">👨‍🏫</span><span class="dd-label">Staff</span></a>
+            <a href="/school/grading"><span class="dd-icon">📊</span><span class="dd-label">Grading</span></a>
+            <a href="/school/report-cards"><span class="dd-icon">📑</span><span class="dd-label">Report Cards</span></a>
+          ` : uPortalType === 'church' ? `
+            <div class="dd-header">Church Modules</div>
+            <a href="/church/members"><span class="dd-icon">👥</span><span class="dd-label">Members</span></a>
+            <a href="/church/tithes"><span class="dd-icon">💰</span><span class="dd-label">Tithes & Offerings</span></a>
+            <a href="/church/sermons"><span class="dd-icon">📖</span><span class="dd-label">Sermons</span></a>
+            <a href="/church/events"><span class="dd-icon">📅</span><span class="dd-label">Events</span></a>
+            <a href="/church/groups"><span class="dd-icon">🤝</span><span class="dd-label">Small Groups</span></a>
+            <a href="/church/giving"><span class="dd-icon">💝</span><span class="dd-label">Online Giving</span></a>
+          ` : uPortalType === 'business' ? `
+            <div class="dd-header">Business Modules</div>
+            <a href="/business/pos"><span class="dd-icon">🛒</span><span class="dd-label">Point of Sale</span></a>
+            <a href="/business/invoices"><span class="dd-icon">🧾</span><span class="dd-label">Invoices</span></a>
+            <a href="/business/payroll"><span class="dd-icon">💵</span><span class="dd-label">Payroll</span></a>
+            <a href="/inventory"><span class="dd-icon">📦</span><span class="dd-label">Inventory</span></a>
+            <a href="/business/expenses"><span class="dd-icon">📉</span><span class="dd-label">Expenses</span></a>
+            <a href="/business/customers"><span class="dd-icon">🧑‍🤝‍🧑</span><span class="dd-label">Customers</span></a>
+            <a href="/business/reports"><span class="dd-icon">📊</span><span class="dd-label">Reports</span></a>
+          ` : uPortalType === 'health' ? `
+            <div class="dd-header">Health Modules</div>
+            <a href="/clinic/patients"><span class="dd-icon">🏥</span><span class="dd-label">Patients</span></a>
+            <a href="/clinic/appointments"><span class="dd-icon">📅</span><span class="dd-label">Appointments</span></a>
+            <a href="/clinic/prescriptions"><span class="dd-icon">💊</span><span class="dd-label">Prescriptions</span></a>
+            <a href="/clinic/lab"><span class="dd-icon">🔬</span><span class="dd-label">Lab Results</span></a>
+            <a href="/clinic/payments"><span class="dd-icon">💳</span><span class="dd-label">Payments</span></a>
+            <a href="/clinic/staff"><span class="dd-icon">👨‍⚕️</span><span class="dd-label">Staff</span></a>
+          ` : uPortalType === 'organization' ? `
+            <div class="dd-header">Organization Modules</div>
+            <a href="/organization/projects"><span class="dd-icon">📋</span><span class="dd-label">Projects</span></a>
+            <a href="/organization/members"><span class="dd-icon">👥</span><span class="dd-label">Members</span></a>
+            <a href="/documents"><span class="dd-icon">📄</span><span class="dd-label">Documents</span></a>
+            <a href="/organization/meetings"><span class="dd-icon">🤝</span><span class="dd-label">Meetings</span></a>
+            <a href="/organization/donors"><span class="dd-icon">💝</span><span class="dd-label">Donors</span></a>
+            <a href="/organization/reports"><span class="dd-icon">📊</span><span class="dd-label">Reports</span></a>
+          ` : uPortalType === 'individual' ? `
+            <div class="dd-header">Personal Modules</div>
+            <a href="/individual/notes"><span class="dd-icon">📝</span><span class="dd-label">Notes</span></a>
+            <a href="/individual/goals"><span class="dd-icon">🎯</span><span class="dd-label">Goals</span></a>
+            <a href="/individual/finance"><span class="dd-icon">💰</span><span class="dd-label">Finance</span></a>
+            <a href="/tasks"><span class="dd-icon">✅</span><span class="dd-label">Tasks</span></a>
+            <a href="/individual/calendar"><span class="dd-icon">📅</span><span class="dd-label">Calendar</span></a>
+            <a href="/individual/contacts"><span class="dd-icon">📇</span><span class="dd-label">Contacts</span></a>
+          ` : `
+            <div class="dd-header">Set Up Your Portal</div>
+            <a href="/switch-portal"><span class="dd-icon">🌍</span><span class="dd-label">Choose Portal Type</span></a>
+          `}
+          <div class="dd-divider"></div>
+          <div class="dd-header">Shared</div>
           <a href="/hr"><span class="dd-icon">👥</span><span class="dd-label">${esc(uiT('mod.hr'))}</span></a>
           <a href="/bookings"><span class="dd-icon">📅</span><span class="dd-label">${esc(uiT('mod.bookings'))}</span></a>
-          <a href="/procurement"><span class="dd-icon">🛒</span><span class="dd-label">${esc(uiT('mod.procurement'))}</span></a>
-          <a href="/incidents"><span class="dd-icon">🚨</span><span class="dd-label">${esc(uiT('mod.incidents'))}</span></a>
-          <a href="/fleet"><span class="dd-icon">🚗</span><span class="dd-label">${esc(uiT('mod.fleet'))}</span></a>
           <a href="/tickets"><span class="dd-icon">🎫</span><span class="dd-label">${esc(uiT('mod.tickets'))}</span></a>
-          <a href="/kb"><span class="dd-icon">📚</span><span class="dd-label">${esc(uiT('mod.kb'))}</span></a>
           ${user && (user.role === 'admin' || user.role === 'super_admin') ? '<div class="dd-divider"></div><div class="dd-header">Admin</div><a href="/rbac"><span class="dd-icon">🛡️</span><span class="dd-label">Roles & Permissions</span></a>' : ''}
         </div>
       </div>
@@ -3636,7 +3701,7 @@ ${user && user._trial_days && user._trial_days > 0 ? `<div id="trial-banner" sty
 </nav>
 <main id="main" role="main"><div class="container">${safeContent}</div></main>
 ${user ? `<div style="max-width:1240px;margin:-10px auto 10px;padding:0 24px"><div class="dash-search"><span class="search-icon">&#128269;</span><input type="text" id="dashModuleSearch" placeholder="Search modules... (press / to focus)" autocomplete="off"><span class="search-count" id="dashSearchCount"></span></div></div>` : ''}
-${user ? `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;left:0;right:0;background:${dark ? 'rgba(15,20,40,0.9)' : 'rgba(255,255,255,0.9)'};backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};padding:6px 0 8px;z-index:1000;justify-content:space-around"><a href="/" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🏠</span>Home</a><a href="/dashboard" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">📊</span>Dashboard</a><a href="/search" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🔍</span>Search</a><a href="/notifications" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🔔</span>Alerts</a><a href="/logout" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:#ef4444;text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🚪</span>Logout</a></nav>` : `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;left:0;right:0;background:${dark ? 'rgba(15,20,40,0.9)' : 'rgba(255,255,255,0.9)'};backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};padding:6px 0 8px;z-index:1000;justify-content:space-around"><a href="/" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🏠</span>Home</a><a href="/login" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--primary);text-decoration:none;padding:4px 8px;border-radius:8px;font-weight:600;transition:all 0.2s"><span style="font-size:20px">🔑</span>Login</a><a href="/register" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--success);text-decoration:none;padding:4px 8px;border-radius:8px;font-weight:600;transition:all 0.2s"><span style="font-size:20px">✨</span>Register</a></nav>`}
+${user ? `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;left:0;right:0;background:${dark ? 'rgba(15,20,40,0.9)' : 'rgba(255,255,255,0.9)'};backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};padding:6px 0 8px;z-index:1000;justify-content:space-around"><a href="/" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🏠</span>Home</a><a href="${uPortalHref}" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">📊</span>Dashboard</a><a href="/search" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🔍</span>Search</a><a href="/notifications" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🔔</span>Alerts</a><a href="/logout" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:#ef4444;text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🚪</span>Logout</a></nav>` : `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;left:0;right:0;background:${dark ? 'rgba(15,20,40,0.9)' : 'rgba(255,255,255,0.9)'};backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};padding:6px 0 8px;z-index:1000;justify-content:space-around"><a href="/" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--text-muted);text-decoration:none;padding:4px 8px;border-radius:8px;transition:all 0.2s"><span style="font-size:20px">🏠</span>Home</a><a href="/login" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--primary);text-decoration:none;padding:4px 8px;border-radius:8px;font-weight:600;transition:all 0.2s"><span style="font-size:20px">🔑</span>Login</a><a href="/register" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--success);text-decoration:none;padding:4px 8px;border-radius:8px;font-weight:600;transition:all 0.2s"><span style="font-size:20px">✨</span>Register</a></nav>`}
 <footer style="background:${dark ? '#0c1222' : '#eef2ff'};padding:48px 24px 24px;margin-top:60px;border-top:1px solid ${dark ? '#1e2d4a' : '#e0e7ff'}">
   <div style="max-width:1240px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:32px">
     <div><strong style="font-size:18px;background:linear-gradient(135deg,var(--primary),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">${esc(platformSettings.site_name)}</strong><p class="muted" style="margin-top:8px;line-height:1.7">${esc(platformSettings.site_tagline)}<br>${esc(uiT('footer.tagline'))}</p></div>
@@ -3946,7 +4011,10 @@ app.post('/login', validate({ email: { required: true, email: true }, password: 
   }
   req.session.user = u;
   await audit(email, 'login', 'User logged in', u.tenant_id, req);
-  res.redirect('/dashboard');
+  // Redirect to the user's actual portal, not the picker
+  const portalType = u.tenant_type || 'school';
+  const validTypes = ['school','church','organization','health','business','individual','public'];
+  res.redirect('/portal/' + (validTypes.includes(portalType) ? portalType : 'school'));
 }));
 
 app.get('/login/2fa', (req, res) => {
@@ -4015,7 +4083,9 @@ app.post('/login/2fa', ah(async (req, res) => {
   delete req.session._pending2FA;
   req.session.user = user;
   await audit(pendingEmail, 'login', 'User logged in with 2FA', user?.tenant_id, req);
-  res.redirect('/dashboard');
+  const portalType2FA = req.session.user?.tenant_type || 'school';
+  const validTypes2FA = ['school','church','organization','health','business','individual','public'];
+  res.redirect('/portal/' + (validTypes2FA.includes(portalType2FA) ? portalType2FA : 'school'));
 }));
 
 app.get('/register', (req, res) => {
@@ -4428,6 +4498,14 @@ app.get('/dashboard', requireAuth, (req, res) => {
     return res.redirect(`/portal/${tenantType}`);
   }
   if (u.role === 'super_admin') return res.redirect('/dev/master');
+
+  // Auto-redirect to user's portal if they have one (skip the picker)
+  if (u.tenant_type && u.tenant_type !== 'public') {
+    const validPortalTypes = ['school','church','organization','health','business','individual'];
+    if (validPortalTypes.includes(u.tenant_type)) {
+      return res.redirect('/portal/' + u.tenant_type);
+    }
+  }
 
   // Show beautiful portal picker instead of auto-redirecting
   const currentType = u.tenant_type || 'school';
@@ -41116,7 +41194,7 @@ try { const m = require('./multi-branch'); m(app, pool, _newModOpts); console.lo
 const _scopeBridge = {
   app, pool, db, ah, esc, renderPage, requireAuth, requireNotBanned,
   requireSuperAdmin, audit, notify, notifyAll, sendEmail, sendSMS, migrations,
-  VALID_TABLES, requestMtnPayment
+  VALID_TABLES, requestMtnPayment, jwtAuth
 };
 
 // Cross-module functions: populated by modules when they load
@@ -41566,7 +41644,8 @@ console.log('[Phase4] 27 additional feature modules deferred — will load 2s af
  'content_sources','content_sync_queue','content_sync_log','content_published',
  'analytics_events','analytics_daily','analytics_funnels','analytics_saved_reports',
  'dev_api_keys','dev_webhooks','dev_webhook_deliveries','dev_api_usage',
- 'fr_campaigns','fr_donations','fr_donors','fr_recurring','fr_goals'
+ 'fr_campaigns','fr_donations','fr_donors','fr_recurring','fr_goals',
+ 'jwt_refresh_tokens'
 ].forEach(t => VALID_TABLES.add(t));
 try {
   const m = require('./referral-system');
