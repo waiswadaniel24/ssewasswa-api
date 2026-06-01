@@ -18,6 +18,12 @@
 const { Pool } = require('pg');
 
 function createPool(connectionString = process.env.DATABASE_URL, overrides = {}) {
+  // Strip sslmode from URL to prevent pg deprecation warning
+  // ("sslmode=require is treated as alias for verify-full").
+  // We set ssl config explicitly below, so the URL param is redundant.
+  if (connectionString) {
+    connectionString = connectionString.replace(/[?&]sslmode=[^&]*/g, '').replace(/\?$/, '');
+  }
   const config = {
     connectionString,
     ssl: { rejectUnauthorized: false },

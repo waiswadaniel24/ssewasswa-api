@@ -1199,9 +1199,12 @@ const checkPlanLimit = async (tenantId, table, userRole) => {
   return { plan, limit, count: parseInt(count), allowed: parseInt(count) < limit };
 };
 const requirePlanLimit = (table) => async (req, res, next) => {
-  if (req.session.user?.role === 'super_admin') return next();
-  const check = await checkPlanLimit(req.session.user.tenant_id, table);
-  if (!check.allowed) return res.send(renderPage('Plan Limit', `<div class="card"><div class="alert alert-error"><h2>Plan Limit Reached</h2><p>You have ${check.count} records on the ${check.plan} plan (limit: ${check.limit}).</p><p>Upgrade to add more records.</p></div><a href="/billing" class="btn btn-gold">Upgrade Plan</a></div>`, req.session.user));
+  try {
+    if (!req.session.user) return next();
+    if (req.session.user.role === 'super_admin') return next();
+    const check = await checkPlanLimit(req.session.user.tenant_id, table);
+    if (!check.allowed) return res.send(renderPage('Plan Limit', `<div class="card"><div class="alert alert-error"><h2>Plan Limit Reached</h2><p>You have ${check.count} records on the ${check.plan} plan (limit: ${check.limit}).</p><p>Upgrade to add more records.</p></div><a href="/billing" class="btn btn-gold">Upgrade Plan</a></div>`, req.session.user));
+  } catch (e) { console.error('[requirePlanLimit]', e.message); }
   next();
 };
 
@@ -9910,10 +9913,11 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const flash = req.session.flash; delete req.session.flash;
   let logs = { rows: [] };
   try { logs = await pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 10'); } catch (e) {}
-  const [tCount, uCount, rev, wal, tenants, chartData, revBreakdown, pendingSubs, adCount, blogCount, withdrawalHistory, newUserGrowth, activeTenants, paymentStats] = await Promise.all([
+  const [tCount, uCount, rev, paymentRev, wal, tenants, chartData, revBreakdown, pendingSubs, adCount, blogCount, withdrawalHistory, newUserGrowth, activeTenants, paymentStats] = await Promise.all([
     pool.query('SELECT COUNT(*) FROM tenants'),
     pool.query('SELECT COUNT(*) FROM users'),
     pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days'`),
+    pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM payments WHERE status='completed' AND created_at>NOW()-INTERVAL '30 days'`),
     pool.query('SELECT COALESCE(balance,0) as b FROM platform_wallet WHERE id=1'),
     pool.query('SELECT id,name,type,COALESCE(wallet_balance,0) as wallet_balance,verified,subdomain,approved,banned,ban_reason FROM tenants ORDER BY id DESC LIMIT 50'),
     pool.query(`SELECT DATE(created_at) as day, SUM(amount) as total FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY day ASC`),
@@ -9923,18 +9927,18 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     pool.query('SELECT COUNT(*) FROM blog_posts'),
     pool.query('SELECT * FROM developer_revenue WHERE amount < 0 ORDER BY created_at DESC LIMIT 10'),
     pool.query(`SELECT DATE(created_at) as day, COUNT(*) as count FROM users WHERE created_at > NOW() - INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY day ASC`),
-    pool.query(`SELECT COUNT(DISTINCT tenant_id) as active FROM users WHERE created_at > NOW() - INTERVAL '7 days'`),
+    pool.query(`SELECT COUNT(DISTINCT tenant_id) as active FROM audit_logs WHERE created_at > NOW() - INTERVAL '7 days'`),
     pool.query(`SELECT COUNT(*), COALESCE(SUM(amount),0) as total FROM payments WHERE created_at > NOW() - INTERVAL '30 days'`)
   ]);
   const flashHtml = flash ? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
   const chartLabels = chartData.rows.map(r => new Date(r.day).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' })).join("','");
   const chartValues = chartData.rows.map(r => r.total).join(',');
   const balance = parseInt(wal.rows[0]?.b || 0);
-  const totalRev = parseInt(rev.rows[0].t || 0);
+  const totalRev = parseInt(rev.rows[0].t || 0) + parseInt(paymentRev.rows[0].t || 0);
   const impersonating = req.session._impersonate_tenant_id;
   const totalUsers = uCount.rows[0].count;
   const totalTenants = tCount.rows[0].count;
-  const activeUsers7d = activeTenants.rows[0].active;
+  const activeTenants7d = activeTenants.rows[0].active;
   const payments30d = paymentStats.rows[0].count;
   const payments30dTotal = parseInt(paymentStats.rows[0].total || 0);
   const activeSubs = pendingSubs.rows[0].count;
@@ -10032,7 +10036,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     <!-- Platform Metrics -->
     <div class="metric-row" style="margin-bottom:20px">
       <div class="metric-card"><div class="value" style="color:#4f46e5">${totalTenants}</div><div class="label">Tenants</div></div>
-      <div class="metric-card"><div class="value" style="color:#059669">${activeUsers7d}</div><div class="label">Active (7d)</div></div>
+      <div class="metric-card"><div class="value" style="color:#059669">${activeTenants7d}</div><div class="label">Active (7d)</div></div>
       <div class="metric-card"><div class="value" style="color:#d97706">${payments30d}</div><div class="label">Payments (30d)</div></div>
       <div class="metric-card"><div class="value" style="color:#7c3aed">${blogPosts}</div><div class="label">Blog Posts</div></div>
       <div class="metric-card"><div class="value" style="color:#ec4899">${activeAds}</div><div class="label">Active Ads</div></div>
@@ -13399,39 +13403,43 @@ app.get('/api-docs', (req, res) => {
 
 // === JSON API ROUTES (for API key access) ===
 const apiAuth = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'API key required' });
-  const key = authHeader.split(' ')[1];
-  const keyHash = crypto.createHash('sha256').update(key).digest('hex');
-  const apiKey = (await pool.query('SELECT * FROM api_keys WHERE key_hash=$1', [keyHash])).rows[0];
-  if (!apiKey) return res.status(401).json({ error: 'Invalid API key' });
-  if (apiKey.is_active === false) return res.status(403).json({ error: 'API key has been revoked' });
-  await pool.query('UPDATE api_keys SET last_used=NOW() WHERE id=$1', [apiKey.id]);
-  req.apiKey = apiKey;
-
-  // === Per-API-key rate limiting (Phase 2) ===
-  // Plan-based limits: free=60/min, basic=200/min, pro=500/min, enterprise=2000/min
   try {
-    const rateKey = `api_rate:${apiKey.id}`;
-    const now = Date.now();
-    const windowMs = 60 * 1000;
-    let record = cacheGetLocal(rateKey);
-    if (!record || now - record.startTime > windowMs) {
-      record = { count: 1, startTime: now };
-    } else {
-      record.count++;
-    }
-    const planLimits = { free: 60, basic: 200, pro: 500, enterprise: 2000 };
-    const limit = planLimits[apiKey.plan] || 60;
-    cacheSetLocal(rateKey, record, windowMs);
-    res.set('X-RateLimit-Limit', String(limit));
-    res.set('X-RateLimit-Remaining', String(Math.max(0, limit - record.count)));
-    res.set('X-RateLimit-Reset', String(Math.floor((record.startTime + windowMs) / 1000)));
-    if (record.count > limit) {
-      return res.status(429).json({ error: 'Rate limit exceeded', limit, remaining: 0, reset_at: new Date(record.startTime + windowMs).toISOString() });
-    }
-  } catch (e) { /* fail-open: rate limit check error should not block requests */ }
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'API key required' });
+    const key = authHeader.split(' ')[1];
+    const keyHash = crypto.createHash('sha256').update(key).digest('hex');
+    const apiKey = (await pool.query('SELECT * FROM api_keys WHERE key_hash=$1', [keyHash])).rows[0];
+    if (!apiKey) return res.status(401).json({ error: 'Invalid API key' });
+    if (apiKey.is_active === false) return res.status(403).json({ error: 'API key has been revoked' });
+    await pool.query('UPDATE api_keys SET last_used=NOW() WHERE id=$1', [apiKey.id]);
+    req.apiKey = apiKey;
 
+    // === Per-API-key rate limiting (Phase 2) ===
+    // Plan-based limits: free=60/min, basic=200/min, pro=500/min, enterprise=2000/min
+    try {
+      const rateKey = `api_rate:${apiKey.id}`;
+      const now = Date.now();
+      const windowMs = 60 * 1000;
+      let record = cacheGetLocal(rateKey);
+      if (!record || now - record.startTime > windowMs) {
+        record = { count: 1, startTime: now };
+      } else {
+        record.count++;
+      }
+      const planLimits = { free: 60, basic: 200, pro: 500, enterprise: 2000 };
+      const limit = planLimits[apiKey.plan] || 60;
+      cacheSetLocal(rateKey, record, windowMs);
+      res.set('X-RateLimit-Limit', String(limit));
+      res.set('X-RateLimit-Remaining', String(Math.max(0, limit - record.count)));
+      res.set('X-RateLimit-Reset', String(Math.floor((record.startTime + windowMs) / 1000)));
+      if (record.count > limit) {
+        return res.status(429).json({ error: 'Rate limit exceeded', limit, remaining: 0, reset_at: new Date(record.startTime + windowMs).toISOString() });
+      }
+    } catch (e) { /* fail-open: rate limit check error should not block requests */ }
+  } catch (e) {
+    console.error('[apiAuth]', e.message);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
   next();
 };
 
@@ -16800,16 +16808,21 @@ app.post('/business/pos/checkout', requirePlanLimit('sales'));
 // If SMS plan gating is desired, add it to the original handler at line ~8537.
 // API access - block free users
 const apiAuthWithPlan = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'API key required' });
-  const key = authHeader.split(' ')[1];
-  const keyHash = crypto.createHash('sha256').update(key).digest('hex');
-  const apiKey = (await pool.query('SELECT * FROM api_keys WHERE key_hash=$1', [keyHash])).rows[0];
-  if (!apiKey) return res.status(401).json({ error: 'Invalid API key' });
-  const check = await checkPlanLimit(apiKey.tenant_id, 'students');
-  if (check.plan === 'free') return res.status(403).json({ error: 'API access requires Basic plan or above. Upgrade at /billing' });
-  await pool.query('UPDATE api_keys SET last_used=NOW() WHERE id=$1', [apiKey.id]);
-  req.apiKey = apiKey;
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'API key required' });
+    const key = authHeader.split(' ')[1];
+    const keyHash = crypto.createHash('sha256').update(key).digest('hex');
+    const apiKey = (await pool.query('SELECT * FROM api_keys WHERE key_hash=$1', [keyHash])).rows[0];
+    if (!apiKey) return res.status(401).json({ error: 'Invalid API key' });
+    const check = await checkPlanLimit(apiKey.tenant_id, 'students');
+    if (check.plan === 'free') return res.status(403).json({ error: 'API access requires Basic plan or above. Upgrade at /billing' });
+    await pool.query('UPDATE api_keys SET last_used=NOW() WHERE id=$1', [apiKey.id]);
+    req.apiKey = apiKey;
+  } catch (e) {
+    console.error('[apiAuthWithPlan]', e.message);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
   next();
 };
 
@@ -44262,7 +44275,7 @@ app.get('/admin/overview', requireAuth, requireNotBanned, ah(async (req, res) =>
 
   // Recent payments
   const recentPayRow = await pool.query(
-    'SELECT amount, payer_name, created_at, method FROM payments WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 5', [tid]
+    'SELECT amount, description, created_at, method FROM payments WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 5', [tid]
   );
   const recentPayments = recentPayRow.rows || [];
 
@@ -44467,10 +44480,10 @@ app.get('/admin/overview', requireAuth, requireNotBanned, ah(async (req, res) =>
       </div>
       ${recentPayments.length ? `
       <table class="kpi-table">
-        <thead><tr><th>Date</th><th>Payer</th><th>Method</th><th style="text-align:right">Amount</th></tr></thead>
+        <thead><tr><th>Date</th><th>Description</th><th>Method</th><th style="text-align:right">Amount</th></tr></thead>
         <tbody>${recentPayments.map(p => `<tr>
           <td>${p.created_at ? new Date(p.created_at).toLocaleDateString() : '-'}</td>
-          <td>${esc(p.payer_name || '-')}</td>
+          <td>${esc(p.description || '-')}</td>
           <td>${esc(p.method || '-')}</td>
           <td style="text-align:right;font-weight:600">${ugx(p.amount)}</td>
         </tr>`).join('')}</tbody>
