@@ -232,4 +232,21 @@ async function _runMigrateJob(job) {
   }
 }
 
-module.exports = { createPool, Pool, queryWithRetry, runMigration, staggerMigration, migrateQuery };
+/**
+ * Returns a promise that resolves when the migrateQuery queue is fully drained.
+ * Used during startup to wait for all module migrations to finish before accepting requests.
+ */
+function waitForMigrateDrain() {
+  return new Promise(resolve => {
+    function check() {
+      if (_migrateQueue.length === 0 && _migrateRunning === 0) {
+        resolve();
+      } else {
+        setTimeout(check, 300);
+      }
+    }
+    check();
+  });
+}
+
+module.exports = { createPool, Pool, queryWithRetry, runMigration, staggerMigration, migrateQuery, waitForMigrateDrain };

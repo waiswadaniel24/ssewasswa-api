@@ -242,7 +242,7 @@ if (process.env.SENTRY_DSN) {
 }
 
 const app = express();
-const { createPool, migrateQuery } = require('./db');
+const { createPool, migrateQuery, waitForMigrateDrain } = require('./db');
 const MigrationQueue = require('./migration-queue');
 const createJWTAuth = require('./jwt-auth');
 
@@ -257,10 +257,11 @@ const _originalPoolConnect = pool.connect.bind(pool);
 const _originalConsoleWarn = console.warn.bind(console);
 const _originalConsoleError = console.error.bind(console);
 let _startupMigrationsDone = false;
-const _STARTUP_CONCURRENCY = 2; // ONLY 2 concurrent during startup — conservative
+const _STARTUP_CONCURRENCY = 5; // 5 concurrent during startup — balances speed vs pool pressure
 let _startupRunning = 0;
 let _startupQueue = [];
 let _migrationWarnCount = 0;
+let _serverReady = false; // Set to true after ALL migrations drain — gate middleware checks this
 
 // Mute migration warnings during startup to keep logs clean
 console.warn = function startupMutedWarn(...args) {
@@ -388,6 +389,24 @@ function finishStartupMigrations() {
     }
   }
   drainNext();
+}
+
+/**
+ * Returns a promise that resolves when the startup guard queue is fully drained.
+ * All queued DB queries (from module migrations) must complete before this resolves.
+ * Used to delay server.listen() until all startup migrations are done.
+ */
+function waitForStartupDrain() {
+  return new Promise(resolve => {
+    function check() {
+      if (_startupQueue.length === 0 && _startupRunning === 0) {
+        resolve();
+      } else {
+        setTimeout(check, 300);
+      }
+    }
+    check();
+  });
 }
 
 // JWT Authentication System (alongside existing session auth)
@@ -632,6 +651,32 @@ app.get('/ping', (req, res) => {
 });
 app.head('/ping', (req, res) => {
   res.status(200).end();
+});
+
+// === STARTUP GATE MIDDLEWARE ===
+// Blocks all requests until _serverReady is set to true (after all migrations drain).
+// Only allows /ping, /health, /favicon.ico, and sw.js through during startup.
+// This prevents 500 errors from DB connection exhaustion during migration phase.
+app.use((req, res, next) => {
+  if (_serverReady) return next();
+  // Allow these paths during startup
+  const allowed = ['/ping', '/health', '/favicon.ico', '/sw.js', '/manifest.json'];
+  if (allowed.some(p => req.path === p || req.path.startsWith('/_next'))) return next();
+  // Block everything else with a friendly 503 + auto-retry
+  res.status(503).set('Content-Type', 'text/html').send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Starting Up | Comfort</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f8fafc;color:#1e293b;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.container{text-align:center;max-width:500px;padding:24px}
+h1{font-size:24px;font-weight:800;margin-bottom:12px;color:#2563eb}
+p{color:#64748b;margin-bottom:20px;font-size:15px}
+.spinner{display:inline-block;width:40px;height:40px;border:3px solid #e2e8f0;border-top:3px solid #2563eb;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:16px}
+@keyframes spin{to{transform:rotate(360deg)}}</style>
+</head><body><div class="container">
+<div class="spinner"></div>
+<h1>Starting Up</h1>
+<p>Platform is initializing. This may take a moment on first load.</p>
+<script>setTimeout(function(){location.reload()},3000)</script>
+</div></body></html>`);
 });
 
 // === SESSION (must come BEFORE CSRF so req.session is available) ===
@@ -46795,10 +46840,20 @@ console.log('[SettingsSearch] API route registered — /settings/search');
 // PHASE 4 COMPLETE: All remaining gap analysis tasks implemented
 // ============================================================
 
-// === START SERVER (after all routes are registered) ===
-// === PROCESS MIGRATION QUEUE (serialize all startup DB migrations) ===
-// This runs AFTER all modules have registered their migrations with the queue.
-// Processing them sequentially prevents connection pool exhaustion.
+// === TWO-PHASE STARTUP ===
+// Phase 1: Bind port IMMEDIATELY (Render requires binding within ~60s)
+// Phase 2: Wait for all migrations to drain, then open the gate for real traffic
+// _serverReady flag is declared near top of file (line ~264) and checked by gate middleware
+
+const PORT = process.env.PORT || 10000;
+const server = require('http').createServer(app);
+server.listen(PORT, () => {
+  console.log(`[Startup] Port ${PORT} bound — running migrations before accepting traffic...`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`DB Pool: max=${pool.options?.max || 20}, timeout=${pool.options?.connectionTimeoutMillis || 60000}ms`);
+});
+
+// Now run all pending migrations and open the gate when done
 (async () => {
   try {
     const mq = app.get('migrationQueue');
@@ -46811,18 +46866,24 @@ console.log('[SettingsSearch] API route registered — /settings/search');
   } catch (e) {
     /* migration OK */
   }
+
+  // Wait for startup guard queue to fully drain
+  console.log('[Startup] Waiting for guard queue to drain...');
+  await waitForStartupDrain();
+  console.log('[Startup] Guard queue fully drained');
+
+  // Remove startup migration guard
+  finishStartupMigrations();
+
+  // Wait for migrateQuery queue to fully drain
+  console.log('[Startup] Waiting for migrateQuery queue to drain...');
+  await waitForMigrateDrain();
+  console.log('[Startup] All migrations complete — opening gate');
+
+  // OPEN THE GATE — server is now ready for real traffic
+  _serverReady = true;
+  console.log('Comfort Platform LIVE — accepting all requests');
 })();
-
-// Remove startup migration guard — all modules loaded, safe to use normal pool.query
-finishStartupMigrations();
-
-const PORT = process.env.PORT || 10000;
-const server = require('http').createServer(app);
-server.listen(PORT, () => {
-  console.log(`Comfort Platform LIVE on ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`DB Pool: max=${pool.options?.max || 20}, timeout=${pool.options?.connectionTimeoutMillis || 60000}ms`);
-});
 
 // Deploy trigger 1779091065
 // Phase 4 deploy trigger: 27 additional modules — 2026-05-18
