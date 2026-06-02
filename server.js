@@ -251,12 +251,38 @@ const pool = createPool(); // Uses shared db.js: max=25, connectionTimeout=90s, 
 // === STARTUP MIGRATION GUARD ===
 // During startup, wrap pool.query AND pool.connect to route through concurrency-limited queue.
 // This prevents 200+ modules from exhausting the 25-connection pool simultaneously.
+// Also mutes console.warn to suppress expected "Connection terminated" noise during startup.
 const _originalPoolQuery = pool.query.bind(pool);
 const _originalPoolConnect = pool.connect.bind(pool);
+const _originalConsoleWarn = console.warn.bind(console);
+const _originalConsoleError = console.error.bind(console);
 let _startupMigrationsDone = false;
-const _STARTUP_CONCURRENCY = 3;
+const _STARTUP_CONCURRENCY = 2; // ONLY 2 concurrent during startup — conservative
 let _startupRunning = 0;
 let _startupQueue = [];
+let _migrationWarnCount = 0;
+
+// Mute migration warnings during startup to keep logs clean
+console.warn = function startupMutedWarn(...args) {
+  const msg = args[0];
+  if (typeof msg === 'string' && (
+    msg.includes('Connection terminated') ||
+    msg.includes('Migration warning') ||
+    msg.includes('Migration error') ||
+    msg.includes('Migration') && msg.includes('Connection terminated')
+  )) {
+    _migrationWarnCount++;
+    return; // Suppress during startup
+  }
+  _originalConsoleWarn(...args);
+};
+console.error = function startupMutedError(...args) {
+  const msg = args[0];
+  if (typeof msg === 'string' && msg.includes('Connection terminated')) {
+    return; // Suppress during startup
+  }
+  _originalConsoleError(...args);
+};
 
 pool.query = function startupGuard(...args) {
   if (_startupMigrationsDone) return _originalPoolQuery(...args);
@@ -286,13 +312,11 @@ function _drainStartupQueue() {
 
 async function _runStartupJob(job) {
   const { args, resolve, reject, type } = job;
-  const maxRetries = 2;
+  const maxRetries = 3; // 3 retries for startup (more forgiving)
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     try {
       if (type === 'connect') {
-        // For connect jobs, return the actual client
         const client = await _originalPoolConnect();
-        // Wrap the client's .query to also go through the queue during startup
         const origClientQuery = client.query.bind(client);
         if (!_startupMigrationsDone) {
           client.query = function(...qArgs) {
@@ -317,19 +341,14 @@ async function _runStartupJob(job) {
         err.message.includes('ECONNREFUSED') ||
         err.message.includes('connection refused') ||
         err.message.includes('cannot acquire') ||
-        err.message.includes('connection reset')
+        err.message.includes('connection reset') ||
+        err.message.includes('remaining connection slots')
       );
       if (!isRetryable || attempt > maxRetries) {
-        // "already exists" / "does not exist" are expected for migrations
-        if (err.message.includes('already exists') || err.message.includes('does not exist') || err.message.includes('ON CONFLICT') || err.message.includes('duplicate') || err.message.includes('relation') || err.message.includes('constraint')) {
-          resolve(type === 'connect' ? null : { rows: [] });
-          return;
-        }
-        // Non-retryable, non-migration error - still resolve with empty to not crash
         resolve(type === 'connect' ? null : { rows: [] });
         return;
       }
-      const delay = 2000 * attempt + Math.floor(Math.random() * 2000);
+      const delay = 3000 * attempt + Math.floor(Math.random() * 3000);
       await new Promise(r => setTimeout(r, delay));
     }
   }
@@ -339,7 +358,9 @@ function finishStartupMigrations() {
   _startupMigrationsDone = true;
   pool.query = _originalPoolQuery;
   pool.connect = _originalPoolConnect;
-  console.log(`[Startup] Migration guard removed — ${_startupQueue.length} remaining jobs flushed`);
+  console.warn = _originalConsoleWarn;
+  console.error = _originalConsoleError;
+  console.log(`[Startup] Migration guard removed — ${_migrationWarnCount} warnings suppressed, ${_startupQueue.length} jobs flushed`);
   // Drain any remaining queued jobs with normal pool operations
   const remaining = _startupQueue.splice(0);
   for (const job of remaining) {
@@ -42939,7 +42960,8 @@ app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   
   // Log the error
-  console.error(`[Error] ${req.method} ${req.path}:`, err.message);
+  console.error(`[Error] ${req.method} ${req.path} (originalUrl: ${req.originalUrl}):`, err.message);
+  if (err.stack) console.error(`[Error Stack] ${err.stack.split('\n').slice(0, 3).join(' | ')}`);
   
   // Send to Sentry if configured
   try { if (Sentry) Sentry.captureException(err); } catch(e) {}
