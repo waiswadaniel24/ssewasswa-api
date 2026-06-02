@@ -56,7 +56,7 @@ module.exports = function(app, pool, requireAuth, ah, esc, renderPage, audit, no
   // Auto-run migrations
   (async () => {
     for (const m of DIGEST_MIGRATIONS) {
-      try { await pool.query(m); } catch (e) {
+      try { await migrateQuery(pool, 'EmailDigest', m); } catch (e) {
         if (!e.message.includes('already exists')) logger.warn('[Digest] Migration warning:', e.message);
       }
     }

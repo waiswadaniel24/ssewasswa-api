@@ -418,7 +418,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // Run migrations + seed per tenant
   (async () => {
     for (const q of migrations) {
-      try { await pool.query(q); } catch(e) {}
+      try { await migrateQuery(pool, 'FundraisingUltimate10', q); } catch(e) {}
     }
     console.log('[FundraisingUltimate10] Migrations complete');
     try {

@@ -19,7 +19,7 @@ module.exports = function(app, pool, opts) {
       `CREATE TABLE IF NOT EXISTS classroom_signage (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, display_name VARCHAR(100), location VARCHAR(200), content_type TEXT DEFAULT 'announcement', content TEXT, is_active SMALLINT DEFAULT 1, priority INT DEFAULT 0, display_from TIMESTAMPTZ, display_until TIMESTAMPTZ, created_by INT, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`,
       `CREATE TABLE IF NOT EXISTS classroom_lesson_recordings (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, room_id INT, subject VARCHAR(100), teacher_id INT, class_name VARCHAR(100), recording_url VARCHAR(500), duration_seconds INT DEFAULT 0, file_size_mb DECIMAL(8,2) DEFAULT 0, recorded_at TIMESTAMPTZ, status TEXT DEFAULT 'available', views INT DEFAULT 0, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`
     ];
-    for (const sql of tables) { try { await pool.query(sql); } catch(e) { console.warn('[SmartClassroom] Table:', e.message); } }
+    for (const sql of tables) { try { await migrateQuery(pool, 'SmartClassroom', sql); } catch(e) { console.warn('[SmartClassroom] Table:', e.message); } }
   }
   initTables();
 

@@ -191,7 +191,7 @@ ${safeContent}
   // Run migrations
   for (const sql of marketplaceMigrations) {
     try {
-      await pool.query(sql);
+      await migrateQuery(pool, 'MarketplacePWA', sql);
     } catch (e) {
       if (!e.message.includes('already exists') && !e.message.includes('does not exist') && !e.message.includes('duplicate') && !e.message.includes('ON CONFLICT')) {
         logger.warn('[Marketplace] Migration warning: ' + e.message);

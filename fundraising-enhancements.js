@@ -1332,25 +1332,22 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     `INSERT INTO campaign_story_templates (tenant_id, template_name, category, title_template, story_template, impact_template, goal_suggestion, tips, is_featured) SELECT id, 'Community Development', 'community', 'Transform [Community Name]: [Project Goal]', 'The community of [community name] in [location] faces [challenge]. For years, residents have struggled with [specific problem]. This campaign aims to [solution] which will directly benefit [number] people and create lasting change for generations to come.', 'Your donation helps build [infrastructure/service] that serves [number] people. UGX [amount] provides [specific impact]. This is a sustainable project that will keep giving back.', 15000000, ARRAY['Include community photos and testimonials','Share data on community needs','Provide project timeline','List partnering organizations'], true FROM tenants WHERE NOT EXISTS (SELECT 1 FROM campaign_story_templates WHERE template_name='Community Development' AND tenant_id=tenants.id) LIMIT 1`,
   ];
 
-  // Run migrations
+  // Run migrations — using migrateQuery to prevent pool exhaustion (170+ statements!)
   async function runFundraisingMigrations() {
     for (const sql of fundraisingMigrations) {
       try {
-        await pool.query(sql);
-      } catch(e) {
-        console.warn('[Fundraising Migration]', e.message);
-      }
+        await migrateQuery(pool, 'Fundraising', sql);
+      } catch(e) { /* already handled by migrateQuery */ }
     }
     for (const sql of fundraisingAlterMigrations) {
       try {
-        await pool.query(sql);
-      } catch(e) {
-        console.warn('[Fundraising Alter Migration]', e.message);
-      }
+        await migrateQuery(pool, 'FundraisingAlter', sql);
+      } catch(e) { /* already handled by migrateQuery */ }
     }
     console.log('[Fundraising] All migrations completed');
   }
-  runFundraisingMigrations().catch(e => console.error('[Fundraising Migration Error]', e.message));
+  // Stagger to avoid connection storm at startup
+  setTimeout(() => runFundraisingMigrations().catch(e => console.error('[Fundraising Migration Error]', e.message)), 8000);
 
   // =============================================
   // HELPER: Generate slug from title

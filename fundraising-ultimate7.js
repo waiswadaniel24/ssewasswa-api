@@ -44,7 +44,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `INSERT INTO inkind_categories (tenant_id, name, description, icon) SELECT t.id, 'Books', 'Textbooks and reading materials', 'book' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM inkind_categories WHERE tenant_id=t.id AND name='Books')`,
     `INSERT INTO inkind_categories (tenant_id, name, description, icon) SELECT t.id, 'Medical Supplies', 'First aid, medicine, medical equipment', 'heart-pulse' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM inkind_categories WHERE tenant_id=t.id AND name='Medical Supplies')`,
   ];
-  (async () => { for (const q of migrations) { try { await pool.query(q); } catch(e){} } console.log('[FundraisingUltimate7] Migrations complete — 8 features'); })();
+  (async () => { for (const q of migrations) { try { await migrateQuery(pool, 'FundUlt7', q); } catch(e){} } console.log('[FundraisingUltimate7] Migrations complete — 8 features'); })();
 
   // FEATURE 1: CRYPTO DONATIONS
   app.get('/api/crypto-wallets', requireAuth, ah(async (req, res) => {

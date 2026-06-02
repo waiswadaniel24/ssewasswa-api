@@ -22,7 +22,7 @@ module.exports = function(app, pool, opts) {
       `CREATE TABLE IF NOT EXISTS collab_events (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, title VARCHAR(200), description TEXT, event_date DATE, event_time TIME, venue VARCHAR(200), max_capacity INT, registered_count INT DEFAULT 0, organizer_school_id INT, category VARCHAR(50), is_cross_school SMALLINT DEFAULT 1, status TEXT DEFAULT 'upcoming', created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`,
       `CREATE TABLE IF NOT EXISTS collab_messages (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, thread_id VARCHAR(50), sender_id INT, sender_tenant_id INT, recipient_id INT, recipient_tenant_id INT, content TEXT, is_read SMALLINT DEFAULT 0, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`
     ];
-    for (const sql of tables) { try { await pool.query(sql); } catch(e) { console.warn('[CrossSchoolCollab] Table:', e.message); } }
+    for (const sql of tables) { try { await migrateQuery(pool, 'CrossSchool', sql); } catch(e) { console.warn('[CrossSchoolCollab] Table:', e.message); } }
   }
   initTables();
 

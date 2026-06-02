@@ -97,7 +97,7 @@ const migrations = [
 `CREATE TABLE IF NOT EXISTS electronics_products(id SERIAL PRIMARY KEY,tenant_id INTEGER NOT NULL,name VARCHAR(255) NOT NULL,brand VARCHAR(100),model VARCHAR(100),category VARCHAR(100) DEFAULT 'Other',serial_number VARCHAR(100),imei VARCHAR(50),cost_price NUMERIC(12,2),selling_price NUMERIC(12,2),stock INTEGER DEFAULT 1,warranty_months INTEGER DEFAULT 12,supplier VARCHAR(255),created_at TIMESTAMPTZ DEFAULT NOW())`,
 `CREATE TABLE IF NOT EXISTS electronics_repairs(id SERIAL PRIMARY KEY,tenant_id INTEGER NOT NULL,customer_name VARCHAR(255) NOT NULL,customer_phone VARCHAR(20),product_name VARCHAR(255),serial_number VARCHAR(100),issue TEXT NOT NULL,estimated_cost NUMERIC(10,2),repair_cost NUMERIC(10,2),status VARCHAR(20) DEFAULT 'received',technician VARCHAR(255),created_at TIMESTAMPTZ DEFAULT NOW())`,
 ];
-(async()=>{for(const sql of migrations){try{await pool.query(sql);}catch(e){}}console.log('[BizSpec] Migrations complete');})();
+(async()=>{for(const sql of migrations){try{await migrateQuery(pool,'BizSpec',sql);}catch(e){}}console.log('[BizSpec] Migrations complete');})();
 
 // ============================================================
 // 1. HOTEL

@@ -356,7 +356,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
   (async () => {
     for (const q of migrations) {
-      try { await pool.query(q); } catch(e) { /* already exists OK */ }
+      try { await migrateQuery(pool, 'FundraisingUltimate4', q); } catch(e) { /* already exists OK */ }
     }
     console.log('[FundraisingUlt4] Migrations complete');
 

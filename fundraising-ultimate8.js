@@ -41,7 +41,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `CREATE INDEX IF NOT EXISTS idx_donor_heatmap_data_tenant ON donor_heatmap_data(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_regional_donation_stats_tenant ON regional_donation_stats(tenant_id)`,
   ];
-  (async () => { for (const q of migrations) { try { await pool.query(q); } catch(e){} } console.log('[FundraisingUltimate8] Migrations complete'); })();
+  (async () => { for (const q of migrations) { try { await migrateQuery(pool, 'FundraisingUltimate8', q); } catch(e){} } console.log('[FundraisingUltimate8] Migrations complete'); })();
 
   // ================================================================
   // FEATURE 1: CAPITAL CAMPAIGNS

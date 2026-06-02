@@ -151,7 +151,7 @@ module.exports = function(app, pool, opts) {
       )`
     ];
     for (const sql of tables) {
-      try { await pool.query(sql); } catch(e) { /* table may already exist */ }
+      try { await migrateQuery(pool, 'CampusPodcast', sql); } catch(e) { /* table may already exist */ }
     }
   }
 

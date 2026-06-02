@@ -12,6 +12,8 @@
 
 module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify, notifyAll, sendEmail, sendSMS, requireAuth, requireNotBanned, requireSuperAdmin) {
 
+  const { migrateQuery } = require('../db');
+
   const WHATSAPP_NUMBER = process.env.WHATSAPP_NUMBER || '256700000000';
 
   // =========================================================================
@@ -136,7 +138,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   (async () => {
     for (const sql of launchMigrations) {
       try {
-        await pool.query(sql);
+        await migrateQuery(pool, 'LaunchRoutes', sql);
       } catch (e) {
         if (!e.message.includes('already exists') && !e.message.includes('does not exist') && !e.message.includes('ON CONFLICT') && !e.message.includes('duplicate')) console.warn('[Launch] Migration warning:', e.message);
       }

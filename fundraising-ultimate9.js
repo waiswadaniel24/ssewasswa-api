@@ -37,7 +37,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `INSERT INTO grant_writing_templates (tenant_id,name,funder_name,category,sections_json,tips) SELECT t.id,'Community Development Template','UNDP','community','["Problem Statement","Approach","Timeline","Budget","Sustainability"]','Emphasize sustainability and local ownership' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM grant_writing_templates WHERE tenant_id=t.id AND name='Community Development Template')`,
     `INSERT INTO grant_writing_templates (tenant_id,name,funder_name,category,sections_json,tips) SELECT t.id,'Health Initiative Template','WHO','health','["Background","Methodology","Expected Outcomes","Budget Justification"]','Include evidence-based approaches' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM grant_writing_templates WHERE tenant_id=t.id AND name='Health Initiative Template')`,
   ];
-  (async()=>{for(const q of M){try{await pool.query(q)}catch(e){}}console.log('[FundraisingUltimate9] Migrations complete')})();
+  (async()=>{for(const q of M){try{await migrateQuery(pool,'FundUlt9',q)}catch(e){}}console.log('[FundraisingUltimate9] Migrations complete')})();
 
   // F1: VIRTUAL EVENTS
   app.get('/api/virtual-events',requireAuth,ah(async(r,s)=>{const q=await pool.query('SELECT * FROM virtual_events WHERE tenant_id=$1 ORDER BY start_time DESC',[r.session.user.tenant_id]);s.json(q.rows)}));

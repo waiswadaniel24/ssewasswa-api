@@ -32,7 +32,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
 
   // ── Migrations ─────────────────────────────────────────────────────────────
   async function migrate() {
-    await pool.query(`
+    await migrateQuery(pool, 'Transport', `
       CREATE TABLE IF NOT EXISTS transport_vehicles (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         plate_number VARCHAR(20) NOT NULL, vehicle_type VARCHAR(50) DEFAULT 'bus',
@@ -94,7 +94,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       'ALTER TABLE transport_incidents ADD COLUMN IF NOT EXISTS resolved BOOLEAN DEFAULT false;',
       'ALTER TABLE transport_incidents ADD COLUMN IF NOT EXISTS reported_by VARCHAR(255);',
     ];
-    for (const sql of alters) { try { await pool.query(sql); } catch (_) {} }
+    for (const sql of alters) { try { await migrateQuery(pool, 'Transport', sql); } catch (_) {} }
 
     const indexes = [
       'CREATE INDEX IF NOT EXISTS idx_tv_tenant ON transport_vehicles(tenant_id);',
@@ -109,7 +109,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       'CREATE INDEX IF NOT EXISTS idx_ti_vehicle ON transport_incidents(vehicle_id);',
       'CREATE INDEX IF NOT EXISTS idx_ti_status ON transport_incidents(resolved);',
     ];
-    for (const sql of indexes) { try { await pool.query(sql); } catch (_) {} }
+    for (const sql of indexes) { try { await migrateQuery(pool, 'Transport', sql); } catch (_) {} }
   }
 
   // ── Shared nav ─────────────────────────────────────────────────────────────
@@ -756,9 +756,11 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   });
 
   // ── Boot ──────────────────────────────────────────────────────────────────
-  migrate().then(() => {
-    console.log('[Transport] Transport management loaded');
-  }).catch(err => {
-    console.error('[Transport] Migration failed:', err.message);
-  });
+  setTimeout(() => {
+    migrate().then(() => {
+      console.log('[Transport] Transport management loaded');
+    }).catch(err => {
+      console.error('[Transport] Migration failed:', err.message);
+    });
+  }, Math.random() * 10000);
 };
