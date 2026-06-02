@@ -1,4 +1,2 @@
 User-agent: *
-Allow: /
-
-Sitemap: https://ssewasswa.onrender.com/sitemap.xml
+Disallow: /
