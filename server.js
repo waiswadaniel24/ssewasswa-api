@@ -35450,19 +35450,19 @@ try {
 
 // === FUNDRAISING ULTIMATE2 (Donor Intelligence & Engagement — 15 features) ===
 ['donor_journeys','donor_capacity_scores','major_gift_pipeline','major_gift_activities','prospect_research','moves_management','stewardship_plans','stewardship_actions','donor_surveys','donor_survey_responses','donor_churn_scores','donor_recommendations','donor_comm_prefs','donor_relationships','donor_next_actions','donor_ltv','reengagement_campaigns','reengagement_logs','annual_giving_forecasts'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => { try { const m = require('./fundraising-ultimate2'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate2] Donor Intelligence loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate2] Failed:', e.message); } }, 3000);
+try { const m = require('./fundraising-ultimate2'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate2] Donor Intelligence loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate2] Failed:', e.message); }
 
 // === FUNDRAISING ULTIMATE3 (Campaign Optimization — 15 features) ===
 ['campaign_schedules','scheduling_insights','campaign_co_creators','campaign_edit_history','campaign_bundles','campaign_bundle_items','campaign_health_scores','fundraising_calendar','goal_recommendations','campaign_storyboards','storyboard_sections','donation_forms','donation_form_submissions','campaign_blueprints','thank_you_templates','thank_you_log','micro_roundup_settings','micro_roundup_transactions','scheduled_donations','seasonality_profiles','amount_suggestions','amount_suggestion_settings'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => { try { const m = require('./fundraising-ultimate3'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate3] Campaign Optimization loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate3] Failed:', e.message); } }, 5000);
+try { const m = require('./fundraising-ultimate3'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate3] Campaign Optimization loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate3] Failed:', e.message); }
 
 // === FUNDRAISING ULTIMATE4 (Financial & Compliance — 15 features) ===
 ['fund_allocations','fund_allocation_entries','fundraising_budgets','budget_line_items','reconciliation_batches','reconciliation_items','grants_ult4','grant_reports_ult4','endowments','endowment_transactions','currency_wallets','currency_transactions','receipt_batches','receipt_batch_items','donation_splits','donation_split_items','fund_categories','fund_category_assignments','donation_anonymity_settings','anonymous_donations','payment_routing_rules','payment_routing_log','financial_dashboard_config','financial_snapshots','compliance_docs','compliance_reminders','enhanced_audit_trail','audit_reports_ult4','fund_balances'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => { try { const m = require('./fundraising-ultimate4'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate4] Financial & Compliance loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate4] Failed:', e.message); } }, 7000);
+try { const m = require('./fundraising-ultimate4'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate4] Financial & Compliance loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate4] Failed:', e.message); }
 
 // === FUNDRAISING ULTIMATE5 (Community & Social — 15 features) ===
 ['community_hub_posts','community_hub_reactions','forum_categories_pro','forum_threads_pro','forum_replies_pro','mentorship_programs','mentorship_pairs','mentorship_sessions','peer_groups','peer_group_members','peer_group_events','regional_chapters','chapter_members','chapter_activities','alumni_networks_ult5','alumni_members_ult5','alumni_events_ult5','csr_portals','csr_projects','csr_reports','ambassadors_pro','ambassador_activities','ambassador_rewards','referral_tiers_pro','referral_tracking_pro','impact_stories','impact_story_reactions','volunteer_profiles','volunteer_time_logs','giving_circles','giving_circle_members','giving_circle_nominations','giving_circle_votes','community_events_pro','community_event_registrations','donor_wall_config_pro','donor_wall_entries_pro','recognition_awards','recognition_recipients'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => { try { const m = require('./fundraising-ultimate5'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate5] Community & Social loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate5] Failed:', e.message); } }, 9000);
+try { const m = require('./fundraising-ultimate5'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate5] Community & Social loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate5] Failed:', e.message); }
 
 // === FUNDRAISING ULTIMATE6 (Integration & Platform — 15 features) ===
 ['integration_configs','integration_sync_log','crm_sync_configs','crm_sync_queue','email_marketing_configs','email_campaign_sync','accounting_sync_configs','accounting_sync_records','webhook_endpoints_pro','webhook_deliveries','api_gateway_keys_pro','api_gateway_logs','api_rate_limits_pro','data_import_jobs','data_export_jobs','import_error_rows','whitelabel_pro_config','language_configs','translations','custom_domains','sso_configs','sso_sessions','donor_2fa_configs','donor_2fa_attempts','privacy_consent_records','privacy_settings','data_retention_policies','data_retention_log','platform_plugins','plugin_marketplace'].forEach(t => VALID_TABLES.add(t));
@@ -35470,27 +35470,27 @@ setTimeout(() => { try { const m = require('./fundraising-ultimate5'); m(app, po
 ['invoices','renewal_logs'].forEach(t => VALID_TABLES.add(t));
 // Phase 3 - Add new tables to VALID_TABLES
 ['approval_workflows','approval_requests','settings_audit_log'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => { try { const m = require('./fundraising-ultimate6'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate6] Integration & Platform loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate6] Failed:', e.message); } }, 11000);
+try { const m = require('./fundraising-ultimate6'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate6] Integration & Platform loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate6] Failed:', e.message); }
 
 // === FUNDRAISING ULTIMATE7 (Advanced Donation Types & Events — 8 features) ===
 ['crypto_wallets','crypto_donations','crypto_transactions','inkind_categories','inkind_donations','planned_giving','bequests','board_members','board_giving_pledges','ticket_tiers','ticket_purchases','auction_items','auction_bids','sponsorship_packages','sponsorship_purchases','donor_advised_funds','daf_grants'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => { try { const m = require('./fundraising-ultimate7'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate7] Advanced Donations & Events loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate7] Failed:', e.message); } }, 13000);
+try { const m = require('./fundraising-ultimate7'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate7] Advanced Donations & Events loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate7] Failed:', e.message); }
 
 // === FUNDRAISING ULTIMATE8 (Campaign Enhancement & Donor Experience — 8 features) ===
 ['capital_campaigns','capital_phases','capital_pledges','tribute_donations','memorial_pages','crowdfunding_perks','perk_claims','campaign_thermometers','thermometer_views','donor_portal_preferences','donor_portal_sessions','email_templates_builder','email_campaign_builder','direct_mail_campaigns','direct_mail_recipients','donor_heatmap_data','regional_donation_stats'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => { try { const m = require('./fundraising-ultimate8'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate8] Campaign Enhancement loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate8] Failed:', e.message); } }, 15000);
+try { const m = require('./fundraising-ultimate8'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate8] Campaign Enhancement loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate8] Failed:', e.message); }
 
 // === FUNDRAISING ULTIMATE9 (Events, Intelligence & Financial — 8 features) ===
 ['virtual_events','virtual_event_attendees','fundraising_galas','gala_tables','gala_seats','wealth_screening_results','donor_wealth_indicators','grant_writing_templates','grant_proposals','donor_tax_statements','tax_statement_batches','giving_days','giving_day_challenges','giving_day_leaderboards','installment_plans','installment_payments','donor_engagement_scores','engagement_activities'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => { try { const m = require('./fundraising-ultimate9'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate9] Events & Intelligence loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate9] Failed:', e.message); } }, 17000);
+try { const m = require('./fundraising-ultimate9'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate9] Events & Intelligence loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate9] Failed:', e.message); }
 
 // === FUNDRAISING ULTIMATE10 (Pages, Payments & Asset Giving — 8 features) ===
 ['landing_pages','landing_page_versions','payment_gateways','gateway_transactions','donor_renewal_campaigns','renewal_reminders','donor_gift_clubs','gift_club_members','campaign_videos','video_engagement','stock_donations','stock_valuations','real_estate_donations','ira_rollovers','ira_distributions'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => { try { const m = require('./fundraising-ultimate10'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate10] Pages & Payments loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate10] Failed:', e.message); } }, 19000);
+try { const m = require('./fundraising-ultimate10'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate10] Pages & Payments loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate10] Failed:', e.message); }
 
 // === FUNDRAISING ULTIMATE11 (Special Assets & Platform Pro — 8 features) ===
 ['vehicle_donations','vehicle_valuations','family_foundations','foundation_members','foundation_grants','mobile_experience_config','push_notifications','campaign_risk_assessments','risk_mitigation_plans','fundraising_compliance_checks','compliance_requirements','donation_impact_reports','impact_report_sections','campaign_collaboration','collaboration_tasks','communication_hub','unified_messages'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => { try { const m = require('./fundraising-ultimate11'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate11] Special Assets & Platform loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate11] Failed:', e.message); } }, 21000);
+try { const m = require('./fundraising-ultimate11'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate11] Special Assets & Platform loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate11] Failed:', e.message); }
 
 // ============================================================
 // ROUND 3 FEATURES: Leave, Expenses, Visitors, Assets, Feedback, Notes, Announcements
@@ -41159,84 +41159,68 @@ try { const m = require('./online-exams'); m(app, db, pool, renderPage, esc); co
 try { const m = require('./event-manager'); m(app, db, pool, renderPage, esc); console.log('[Events] Module loaded'); } catch(e) { console.warn('[Events] Error:', e.message); }
 try { const m = require('./inventory-pro'); m(app, db, pool, renderPage, esc); console.log('[Inventory] Module loaded'); } catch(e) { console.warn('[Inventory] Error:', e.message); }
 
-// Batch 2 — 2s delay
-setTimeout(() => {
-  try { const m = require('./visitor-log'); m(app, db, pool, renderPage, esc); console.log('[Visitors] Module loaded'); } catch(e) { console.warn('[Visitors] Error:', e.message); }
-  try { const m = require('./library'); m(app, db, pool, renderPage, esc); console.log('[Library] Module loaded'); } catch(e) { console.warn('[Library] Error:', e.message); }
-  try { const m = require('./payroll'); m(app, db, pool, renderPage, esc); console.log('[Payroll] Module loaded'); } catch(e) { console.warn('[Payroll] Error:', e.message); }
-  try { const m = require('./alumni-network'); m(app, db, pool, renderPage, esc); console.log('[Alumni] Module loaded'); } catch(e) { console.warn('[Alumni] Error:', e.message); }
-  try { const m = require('./hostel-manager'); m(app, db, pool, renderPage, esc); console.log('[Hostel] Module loaded'); } catch(e) { console.warn('[Hostel] Error:', e.message); }
-}, 2000);
+// Batch 2 — loaded synchronously through startup guard (concurrency limited to 2)
+try { const m = require('./visitor-log'); m(app, db, pool, renderPage, esc); console.log('[Visitors] Module loaded'); } catch(e) { console.warn('[Visitors] Error:', e.message); }
+try { const m = require('./library'); m(app, db, pool, renderPage, esc); console.log('[Library] Module loaded'); } catch(e) { console.warn('[Library] Error:', e.message); }
+try { const m = require('./payroll'); m(app, db, pool, renderPage, esc); console.log('[Payroll] Module loaded'); } catch(e) { console.warn('[Payroll] Error:', e.message); }
+try { const m = require('./alumni-network'); m(app, db, pool, renderPage, esc); console.log('[Alumni] Module loaded'); } catch(e) { console.warn('[Alumni] Error:', e.message); }
+try { const m = require('./hostel-manager'); m(app, db, pool, renderPage, esc); console.log('[Hostel] Module loaded'); } catch(e) { console.warn('[Hostel] Error:', e.message); }
 
-// Batch 3 — 4s delay
-setTimeout(() => {
-  try { const m = require('./transport'); m(app, db, pool, renderPage, esc); console.log('[Transport] Module loaded'); } catch(e) { console.warn('[Transport] Error:', e.message); }
-  try { const m = require('./canteen'); m(app, db, pool, renderPage, esc); console.log('[Canteen] Module loaded'); } catch(e) { console.warn('[Canteen] Error:', e.message); }
-  try { const m = require('./sports'); m(app, db, pool, renderPage, esc); console.log('[Sports] Module loaded'); } catch(e) { console.warn('[Sports] Error:', e.message); }
-  try { const m = require('./certificates'); m(app, db, pool, renderPage, esc); console.log('[Certificates] Module loaded'); } catch(e) { console.warn('[Certificates] Error:', e.message); }
-  try { const m = require('./feedback'); m(app, db, pool, renderPage, esc); console.log('[Feedback] Module loaded'); } catch(e) { console.warn('[Feedback] Error:', e.message); }
-}, 4000);
+// Batch 3 — loaded synchronously through startup guard
+try { const m = require('./transport'); m(app, db, pool, renderPage, esc); console.log('[Transport] Module loaded'); } catch(e) { console.warn('[Transport] Error:', e.message); }
+try { const m = require('./canteen'); m(app, db, pool, renderPage, esc); console.log('[Canteen] Module loaded'); } catch(e) { console.warn('[Canteen] Error:', e.message); }
+try { const m = require('./sports'); m(app, db, pool, renderPage, esc); console.log('[Sports] Module loaded'); } catch(e) { console.warn('[Sports] Error:', e.message); }
+try { const m = require('./certificates'); m(app, db, pool, renderPage, esc); console.log('[Certificates] Module loaded'); } catch(e) { console.warn('[Certificates] Error:', e.message); }
+try { const m = require('./feedback'); m(app, db, pool, renderPage, esc); console.log('[Feedback] Module loaded'); } catch(e) { console.warn('[Feedback] Error:', e.message); }
 
-// Batch 4 — 6s delay
-setTimeout(() => {
-  try { const m = require('./asset-tracker'); m(app, db, pool, renderPage, esc); console.log('[Assets] Module loaded'); } catch(e) { console.warn('[Assets] Error:', e.message); }
-  try { const m = require('./crm'); m(app, db, pool, renderPage, esc); console.log('[CRM] Module loaded'); } catch(e) { console.warn('[CRM] Error:', e.message); }
-  try { const m = require('./blog-cms'); m(app, db, pool, renderPage, esc); console.log('[Blog] Module loaded'); } catch(e) { console.warn('[Blog] Error:', e.message); }
-  try { const _atInit = (process.env.AT_API_KEY && process.env.AT_USERNAME) ? require('africastalking')({ apiKey: process.env.AT_API_KEY, username: process.env.AT_USERNAME }) : null; const m = require('./sms-blast'); m(app, db, pool, renderPage, esc, { africastalking: _atInit }); console.log('[SMS] Module loaded'); } catch(e) { console.warn('[SMS] Error:', e.message); }
-  try { const m = require('./ai-assistant'); m(app, db, pool, renderPage, esc); console.log('[AI] Module loaded'); } catch(e) { console.warn('[AI] Error:', e.message); }
-}, 6000);
+// Batch 4 — loaded synchronously through startup guard
+try { const m = require('./asset-tracker'); m(app, db, pool, renderPage, esc); console.log('[Assets] Module loaded'); } catch(e) { console.warn('[Assets] Error:', e.message); }
+try { const m = require('./crm'); m(app, db, pool, renderPage, esc); console.log('[CRM] Module loaded'); } catch(e) { console.warn('[CRM] Error:', e.message); }
+try { const m = require('./blog-cms'); m(app, db, pool, renderPage, esc); console.log('[Blog] Module loaded'); } catch(e) { console.warn('[Blog] Error:', e.message); }
+try { const _atInit = (process.env.AT_API_KEY && process.env.AT_USERNAME) ? require('africastalking')({ apiKey: process.env.AT_API_KEY, username: process.env.AT_USERNAME }) : null; const m = require('./sms-blast'); m(app, db, pool, renderPage, esc, { africastalking: _atInit }); console.log('[SMS] Module loaded'); } catch(e) { console.warn('[SMS] Error:', e.message); }
+try { const m = require('./ai-assistant'); m(app, db, pool, renderPage, esc); console.log('[AI] Module loaded'); } catch(e) { console.warn('[AI] Error:', e.message); }
 
-// Batch 5 — 8s delay
-setTimeout(() => {
-  try { const m = require('./student-id-cards'); m(app, db, pool, renderPage, esc); console.log('[IDCards] Student ID card generator loaded'); } catch(e) { console.warn('[IDCards] Error:', e.message); }
-  try { const m = require('./qr-payments'); m(app, db, pool, renderPage, esc); console.log('[QRPayments] QR code payment system loaded'); } catch(e) { console.warn('[QRPayments] Error:', e.message); }
-  try { const m = require('./fee-installments'); m(app, db, pool, renderPage, esc); console.log('[FeeInstallments] Fee installment plans loaded'); } catch(e) { console.warn('[FeeInstallments] Error:', e.message); }
-  try { const m = require('./whatsapp-receipts'); m(app, db, pool, renderPage, esc); console.log('[WhatsAppReceipts] WhatsApp receipt sharing loaded'); } catch(e) { console.warn('[WhatsAppReceipts] Error:', e.message); }
-  try { const m = require('./ussd-portal'); m(app, db, pool, renderPage, esc); console.log('[USSD] USSD portal loaded'); } catch(e) { console.warn('[USSD] Error:', e.message); }
-}, 8000);
+// Batch 5 — loaded synchronously through startup guard
+try { const m = require('./student-id-cards'); m(app, db, pool, renderPage, esc); console.log('[IDCards] Student ID card generator loaded'); } catch(e) { console.warn('[IDCards] Error:', e.message); }
+try { const m = require('./qr-payments'); m(app, db, pool, renderPage, esc); console.log('[QRPayments] QR code payment system loaded'); } catch(e) { console.warn('[QRPayments] Error:', e.message); }
+try { const m = require('./fee-installments'); m(app, db, pool, renderPage, esc); console.log('[FeeInstallments] Fee installment plans loaded'); } catch(e) { console.warn('[FeeInstallments] Error:', e.message); }
+try { const m = require('./whatsapp-receipts'); m(app, db, pool, renderPage, esc); console.log('[WhatsAppReceipts] WhatsApp receipt sharing loaded'); } catch(e) { console.warn('[WhatsAppReceipts] Error:', e.message); }
+try { const m = require('./ussd-portal'); m(app, db, pool, renderPage, esc); console.log('[USSD] USSD portal loaded'); } catch(e) { console.warn('[USSD] Error:', e.message); }
 
-// Batch 6 — 10s delay
-setTimeout(() => {
-  try { const m = require('./email-campaigns'); m(app, db, pool, renderPage, esc); console.log('[EmailCampaigns] Email campaign builder loaded'); } catch(e) { console.warn('[EmailCampaigns] Error:', e.message); }
-  try { const m = require('./ptc-booking'); m(app, db, pool, renderPage, esc); console.log('[PTCBooking] Parent-teacher conference booking loaded'); } catch(e) { console.warn('[PTCBooking] Error:', e.message); }
-  try { const m = require('./inventory-reorder'); m(app, db, pool, renderPage, esc); console.log('[InventoryReorder] Inventory auto-reorder loaded'); } catch(e) { console.warn('[InventoryReorder] Error:', e.message); }
-  try { const m = require('./staff-appraisals'); m(app, db, pool, renderPage, esc); console.log('[StaffAppraisals] Staff appraisals loaded'); } catch(e) { console.warn('[StaffAppraisals] Error:', e.message); }
-  try { const m = require('./student-health'); m(app, db, pool, renderPage, esc); console.log('[StudentHealth] Student health records loaded'); } catch(e) { console.warn('[StudentHealth] Error:', e.message); }
-}, 10000);
+// Batch 6 — loaded synchronously through startup guard
+try { const m = require('./email-campaigns'); m(app, db, pool, renderPage, esc); console.log('[EmailCampaigns] Email campaign builder loaded'); } catch(e) { console.warn('[EmailCampaigns] Error:', e.message); }
+try { const m = require('./ptc-booking'); m(app, db, pool, renderPage, esc); console.log('[PTCBooking] Parent-teacher conference booking loaded'); } catch(e) { console.warn('[PTCBooking] Error:', e.message); }
+try { const m = require('./inventory-reorder'); m(app, db, pool, renderPage, esc); console.log('[InventoryReorder] Inventory auto-reorder loaded'); } catch(e) { console.warn('[InventoryReorder] Error:', e.message); }
+try { const m = require('./staff-appraisals'); m(app, db, pool, renderPage, esc); console.log('[StaffAppraisals] Staff appraisals loaded'); } catch(e) { console.warn('[StaffAppraisals] Error:', e.message); }
+try { const m = require('./student-health'); m(app, db, pool, renderPage, esc); console.log('[StudentHealth] Student health records loaded'); } catch(e) { console.warn('[StudentHealth] Error:', e.message); }
 
-// Batch 7 — 12s delay
-setTimeout(() => {
-  try { const m = require('./scholarship-manager'); m(app, db, pool, renderPage, esc); console.log('[Scholarships] Scholarship & bursary manager loaded'); } catch(e) { console.warn('[Scholarships] Error:', e.message); }
-  try { const m = require('./leave-manager'); m(app, db, pool, renderPage, esc); console.log('[LeaveManager] Leave management loaded'); } catch(e) { console.warn('[LeaveManager] Error:', e.message); }
-  try { const m = require('./discipline-tracker'); m(app, db, pool, renderPage, esc); console.log('[Discipline] Discipline & behavior tracker loaded'); } catch(e) { console.warn('[Discipline] Error:', e.message); }
-  try { const m = require('./budget-manager'); m(app, db, pool, renderPage, esc); console.log('[Budget] Department & budget manager loaded'); } catch(e) { console.warn('[Budget] Error:', e.message); }
-  try { const m = require('./volunteer-manager'); m(app, db, pool, renderPage, esc); console.log('[Volunteers] Volunteer manager loaded'); } catch(e) { console.warn('[Volunteers] Error:', e.message); }
-}, 12000);
+// Batch 7 — loaded synchronously through startup guard
+try { const m = require('./scholarship-manager'); m(app, db, pool, renderPage, esc); console.log('[Scholarships] Scholarship & bursary manager loaded'); } catch(e) { console.warn('[Scholarships] Error:', e.message); }
+try { const m = require('./leave-manager'); m(app, db, pool, renderPage, esc); console.log('[LeaveManager] Leave management loaded'); } catch(e) { console.warn('[LeaveManager] Error:', e.message); }
+try { const m = require('./discipline-tracker'); m(app, db, pool, renderPage, esc); console.log('[Discipline] Discipline & behavior tracker loaded'); } catch(e) { console.warn('[Discipline] Error:', e.message); }
+try { const m = require('./budget-manager'); m(app, db, pool, renderPage, esc); console.log('[Budget] Department & budget manager loaded'); } catch(e) { console.warn('[Budget] Error:', e.message); }
+try { const m = require('./volunteer-manager'); m(app, db, pool, renderPage, esc); console.log('[Volunteers] Volunteer manager loaded'); } catch(e) { console.warn('[Volunteers] Error:', e.message); }
 
-// Batch 8 — 14s delay
-setTimeout(() => {
-  try { const m = require('./dev-team-manager'); m(app, db, pool, renderPage, esc); console.log('[DevTeam] Dev team manager loaded'); } catch(e) { console.warn('[DevTeam] Error:', e.message); }
-  try { const m = require('./dev-portal'); m(app, pool, renderPage, esc); console.log('[DevPortal] Developer portal extension loaded — 25 features'); } catch(e) { console.warn('[DevPortal] Error:', e.message); }
-  try { const m = require('./staff-access-control'); m(app, db, pool, renderPage, esc); console.log('[StaffAccess] Staff & access control loaded'); } catch(e) { console.warn('[StaffAccess] Error:', e.message); }
-  try { const m = require('./tithes-offerings'); m(app, db, pool, renderPage, esc); console.log('[Tithes] Tithes & offerings module loaded'); } catch(e) { console.warn('[Tithes] Error:', e.message); }
-  try { const m = require('./analytics-dashboard'); m(app, db, pool, renderPage, esc); console.log('[Analytics] Analytics dashboard module loaded'); } catch(e) { console.warn('[Analytics] Error:', e.message); }
-  try { const m = require('./student-portal'); m(app, db, pool, renderPage, esc); console.log('[StudentPortal] Student portal module loaded'); } catch(e) { console.warn('[StudentPortal] Error:', e.message); }
-  try { const m = require('./individual-portal'); m(app, pool, renderPage, esc); console.log('[IndividualPortal] Individual portal extension loaded — 35 features'); } catch(e) { console.warn('[IndividualPortal] Error:', e.message); }
-}, 14000);
+// Batch 8 — loaded synchronously through startup guard
+try { const m = require('./dev-team-manager'); m(app, db, pool, renderPage, esc); console.log('[DevTeam] Dev team manager loaded'); } catch(e) { console.warn('[DevTeam] Error:', e.message); }
+try { const m = require('./dev-portal'); m(app, pool, renderPage, esc); console.log('[DevPortal] Developer portal extension loaded — 25 features'); } catch(e) { console.warn('[DevPortal] Error:', e.message); }
+try { const m = require('./staff-access-control'); m(app, db, pool, renderPage, esc); console.log('[StaffAccess] Staff & access control loaded'); } catch(e) { console.warn('[StaffAccess] Error:', e.message); }
+try { const m = require('./tithes-offerings'); m(app, db, pool, renderPage, esc); console.log('[Tithes] Tithes & offerings module loaded'); } catch(e) { console.warn('[Tithes] Error:', e.message); }
+try { const m = require('./analytics-dashboard'); m(app, db, pool, renderPage, esc); console.log('[Analytics] Analytics dashboard module loaded'); } catch(e) { console.warn('[Analytics] Error:', e.message); }
+try { const m = require('./student-portal'); m(app, db, pool, renderPage, esc); console.log('[StudentPortal] Student portal module loaded'); } catch(e) { console.warn('[StudentPortal] Error:', e.message); }
+try { const m = require('./individual-portal'); m(app, pool, renderPage, esc); console.log('[IndividualPortal] Individual portal extension loaded — 35 features'); } catch(e) { console.warn('[IndividualPortal] Error:', e.message); }
 
-// Batch 9 — 16s delay (table allowlists registered synchronously; module loading deferred)
+// Batch 9 — loaded synchronously through startup guard (table allowlists + modules)
 ['grades','marks','marksheets','grading_scales','class_subjects'].forEach(t => VALID_TABLES.add(t));
 ['fee_structures','fees_structure','fee_receipts','fee_reminder_settings','class_payments','payment_methods','payment_requests','payment_transactions'].forEach(t => VALID_TABLES.add(t));
 ['retail_products','retail_sales','retail_sale_items','school_shop_sales','supermarket_daily_sales','supermarket_products','stock_adjustments','stock_movements','stock_takes','stock_take_items','stock_transfers'].forEach(t => VALID_TABLES.add(t));
 ['timetable_periods','timetable_conflicts','lesson_plans','live_classes'].forEach(t => VALID_TABLES.add(t));
 ['lms_enrollments','lms_content','lms_assignments','lms_submissions','courses','quiz_questions','quizzes','quiz_attempts'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => {
-  try { const m = require('./gradebook'); m(app, db, pool, renderPage, esc); console.log('[Gradebook] Gradebook module loaded'); } catch(e) { console.warn('[Gradebook] Error:', e.message); }
-  try { const m = require('./fee-management'); m(app, db, pool, renderPage, esc); console.log('[FeeManagement] Fee management module loaded'); } catch(e) { console.warn('[FeeManagement] Error:', e.message); }
-  try { const m = require('./pos-terminal'); m(app, db, pool, renderPage, esc); console.log('[POS] POS terminal module loaded'); } catch(e) { console.warn('[POS] Error:', e.message); }
-  try { const m = require('./timetable-builder'); m(app, db, pool, renderPage, esc); console.log('[Timetable] Timetable builder module loaded'); } catch(e) { console.warn('[Timetable] Error:', e.message); }
-  try { const m = require('./lms'); m(app, db, pool, renderPage, esc); console.log('[LMS] Learning management system loaded'); } catch(e) { console.warn('[LMS] Error:', e.message); }
-}, 16000);
+try { const m = require('./gradebook'); m(app, db, pool, renderPage, esc); console.log('[Gradebook] Gradebook module loaded'); } catch(e) { console.warn('[Gradebook] Error:', e.message); }
+try { const m = require('./fee-management'); m(app, db, pool, renderPage, esc); console.log('[FeeManagement] Fee management module loaded'); } catch(e) { console.warn('[FeeManagement] Error:', e.message); }
+try { const m = require('./pos-terminal'); m(app, db, pool, renderPage, esc); console.log('[POS] POS terminal module loaded'); } catch(e) { console.warn('[POS] Error:', e.message); }
+try { const m = require('./timetable-builder'); m(app, db, pool, renderPage, esc); console.log('[Timetable] Timetable builder module loaded'); } catch(e) { console.warn('[Timetable] Error:', e.message); }
+try { const m = require('./lms'); m(app, db, pool, renderPage, esc); console.log('[LMS] Learning management system loaded'); } catch(e) { console.warn('[LMS] Error:', e.message); }
 
 // ============================================================
 // MODULE: ADMISSIONS (Application, Review, Enrollment)
