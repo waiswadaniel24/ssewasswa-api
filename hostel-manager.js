@@ -31,7 +31,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
 
   // ── Migrations ─────────────────────────────────────────────────────────────
   async function migrate() {
-    await pool.query(`
+    await migrateQuery(pool, 'Hostel', `
       CREATE TABLE IF NOT EXISTS hostel_buildings (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL, type VARCHAR(20) DEFAULT 'boys',
@@ -97,7 +97,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
       `ALTER TABLE hostel_maintenance ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'pending';`,
       `ALTER TABLE hostel_maintenance ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;`,
     ];
-    for (const sql of alters) { try { await pool.query(sql); } catch (_) { /* exists */ } }
+    for (const sql of alters) { try { await migrateQuery(pool, 'Hostel', sql); } catch (_) { /* exists */ } }
 
     // Indexes
     const indexes = [
@@ -113,7 +113,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
       `CREATE INDEX IF NOT EXISTS idx_hm_building ON hostel_maintenance(building_id);`,
       `CREATE INDEX IF NOT EXISTS idx_hm_status ON hostel_maintenance(status);`,
     ];
-    for (const sql of indexes) { try { await pool.query(sql); } catch (_) { /* exists */ } }
+    for (const sql of indexes) { try { await migrateQuery(pool, 'Hostel', sql); } catch (_) { /* exists */ } }
   }
 
   // ── Shared nav ─────────────────────────────────────────────────────────────
@@ -858,10 +858,12 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   });
 
   // ── Boot ───────────────────────────────────────────────────────────────────
+  setTimeout(() => {
   migrate().then(() => {
     console.log('[Hostel] Hostel management loaded');
   }).catch(err => {
     console.error('[Hostel] Migration failed:', err.message);
   });
+  }, Math.random() * 10000);
 
 };

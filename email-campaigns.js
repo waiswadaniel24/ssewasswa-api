@@ -37,7 +37,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   //  MIGRATIONS
   // ═══════════════════════════════════════════════════════
   (async () => {
-    if (!c) return;
+    if (!pool) return;
     try {
       await migrateQuery(pool, 'EmailCampaigns', `CREATE TABLE IF NOT EXISTS email_campaigns_list (
         id SERIAL PRIMARY KEY,

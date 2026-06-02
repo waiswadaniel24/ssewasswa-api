@@ -267,7 +267,7 @@ module.exports = function feeInstallments(app, db, pool, renderPage, esc) {
   ];
 
   (async () => {
-    if (!c) return;
+    if (!pool) return;
     try {
       for (const sql of migrations) await migrateQuery(pool, 'FeeInstallments', sql);
       console.log('[FeeInstallments] Migrations applied: ' + migrations.length + ' statements');

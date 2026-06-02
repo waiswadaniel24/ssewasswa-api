@@ -130,8 +130,9 @@ module.exports = function(app, pool, opts) {
   }
 
   // ── Table creation ──
+  setTimeout(() => {
   (async () => {
-    await pool.query(`
+    await migrateQuery(pool, 'PocketMoney', `
       CREATE TABLE IF NOT EXISTS wallet_accounts (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 1,
@@ -187,6 +188,7 @@ module.exports = function(app, pool, opts) {
     try { await migrateQuery(pool, 'PocketMoney', `CREATE INDEX IF NOT EXISTS idx_wt_date ON wallet_transactions(tenant_id, created_at);`); } catch(e) {}
     try { await migrateQuery(pool, 'PocketMoney', `CREATE INDEX IF NOT EXISTS idx_ws_account ON wallet_savings(tenant_id, account_id);`); } catch(e) {}
   })().catch(e => console.error('pocket-money table init error:', e));
+  }, Math.random() * 10000);
 
   // ── Helper: get or create wallet ──
   async function getOrCreateWallet(tid, studentId) {

@@ -73,7 +73,7 @@ module.exports = function(app, pool, opts) {
   // ─── Create Tables ───────────────────────────────────────────────────
 
   async function ensureTables() {
-    await pool.query(`
+    await migrateQuery(pool, 'SpacedRep', `
       CREATE TABLE IF NOT EXISTS flashcard_decks (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 0,
@@ -97,7 +97,7 @@ module.exports = function(app, pool, opts) {
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'SpacedRep', `
       CREATE TABLE IF NOT EXISTS flashcards (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 0,
@@ -115,7 +115,7 @@ module.exports = function(app, pool, opts) {
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'SpacedRep', `
       CREATE TABLE IF NOT EXISTS flashcard_progress (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 0,
@@ -134,7 +134,7 @@ module.exports = function(app, pool, opts) {
         CONSTRAINT uk_card_user UNIQUE (tenant_id, card_id, user_id)
       )
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'SpacedRep', `
       CREATE TABLE IF NOT EXISTS study_sessions (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 0,
@@ -151,7 +151,7 @@ module.exports = function(app, pool, opts) {
         completed_at TIMESTAMPTZ DEFAULT NULL
       )
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'SpacedRep', `
       CREATE TABLE IF NOT EXISTS flashcard_imports (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 0,
@@ -163,7 +163,7 @@ module.exports = function(app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'SpacedRep', `
       CREATE TABLE IF NOT EXISTS deck_ratings (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 0,

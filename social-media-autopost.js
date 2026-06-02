@@ -102,7 +102,7 @@ module.exports = function(app, pool, opts) {
 
   /* ───────── Database Tables ───────── */
   async function initTables() {
-    await pool.query(`CREATE TABLE IF NOT EXISTS social_accounts (
+    await migrateQuery(pool, 'SocialMedia', `CREATE TABLE IF NOT EXISTS social_accounts (
       id SERIAL PRIMARY KEY,
       tenant_id INT NOT NULL DEFAULT 0,
       platform VARCHAR(50) NOT NULL,
@@ -116,7 +116,7 @@ module.exports = function(app, pool, opts) {
       last_used TIMESTAMPTZ)
     `);
 
-    await pool.query(`CREATE TABLE IF NOT EXISTS social_posts (
+    await migrateQuery(pool, 'SocialMedia', `CREATE TABLE IF NOT EXISTS social_posts (
       id SERIAL PRIMARY KEY,
       tenant_id INT NOT NULL DEFAULT 0,
       account_id INT DEFAULT NULL,
@@ -138,7 +138,7 @@ module.exports = function(app, pool, opts) {
       updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
     `);
 
-    await pool.query(`CREATE TABLE IF NOT EXISTS post_templates (
+    await migrateQuery(pool, 'SocialMedia', `CREATE TABLE IF NOT EXISTS post_templates (
       id SERIAL PRIMARY KEY,
       tenant_id INT NOT NULL DEFAULT 0,
       name VARCHAR(200) NOT NULL,
@@ -152,7 +152,7 @@ module.exports = function(app, pool, opts) {
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
     `);
 
-    await pool.query(`CREATE TABLE IF NOT EXISTS social_post_rules (
+    await migrateQuery(pool, 'SocialMedia', `CREATE TABLE IF NOT EXISTS social_post_rules (
       id SERIAL PRIMARY KEY,
       tenant_id INT NOT NULL DEFAULT 0,
       rule_name VARCHAR(200),
@@ -166,7 +166,7 @@ module.exports = function(app, pool, opts) {
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
     `);
 
-    await pool.query(`CREATE TABLE IF NOT EXISTS social_hashtags (
+    await migrateQuery(pool, 'SocialMedia', `CREATE TABLE IF NOT EXISTS social_hashtags (
       id SERIAL PRIMARY KEY,
       tenant_id INT NOT NULL DEFAULT 0,
       tag VARCHAR(200) NOT NULL,
@@ -178,7 +178,7 @@ module.exports = function(app, pool, opts) {
       CONSTRAINT uk_tag_tenant UNIQUE (tenant_id, tag)
     `);
 
-    await pool.query(`CREATE TABLE IF NOT EXISTS post_approvals (
+    await migrateQuery(pool, 'SocialMedia', `CREATE TABLE IF NOT EXISTS post_approvals (
       id SERIAL PRIMARY KEY,
       tenant_id INT NOT NULL DEFAULT 0,
       post_id INT NOT NULL,
@@ -190,7 +190,7 @@ module.exports = function(app, pool, opts) {
     `);
 
     // Seed system templates
-    const { rows } = await pool.query(`SELECT COUNT(*) as c FROM post_templates WHERE tenant_id=0 AND is_system=true`);
+    const { rows } = await migrateQuery(pool, 'SocialMedia', `SELECT COUNT(*) as c FROM post_templates WHERE tenant_id=0 AND is_system=true`);
     if (rows[0].c === 0) {
       const sysTemplates = [
         { name: 'Exam Results Announcement', category: 'academics', content_template: '🎓 Proud to announce our outstanding exam results!\n\n🏆 Topper: {{topper_name}} — {{score}}%\n📊 Class Average: {{class_avg}}%\n💡 Students scoring above 90%: {{distinction_count}}\n\nCongratulations to all our brilliant students! Keep shining! ✨', platforms: JSON.stringify(['facebook','twitter','instagram','linkedin']), hashtags: JSON.stringify(['#ExamResults','#ProudSchool','#StudentSuccess','#AcademicExcellence']) },
@@ -203,13 +203,13 @@ module.exports = function(app, pool, opts) {
         { name: 'Parent-Teacher Meeting', category: 'events', content_template: '🤝 Parent-Teacher Meeting\n\n📅 Date: {{date}}\n⏰ Time: {{time}}\n📍 Venue: {{venue}}\n\nWe cordially invite all parents to discuss their child\'s progress. Your involvement matters!\n\nPlease bring the progress report card. See you there! 📚', platforms: JSON.stringify(['facebook','twitter']), hashtags: JSON.stringify(['#PTM','#ParentTeacherMeeting','#SchoolCommunication']) },
       ];
       for (const t of sysTemplates) {
-        await pool.query(`INSERT INTO post_templates (tenant_id,name,category,content_template,platforms,hashtags,is_system) VALUES (0,$1,$2,$3,$4,$5,true)`,
+        await migrateQuery(pool, 'SocialMedia', `INSERT INTO post_templates (tenant_id,name,category,content_template,platforms,hashtags,is_system) VALUES (0,$1,$2,$3,$4,$5,true)`,
           [t.name, t.category, t.content_template, t.platforms, t.hashtags]);
       }
     }
 
     // Seed trending education hashtags
-    const { rows: htagRows } = await pool.query(`SELECT COUNT(*) as c FROM social_hashtags WHERE tenant_id=0`);
+    const { rows: htagRows } = await migrateQuery(pool, 'SocialMedia', `SELECT COUNT(*) as c FROM social_hashtags WHERE tenant_id=0`);
     if (htagRows[0].c === 0) {
       const htags = [
         { tag:'#Education', category:'general', is_trending:true, trend_score:95 },
@@ -229,7 +229,7 @@ module.exports = function(app, pool, opts) {
         { tag:'#Parenting', category:'general', is_trending:false, trend_score:73 },
       ];
       for (const h of htags) {
-        await pool.query(`INSERT INTO social_hashtags (tenant_id,tag,category,usage_count,is_trending,trend_score) VALUES (0,$1,$2,0,$3,$4)`,
+        await migrateQuery(pool, 'SocialMedia', `INSERT INTO social_hashtags (tenant_id,tag,category,usage_count,is_trending,trend_score) VALUES (0,$1,$2,0,$3,$4)`,
           [h.tag, h.category, h.is_trending, h.trend_score]);
       }
     }

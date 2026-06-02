@@ -268,7 +268,6 @@ module.exports = function parentTeacherChat(app, pool, opts) {
   ];
 
   (async () => {
-    if (!client) return;
     try {
       for (const sql of migrations) { try { await migrateQuery(pool, 'ParentTeacherChat', sql); } catch (e) { /* skip */ } }
     } catch (e) { /* skip */ }

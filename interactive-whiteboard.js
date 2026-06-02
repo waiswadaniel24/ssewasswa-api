@@ -70,7 +70,7 @@ module.exports = function(app, pool, opts) {
 
   async function ensureTables() {
     try {
-      await pool.query(`
+      await migrateQuery(pool, 'Whiteboard', `
         CREATE TABLE IF NOT EXISTS whiteboard_sessions (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL,
@@ -92,7 +92,7 @@ module.exports = function(app, pool, opts) {
         )
       `);
 
-      await pool.query(`
+      await migrateQuery(pool, 'Whiteboard', `
         CREATE TABLE IF NOT EXISTS whiteboard_pages (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL,
@@ -111,7 +111,7 @@ module.exports = function(app, pool, opts) {
         )
       `);
 
-      await pool.query(`
+      await migrateQuery(pool, 'Whiteboard', `
         CREATE TABLE IF NOT EXISTS whiteboard_content (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL,
@@ -127,7 +127,7 @@ module.exports = function(app, pool, opts) {
         )
       `);
 
-      await pool.query(`
+      await migrateQuery(pool, 'Whiteboard', `
         CREATE TABLE IF NOT EXISTS whiteboard_templates (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL DEFAULT 0,
@@ -144,7 +144,7 @@ module.exports = function(app, pool, opts) {
         )
       `);
 
-      await pool.query(`
+      await migrateQuery(pool, 'Whiteboard', `
         CREATE TABLE IF NOT EXISTS whiteboard_collaborators (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL,
@@ -162,7 +162,7 @@ module.exports = function(app, pool, opts) {
         )
       `);
 
-      await pool.query(`
+      await migrateQuery(pool, 'Whiteboard', `
         CREATE TABLE IF NOT EXISTS whiteboard_submissions (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL,
@@ -182,7 +182,7 @@ module.exports = function(app, pool, opts) {
         )
       `);
 
-      await pool.query(`
+      await migrateQuery(pool, 'Whiteboard', `
         CREATE TABLE IF NOT EXISTS whiteboard_version_history (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL,
@@ -197,12 +197,12 @@ module.exports = function(app, pool, opts) {
 
       // Seed built-in templates (tenant_id=0 means shared across all tenants)
       for (const tpl of BUILTIN_TEMPLATES) {
-        const existing = await pool.query(
+        const existing = await migrateQuery(pool, 'Whiteboard', 
           'SELECT id FROM whiteboard_templates WHERE tenant_id=0 AND name=$1 AND is_builtin=1 LIMIT 1',
           [tpl.name]
         );
         if (!existing.rows.length) {
-          await pool.query(
+          await migrateQuery(pool, 'Whiteboard', 
             `INSERT INTO whiteboard_templates (tenant_id, name, description, category, config, is_builtin, is_public)
              VALUES (0, $1, $2, $3, $4, 1, 1)`,
             [tpl.name, tpl.description, tpl.category, tpl.config]
@@ -214,7 +214,7 @@ module.exports = function(app, pool, opts) {
     }
   }
 
-  ensureTables().catch(err => console.error('[whiteboard] Table init error:', err.message));
+  setTimeout(() => { ensureTables().catch(err => console.error('[whiteboard] Table init error:', err.message)); }, Math.random() * 10000);
 
   // ══════════════════════════════════════════════════════════════════════════
   //  1. DASHBOARD

@@ -52,7 +52,7 @@ module.exports = function(app, pool, requireAuth, ah, esc, renderPage, audit, no
 
   (async () => {
     for (const m of USAGE_MIGRATIONS) {
-      try { await pool.query(m); } catch (e) {
+      try { await migrateQuery(pool, 'Usage', m); } catch (e) {
         if (!e.message.includes('already exists')) logger.warn('[Usage] Migration warning:', e.message);
       }
     }
@@ -65,7 +65,7 @@ module.exports = function(app, pool, requireAuth, ah, esc, renderPage, audit, no
       { metric: 'records', unit: 'Record', free: 50, basic: 500, pro: 50000, enterprise: 500000, rate_ugx: 10, rate_usd: 0.003, desc: 'Database records (students, members, etc.)' },
     ];
     for (const r of rates) {
-      await pool.query(`INSERT INTO usage_overage_rates (metric_type, unit_name, free_limit, basic_limit, pro_limit, enterprise_limit, overage_rate_ugx, overage_rate_usd, description)
+      await migrateQuery(pool, 'Usage', `INSERT INTO usage_overage_rates (metric_type, unit_name, free_limit, basic_limit, pro_limit, enterprise_limit, overage_rate_ugx, overage_rate_usd, description)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`,
         [r.metric, r.unit, r.free, r.basic, r.pro, r.enterprise, r.rate_ugx, r.rate_usd, r.desc]);
     }

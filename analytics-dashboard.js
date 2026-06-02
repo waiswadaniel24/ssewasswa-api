@@ -83,6 +83,7 @@ module.exports = function analyticsDashboard(app, db, pool, renderPage, esc) {
   // ============================================================
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
+  setTimeout(() => {
   (async () => {
     try {
       await migrateQuery(pool, 'AnalyticsDashboard', `CREATE TABLE IF NOT EXISTS analytics_snapshots (
@@ -102,6 +103,7 @@ module.exports = function analyticsDashboard(app, db, pool, renderPage, esc) {
       console.log('[Analytics] Migrations applied successfully');
     } catch (e) { console.error('[Analytics] Migration error:', e.message); }
   })();
+  }, Math.random() * 10000);
 
   // Helper: bar chart HTML from data
   const barChart = (data, maxVal, color) => {

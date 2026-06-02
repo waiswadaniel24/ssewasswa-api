@@ -443,7 +443,7 @@ app.get('/profile/:email', ah(async (req, res) => {
 // ============================================================
 // === SEED & INIT ===
 // ============================================================
-seedAchievements().catch(e => console.warn('[Engagement] Seed error:', e.message));
-seedRewardsStore().catch(e => console.warn('[Engagement] Seed error:', e.message));
-generateDailyChallenges().catch(e => console.warn('[Engagement] Challenge gen error:', e.message));
+setTimeout(() => { seedAchievements().catch(e => console.warn('[Engagement] Seed error:', e.message)); }, 3000 + Math.random() * 5000);
+setTimeout(() => { seedRewardsStore().catch(e => console.warn('[Engagement] Seed error:', e.message)); }, 6000 + Math.random() * 5000);
+setTimeout(() => { generateDailyChallenges().catch(e => console.warn('[Engagement] Challenge gen error:', e.message)); }, 9000 + Math.random() * 5000);
 console.log('[Engagement] LOADED: Daily Challenges, Streaks, Achievements (15 badges), Rewards Store (8 items), Leaderboard, User Profiles');

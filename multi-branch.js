@@ -611,7 +611,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     let success = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-      await pool.query(`
+      await migrateQuery(pool, 'MultiBranch', `
         CREATE TABLE IF NOT EXISTS branch_inter_requests (
           id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
           from_branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,

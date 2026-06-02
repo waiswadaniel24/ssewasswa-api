@@ -27,7 +27,7 @@ const getTransporter = () => {
 // === ENSURE email_queue TABLE EXISTS ===
 async function ensureTable() {
   try {
-    await pool.query(`
+    await migrateQuery(pool, 'Worker', `
       CREATE TABLE IF NOT EXISTS email_queue (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER,
@@ -43,8 +43,8 @@ async function ensureTable() {
       )
     `);
     // Add columns if they don't exist (for existing deployments)
-    await pool.query(`ALTER TABLE email_queue ADD COLUMN IF NOT EXISTS html BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE email_queue ADD COLUMN IF NOT EXISTS attempts INTEGER DEFAULT 0`);
+    await migrateQuery(pool, 'Worker', `ALTER TABLE email_queue ADD COLUMN IF NOT EXISTS html BOOLEAN DEFAULT false`);
+    await migrateQuery(pool, 'Worker', `ALTER TABLE email_queue ADD COLUMN IF NOT EXISTS attempts INTEGER DEFAULT 0`);
     console.log('[Worker] email_queue table ready');
   } catch (e) {
     console.error('[Worker] Failed to ensure email_queue table:', e.message);
@@ -99,7 +99,7 @@ async function processEmails() {
 // === ENSURE fee_reminder_settings TABLE EXISTS ===
 async function ensureFeeReminderSettingsTable() {
   try {
-    await pool.query(`
+    await migrateQuery(pool, 'Worker', `
       CREATE TABLE IF NOT EXISTS fee_reminder_settings (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER UNIQUE,
@@ -113,7 +113,7 @@ async function ensureFeeReminderSettingsTable() {
       )
     `);
     // Ensure sms_logs has trigger_type column
-    await pool.query(`ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS trigger_type TEXT`);
+    await migrateQuery(pool, 'Worker', `ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS trigger_type TEXT`);
     console.log('[Worker] fee_reminder_settings table ready');
   } catch (e) {
     console.error('[Worker] Failed to ensure fee_reminder_settings table:', e.message);

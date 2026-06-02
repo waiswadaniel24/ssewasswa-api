@@ -23,7 +23,7 @@ module.exports = function ussdPortal(app, db, pool, renderPage, esc) {
   //  MIGRATIONS (async IIFE at module load)
   // ═══════════════════════════════════════════════════════
   (async () => {
-    if (!c) return;
+    if (!pool) return;
     try {
       await migrateQuery(pool, 'UssdPortal', `CREATE TABLE IF NOT EXISTS ussd_sessions (
         id SERIAL PRIMARY KEY,

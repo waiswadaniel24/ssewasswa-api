@@ -156,7 +156,6 @@ module.exports = function securityOps(app, pool, requireAuth, logger, audit, ren
 
   // Run new migrations on module load
   (async () => {
-    if (!client) return;
     try {
       for (const sql of newMigrations) await migrateQuery(pool, 'SecurityOps', sql);
       logger.info({ msg: '[SecurityOps] New migrations applied', count: newMigrations.length });

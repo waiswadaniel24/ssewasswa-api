@@ -75,9 +75,10 @@ module.exports = function (app, pool, opts) {
   };
 
   /* ─── auto-migration ─────────────────────────────────────────────── */
+  setTimeout(() => {
   (async () => {
     try {
-      await pool.query(`
+      await migrateQuery(pool, 'PeerReview', `
         CREATE TABLE IF NOT EXISTS peer_review_assignments (
           id            SERIAL PRIMARY KEY,
           tenant_id     INT NOT NULL,
@@ -146,6 +147,7 @@ module.exports = function (app, pool, opts) {
       console.warn('[PeerReview] Migration warning:', e.message);
     }
   })();
+  }, Math.random() * 10000);
 
   /* ─── 1. DASHBOARD ──────────────────────────────────────────────── */
   app.get('/school/peer-review', requireAuth, requireNotBanned, async (req, res) => {

@@ -108,7 +108,7 @@ module.exports = function(app, pool, opts) {
   // ═══════════════════════════════════════════════════════════════════════════
   async function migrate() {
     // 1. bus_routes
-    await pool.query(`
+    await migrateQuery(pool, 'BusRoute', `
       CREATE TABLE IF NOT EXISTS bus_routes (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
@@ -129,7 +129,7 @@ module.exports = function(app, pool, opts) {
     `);
 
     // 2. bus_fleet
-    await pool.query(`
+    await migrateQuery(pool, 'BusRoute', `
       CREATE TABLE IF NOT EXISTS bus_fleet (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
@@ -154,7 +154,7 @@ module.exports = function(app, pool, opts) {
     `);
 
     // 3. bus_stops
-    await pool.query(`
+    await migrateQuery(pool, 'BusRoute', `
       CREATE TABLE IF NOT EXISTS bus_stops (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
@@ -174,7 +174,7 @@ module.exports = function(app, pool, opts) {
     `);
 
     // 4. bus_student_assignments
-    await pool.query(`
+    await migrateQuery(pool, 'BusRoute', `
       CREATE TABLE IF NOT EXISTS bus_student_assignments (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
@@ -197,7 +197,7 @@ module.exports = function(app, pool, opts) {
     `);
 
     // 5. bus_trips
-    await pool.query(`
+    await migrateQuery(pool, 'BusRoute', `
       CREATE TABLE IF NOT EXISTS bus_trips (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
@@ -223,7 +223,7 @@ module.exports = function(app, pool, opts) {
     `);
 
     // 6. bus_maintenance
-    await pool.query(`
+    await migrateQuery(pool, 'BusRoute', `
       CREATE TABLE IF NOT EXISTS bus_maintenance (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
@@ -245,7 +245,7 @@ module.exports = function(app, pool, opts) {
     `);
 
     // 7. bus_notifications_log
-    await pool.query(`
+    await migrateQuery(pool, 'BusRoute', `
       CREATE TABLE IF NOT EXISTS bus_notifications_log (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
@@ -265,11 +265,13 @@ module.exports = function(app, pool, opts) {
   }
 
   // ── Run migrations ─────────────────────────────────────────────────────────
+  setTimeout(() => {
   migrate().then(() => {
     console.log('[bus-route-optimizer] Migrations complete.');
   }).catch(err => {
     console.error('[bus-route-optimizer] Migration error:', err.message);
   });
+  }, Math.random() * 10000);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 1 — Dashboard

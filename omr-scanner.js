@@ -126,7 +126,7 @@ module.exports = function(app, pool, opts) {
         most_common_wrong VARCHAR(5), created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         CONSTRAINT uk_exam_q UNIQUE (exam_id, question_number, tenant_id))`
     ];
-    for (const sql of queries) { try { await pool.query(sql); } catch(e) { console.error('OMR init:', e.message); } }
+    for (const sql of queries) { try { await migrateQuery(pool, 'OMR', sql); } catch(e) { console.error('OMR init:', e.message); } }
   }
   initDB().catch(() => {});
 

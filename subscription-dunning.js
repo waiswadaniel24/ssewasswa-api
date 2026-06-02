@@ -61,7 +61,7 @@ module.exports = function(app, pool, requireAuth, ah, esc, renderPage, audit, no
 
   (async () => {
     for (const m of DUNNING_MIGRATIONS) {
-      try { await pool.query(m); } catch (e) {
+      try { await migrateQuery(pool, 'Dunning', m); } catch (e) {
         if (!e.message.includes('already exists') && !e.message.includes('does not exist')) logger.warn('[Dunning] Migration warning:', e.message);
       }
     }

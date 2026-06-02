@@ -27,7 +27,7 @@ module.exports = function pushNotifications(app, pool, opts) {
   //  MIGRATIONS
   // ═══════════════════════════════════════════════════════
   (async () => {
-    if (!c) return;
+    if (!pool) return;
     try {
       await migrateQuery(pool, 'PushNotifications', `CREATE TABLE IF NOT EXISTS push_config (
         id SERIAL PRIMARY KEY,

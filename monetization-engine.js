@@ -1440,7 +1440,7 @@ async function seedMonetizationData() {
 }
 
 // Run seed on load
-seedMonetizationData().catch(e => console.warn('[MonetizationEngine] Seed error:', e.message));
+setTimeout(() => { seedMonetizationData().catch(e => console.warn('[MonetizationEngine] Seed error:', e.message)); }, 5000 + Math.random() * 5000);
 
 // Export cross-module functions to global scope for dependent modules
 if (typeof trackRevenue === 'function') global.trackRevenue = trackRevenue;

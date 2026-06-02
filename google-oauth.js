@@ -8,6 +8,7 @@
 //   GOOGLE_CLIENT_SECRET   (required)
 //   GOOGLE_CALLBACK_URL    (default: https://ssewasswa.onrender.com/auth/google/callback)
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts = {}) {
   const esc = opts.esc || (s => s);
   const audit = opts.audit || (() => {});
@@ -33,7 +34,7 @@ module.exports = function(app, pool, opts = {}) {
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT`,
     ];
     for (const m of migrations) {
-      try { await pool.query(m); } catch (e) {
+      try { await migrateQuery(pool, 'GoogleOAuth', m); } catch (e) {
         if (!e.message.includes('already exists')) console.warn('[GoogleOAuth] Migration warning:', e.message);
       }
     }

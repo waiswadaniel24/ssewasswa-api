@@ -442,6 +442,6 @@ app.get('/js/seo-helper.js', ah(async (req, res) => {
 // ============================================================
 // === INIT ===
 // ============================================================
-generateAutoBlogPosts().catch(e => console.warn('[SEO] Blog gen error:', e.message));
-seedKeywords().catch(e => console.warn('[SEO] Keyword seed error:', e.message));
+setTimeout(() => { generateAutoBlogPosts().catch(e => console.warn('[SEO] Blog gen error:', e.message)); }, 5000 + Math.random() * 5000);
+setTimeout(() => { seedKeywords().catch(e => console.warn('[SEO] Keyword seed error:', e.message)); }, 8000 + Math.random() * 5000);
 console.log('[SEO] LOADED: Auto-blog generator, keyword tracker (20 keywords), smart 404 handler, search pings, SEO middleware, schema markup, Open Graph auto-tags');
