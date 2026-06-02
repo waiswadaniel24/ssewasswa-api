@@ -236,10 +236,14 @@ async function _runMigrateJob(job) {
  * Returns a promise that resolves when the migrateQuery queue is fully drained.
  * Used during startup to wait for all module migrations to finish before accepting requests.
  */
-function waitForMigrateDrain() {
+function waitForMigrateDrain(timeoutMs = 60000) {
   return new Promise(resolve => {
+    const start = Date.now();
     function check() {
       if (_migrateQueue.length === 0 && _migrateRunning === 0) {
+        resolve();
+      } else if (Date.now() - start > timeoutMs) {
+        console.warn(`[MigrateQueue] Drain timed out after ${timeoutMs}ms — ${_migrateQueue.length} queued, ${_migrateRunning} running. Opening gate.`);
         resolve();
       } else {
         setTimeout(check, 300);

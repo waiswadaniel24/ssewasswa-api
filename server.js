@@ -257,7 +257,7 @@ const _originalPoolConnect = pool.connect.bind(pool);
 const _originalConsoleWarn = console.warn.bind(console);
 const _originalConsoleError = console.error.bind(console);
 let _startupMigrationsDone = false;
-const _STARTUP_CONCURRENCY = 5; // 5 concurrent during startup — balances speed vs pool pressure
+const _STARTUP_CONCURRENCY = 10; // 10 concurrent during startup — Render free DB can handle it
 let _startupRunning = 0;
 let _startupQueue = [];
 let _migrationWarnCount = 0;
@@ -396,13 +396,17 @@ function finishStartupMigrations() {
  * All queued DB queries (from module migrations) must complete before this resolves.
  * Used to delay server.listen() until all startup migrations are done.
  */
-function waitForStartupDrain() {
+function waitForStartupDrain(timeoutMs = 120000) {
   return new Promise(resolve => {
+    const start = Date.now();
     function check() {
       if (_startupQueue.length === 0 && _startupRunning === 0) {
         resolve();
+      } else if (Date.now() - start > timeoutMs) {
+        console.warn(`[Startup] Guard queue drain timed out after ${timeoutMs}ms — ${_startupQueue.length} queued, ${_startupRunning} running. Opening gate anyway.`);
+        resolve();
       } else {
-        setTimeout(check, 300);
+        setTimeout(check, 500);
       }
     }
     check();
