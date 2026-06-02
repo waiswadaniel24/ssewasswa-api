@@ -360,16 +360,34 @@ function finishStartupMigrations() {
   pool.connect = _originalPoolConnect;
   console.warn = _originalConsoleWarn;
   console.error = _originalConsoleError;
-  console.log(`[Startup] Migration guard removed — ${_migrationWarnCount} warnings suppressed, ${_startupQueue.length} jobs flushed`);
-  // Drain any remaining queued jobs with normal pool operations
   const remaining = _startupQueue.splice(0);
-  for (const job of remaining) {
-    if (job.type === 'connect') {
-      _originalPoolConnect().then(job.resolve).catch(() => job.resolve(null));
-    } else {
-      _originalPoolQuery(...job.args).then(job.resolve).catch(() => job.resolve({ rows: [] }));
+  console.log(`[Startup] Migration guard removed — ${_migrationWarnCount} warnings suppressed, ${remaining.length} remaining jobs`);
+  if (remaining.length === 0) return;
+  // Drain remaining jobs GRADUALLY (max 3 concurrent) to avoid connection pool burst
+  const MAX_DRAIN = 3;
+  let drainIdx = 0;
+  let drainRunning = 0;
+  function drainNext() {
+    while (drainRunning < MAX_DRAIN && drainIdx < remaining.length) {
+      drainRunning++;
+      const job = remaining[drainIdx++];
+      const p = job.type === 'connect'
+        ? _originalPoolConnect().then(c => c).catch(() => null)
+        : _originalPoolQuery(...job.args).catch(() => ({ rows: [] }));
+      p.then(result => {
+        if (job.type === 'connect') job.resolve(result);
+        else job.resolve(result);
+        drainRunning--;
+        drainNext();
+      }).catch(() => {
+        if (job.type === 'connect') job.resolve(null);
+        else job.resolve({ rows: [] });
+        drainRunning--;
+        drainNext();
+      });
     }
   }
+  drainNext();
 }
 
 // JWT Authentication System (alongside existing session auth)
@@ -2977,6 +2995,19 @@ const uniqueConstraintMigrations = [
 ];
 
 (async () => {
+  // Fast path: skip migrations if they ran successfully in the last 30 minutes
+  try {
+    const { rows } = await pool.query("SELECT value FROM platform_settings WHERE key='_migration_last_success'");
+    if (rows.length > 0) {
+      const lastSuccess = parseInt(rows[0].value);
+      const age = Date.now() - lastSuccess;
+      if (age < 30 * 60 * 1000) { // 30 minutes
+        console.log(`[Migrations] Skipping — last successful run was ${Math.round(age/1000)}s ago`);
+        return;
+      }
+    }
+  } catch (e) { /* ignore — will run migrations */ }
+
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       // Run each migration individually so one failure doesn't stop the rest
@@ -3197,6 +3228,11 @@ const uniqueConstraintMigrations = [
       for (const [key, name, desc, ver, cat, req] of phase3Flags) {
         try { await pool.query('INSERT INTO feature_flags(feature_key,name,description,version,category,requirements,is_active) VALUES($1,$2,$3,$4,$5,$6,true) ON CONFLICT(feature_key) DO NOTHING', [key, name, desc, ver, cat, req]); } catch(e) { console.error('[Error]', e.message); }
       }
+      // Record successful migration time — allows skip on next restart within 30min
+      try {
+        await pool.query("INSERT INTO platform_settings(key, value) VALUES('_migration_last_success', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [String(Date.now())]);
+      } catch(e) { /* non-critical */ }
+      console.log('[Migrations] All core migrations completed successfully');
       break;
     } catch (e) {
       console.error(`DB Init Error (attempt ${attempt}/3):`, e.message);
@@ -14407,9 +14443,9 @@ app.get('/health', ah(async (req, res) => {
     let redisOk = false;
     if (redisCache) { try { await redisCache.ping(); redisOk = true; } catch {} }
     // Phase 2: Enhanced health check with more details for uptime monitoring
-    const activeSubscriptions = (await pool.query("SELECT COUNT(*) FROM subscriptions WHERE status='active' AND plan != 'free'")).rows[0].count;
-    const activeTenants = (await pool.query("SELECT COUNT(*) FROM tenants WHERE approved=true")).rows[0].count;
-    const pendingApprovals = (await pool.query("SELECT COUNT(*) FROM tenants WHERE approved=false")).rows[0].count;
+    const activeSubscriptions = (await pool.query("SELECT COUNT(*) FROM subscriptions WHERE status='active' AND plan != 'free'").catch(() => ({rows:[{count:0}]}))).rows[0].count;
+    const activeTenants = (await pool.query("SELECT COUNT(*) FROM tenants WHERE approved=true").catch(() => ({rows:[{count:0}]}))).rows[0].count;
+    const pendingApprovals = (await pool.query("SELECT COUNT(*) FROM tenants WHERE approved=false").catch(() => ({rows:[{count:0}]}))).rows[0].count;
     res.json({
       status: 'ok',
       uptime: Math.floor(process.uptime()),
@@ -14431,7 +14467,7 @@ app.get('/health', ah(async (req, res) => {
       memory: { rss_mb: Math.round(process.memoryUsage().rss / 1024 / 1024), heap_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) }
     });
   } catch (e) {
-    res.status(503).json({ status: 'error', message: 'Database unreachable', timestamp: new Date().toISOString() });
+    res.status(503).json({ status: 'error', message: 'Database unreachable', uptime: Math.floor(process.uptime()), timestamp: new Date().toISOString(), memory_mb: Math.round(process.memoryUsage().rss / 1024 / 1024) });
   }
 }));
 
@@ -42969,27 +43005,51 @@ app.use((err, req, res, next) => {
   try { if (Sentry) Sentry.captureException(err); } catch(e) {}
   
   // Don't leak error details in production
-  const msg = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred. Our team has been notified.' : (err.message || 'Something went wrong');
+  const isDbError = err.message && (
+    err.message.includes('Connection terminated') ||
+    err.message.includes('ECONNREFUSED') ||
+    err.message.includes('too many clients') ||
+    err.message.includes('connection refused') ||
+    err.message.includes('cannot acquire') ||
+    err.message.includes('remaining connection slot') ||
+    err.message.includes('timeout') ||
+    err.message.includes('pool exhausted')
+  );
+  const msg = process.env.NODE_ENV === 'production'
+    ? (isDbError ? 'Our database is temporarily busy. Please try again in a moment.' : 'An unexpected error occurred. Our team has been notified.')
+    : (err.message || 'Something went wrong');
   
   // JSON response for API requests
-  if (req.accepts('json')) {
-    return res.status(500).json({ error: msg, ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }) });
+  if (req.accepts('json') && !req.accepts('html')) {
+    return res.status(500).json({ error: msg, retry_after: isDbError ? 10 : undefined, ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }) });
   }
   
-  // HTML response for browser requests
+  // HTML response for browser requests — show friendly page with auto-retry
   const user = req.session?.user || null;
-  res.status(500).send(renderPage('500 - Server Error', `
-    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#b91c1c)"><h1>500</h1><p>Something went wrong</p></div>
-    <div class="card" style="max-width:600px;margin:0 auto;text-align:center">
-      <div style="font-size:80px;margin:20px 0">⚠️</div>
-      <h2>Internal Server Error</h2>
-      <p class="muted" style="margin:15px 0">${esc(msg)}</p>
-      <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-        <a href="/" class="btn">Go Home</a>
-        <a href="javascript:history.back()" class="btn" style="background:#64748b">Go Back</a>
-      </div>
-    </div>
-  `, user));
+  res.status(500).send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${isDbError ? 'Temporarily Unavailable' : 'Server Error'} | Comfort</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f8fafc;color:#1e293b;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.container{text-align:center;max-width:500px;padding:24px}
+.icon{font-size:72px;margin-bottom:16px}
+h1{font-size:28px;font-weight:800;margin-bottom:8px;color:${isDbError ? '#d97706' : '#dc2626}'}
+p{font-size:16px;color:#64748b;line-height:1.6;margin-bottom:24px}
+.btn{display:inline-block;padding:12px 28px;background:#2563eb;color:#fff;border-radius:8px;text-decoration:none;font-size:15px;font-weight:600;margin:4px}
+.btn:hover{background:#1d4ed8}
+.btn-secondary{background:#f1f5f5;color:#475569}
+.btn-secondary:hover{background:#e2e8f0}
+.timer{font-size:14px;color:#94a3b8;margin-top:12px}</style></head>
+<body>
+<div class="container">
+<div class="icon">${isDbError ? '🔄' : '⚠️'}</div>
+<h1>${isDbError ? 'Temporarily Unavailable' : 'Something Went Wrong'}</h1>
+<p>${esc(msg)}</p>
+<div>
+<a href="javascript:location.reload()" class="btn">${isDbError ? 'Retry Now' : 'Try Again'}</a>
+<a href="/" class="btn btn-secondary">Go Home</a>
+</div>
+${isDbError ? '<p class="timer">Auto-retrying in <span id="cd">10</span>s...</p><script>var c=10;var t=setInterval(function(){c--;document.getElementById("cd").textContent=c;if(c<=0){clearInterval(t);location.reload()}},1000);</script>' : ''}
+</div>
+</body></html>`);
 });
 
 // === ATTACH WEBSOCKET SERVER ===

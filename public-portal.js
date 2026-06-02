@@ -63,7 +63,18 @@ module.exports = function(app, pool, bcrypt, ah, esc, renderPage, audit, sendEma
   // PUBLIC LANDING PAGE (overrides launch-routes /)
   // ============================================================
   app.get('/', (req, res) => {
-    if (req.session && req.session.user) return res.redirect('/dashboard');
+    // If logged in, test DB before redirecting to dashboard (which needs DB)
+    if (req.session && req.session.user) {
+      pool.query('SELECT 1').then(() => res.redirect('/dashboard')).catch(() => {
+        console.warn('[Landing] DB unreachable, serving static landing page to logged-in user');
+        _serveLandingPage(req, res);
+      });
+      return;
+    }
+    _serveLandingPage(req, res);
+  });
+
+  function _serveLandingPage(req, res) {
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
