@@ -46842,31 +46842,37 @@ server.listen(PORT, () => {
     const mq = app.get('migrationQueue');
     if (mq && mq.queue.length > 0) {
       console.log(`[Startup] Processing ${mq.queue.length} queued migrations...`);
-      await mq.drain();
+      // Safety timeout: don't let drain() hang forever
+      await Promise.race([
+        mq.drain(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('MigrationQueue drain timeout')), 60000))
+      ]).catch(e => {
+        console.warn(`[Startup] ${e.message} — skipping remaining migrations`);
+      });
     } else {
       console.log('[Startup] No queued migrations (modules ran migrations directly)');
     }
   } catch (e) {
-    /* migration OK */
+    console.warn('[Startup] Migration drain error:', e.message);
   }
 
-  // Wait for startup guard queue to drain (with 90s safety timeout)
+  // Wait for startup guard queue to drain (with 30s timeout — reduced from 90s)
   console.log('[Startup] Waiting for guard queue to drain...');
-  await waitForStartupDrain(90000);
+  await waitForStartupDrain(30000);
   console.log('[Startup] Guard queue drained or timed out');
 
   // Transition guard to production mode (increase concurrency, keep as limiter)
   finishStartupMigrations();
 
-  // Brief settle time for in-flight migrateQuery jobs
-  await new Promise(r => setTimeout(r, 3000));
+  // Brief settle time for in-flight migrateQuery jobs (reduced from 3s)
+  await new Promise(r => setTimeout(r, 1000));
 
   // OPEN THE GATE
   _serverReady = true;
   console.log('Comfort Platform LIVE — accepting all requests');
 })();
 
-// Deploy trigger 1779091065
+// Deploy trigger 1779091066 — cold-start optimization + keep-alive workflow
 // Phase 4 deploy trigger: 27 additional modules — 2026-05-18
 // Redeploy trigger: 2026-05-18 webhooks-fix-pwa-update-v4
 // v19.2 deploy trigger: fix 278 SQL migration errors + subscription gating + admin feature overrides — 2026-05-19

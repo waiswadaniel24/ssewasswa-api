@@ -87,17 +87,18 @@ class MigrationQueue {
 
   _processNext() {
     if (this.queue.length === 0) {
-      // Check if all work is done
-      if (this._drainResolve && this.completed + this.failed >= (this._drainPromise ? this.queue.length : 0)) {
-        // Already resolved or no work pending
-      }
       return;
     }
 
     const item = this.queue.shift();
-    if (!item) return;
+    if (!item) {
+      // Queue might be empty now — check if drain should resolve
+      this._tryResolveDrain();
+      return;
+    }
 
     const { name, fn } = item;
+    this._runningCount = (this._runningCount || 0) + 1;
 
     (async () => {
       try {
@@ -106,26 +107,25 @@ class MigrationQueue {
         console.log(`[MigrationQueue] ✓ ${name} (${this.completed + this.failed}/${this.completed + this.failed + this.queue.length})`);
       } catch (err) {
         this.failed++;
-        /* migration OK */
+        /* migration OK — don't crash on migration errors */
       }
 
-      // Process next item
+      this._runningCount = (this._runningCount || 0) - 1;
+
+      // Process next item or resolve drain
       if (this.queue.length > 0) {
         this._processNext();
-      } else if (this._drainResolve && this.queue.length === 0) {
-        // All items have been dequeued; check if all are done
-        const totalProcessed = this.completed + this.failed;
-        // Simple check: if queue is empty and we're the last running task
-        // We need a counter for currently running tasks
-        this._runningCount = (this._runningCount || 0) - 1;
-        if (this._runningCount <= 0 && this.queue.length === 0) {
-          this._drainResolve();
-          this._drainResolve = null;
-        }
+      } else {
+        this._tryResolveDrain();
       }
     })();
+  }
 
-    this._runningCount = (this._runningCount || 0) + 1;
+  _tryResolveDrain() {
+    if (this._drainResolve && this.queue.length === 0 && (this._runningCount || 0) <= 0) {
+      this._drainResolve();
+      this._drainResolve = null;
+    }
   }
 
   /** Get queue status */

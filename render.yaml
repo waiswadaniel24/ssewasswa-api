@@ -4,7 +4,7 @@ services:
     env: node
     plan: free
     buildCommand: npm install
-    startCommand: node --max-old-space-size=400 server.js
+    startCommand: node --max-old-space-size=384 --optimize-for-size server.js
     healthCheckPath: /ping
     envVars:
       - key: NODE_ENV

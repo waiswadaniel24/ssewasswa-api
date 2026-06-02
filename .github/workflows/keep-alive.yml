@@ -1,0 +1,23 @@
+name: Keep Alive
+
+on:
+  schedule:
+    # Ping every 14 minutes (free tier spins down after ~15 min of inactivity)
+    - cron: '*/14 * * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping Render Service
+        run: |
+          echo "Pinging ssewasswa.onrender.com to prevent cold start..."
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 https://ssewasswa.onrender.com/ping)
+          echo "Response: HTTP $HTTP_CODE"
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Service is alive"
+          else
+            echo "⚠️ Service returned HTTP $HTTP_CODE (may be starting up)"
+          fi
