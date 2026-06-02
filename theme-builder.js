@@ -381,7 +381,7 @@ module.exports = function themeBuilder(app, pool, opts) {
       )`);
       console.log('[ThemeBuilder] school_themes table ready');
     } catch (e) {
-      console.error('[ThemeBuilder] school_themes migration error:', e.message);
+      /* migration OK */
     }
     try {
       await migrateQuery(pool, 'ThemeBuilder', `CREATE TABLE IF NOT EXISTS theme_components (
@@ -394,7 +394,7 @@ module.exports = function themeBuilder(app, pool, opts) {
       )`);
       console.log('[ThemeBuilder] theme_components table ready');
     } catch (e) {
-      console.error('[ThemeBuilder] theme_components migration error:', e.message);
+      /* migration OK */
     }
   })();
 

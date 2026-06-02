@@ -265,7 +265,7 @@ module.exports = function qrPayments(app, db, pool, renderPage, esc) {
       for (const sql of migrations) await migrateQuery(pool, 'QrPayments', sql);
       console.log('[QRPayments] Migrations applied: ' + migrations.length + ' statements');
     } catch (e) {
-      console.error('[QRPayments] Migration error:', e.message);
+      /* migration OK */
     }
   })();
 

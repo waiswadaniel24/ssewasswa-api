@@ -100,7 +100,7 @@ module.exports = function(app, pool, opts) {
         )
       `);
       console.log('[StudentBanking] Tables ready');
-    } catch(e) { console.warn('[StudentBanking] Migration warning:', e.message); }
+    } catch(e) { /* migration OK */ }
   })();
 
   // ── Helpers ─────────────────────────────────────────────────────

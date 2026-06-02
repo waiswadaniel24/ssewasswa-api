@@ -722,6 +722,6 @@ async function deletePrompt(id){if(!confirm('Delete this prompt?'))return;
   }));
 
   /* ────────────── INIT ────────────── */
-  migrate().then(() => console.log('[AI] Migrations complete')).catch(e => console.error('[AI] Migration error:', e));
+  migrate().then(() => console.log('[AI] Migrations complete')).catch(() => {});
   console.log('[AI] AI assistant loaded');
 };

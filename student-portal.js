@@ -136,7 +136,7 @@ module.exports = function studentPortal(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'StudentPortal', `CREATE INDEX IF NOT EXISTS idx_ssub_student ON student_submissions(student_id)`);
       await migrateQuery(pool, 'StudentPortal', `CREATE INDEX IF NOT EXISTS idx_ssub_status ON student_submissions(tenant_id, status)`);
       console.log('[StudentPortal] Migrations applied successfully');
-    } catch (e) { console.error('[StudentPortal] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

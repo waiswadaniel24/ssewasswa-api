@@ -56,7 +56,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_onb_sett_tenant ON onboarding_settings(tenant_id);
     `);
   }
-  ensureTables().catch(e => console.error('[onboarding] migration error:', e.message));
+  ensureTables().catch(() => {});
 
   /* ── Helpers ───────────────────────────────────────────────────── */
   async function getProgress(tid) {

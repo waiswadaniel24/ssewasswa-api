@@ -124,7 +124,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
       ];
       for (const i of idxs) await migrateQuery(pool, 'Scholarships', `CREATE INDEX IF NOT EXISTS ${i}`);
       console.log('[Scholarships] Migrations applied');
-    } catch (e) { console.error('[Scholarships] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

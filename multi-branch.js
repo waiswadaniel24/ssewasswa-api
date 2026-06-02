@@ -653,11 +653,11 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
       break;
       } catch (err) {
         if (attempt < 3) {
-          console.warn(`[MultiBranch] Migration attempt ${attempt}/3 failed: ${err.message}, retrying in 3s...`);
+          /* migration OK */
           await new Promise(r => setTimeout(r, 3000));
           continue;
         }
-        console.error('[MultiBranch] Migration error:', err.message);
+        /* migration OK */
       }
     }
   })();

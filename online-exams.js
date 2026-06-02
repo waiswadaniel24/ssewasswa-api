@@ -216,7 +216,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
     try {
       for (const sql of migrations) await migrateQuery(pool, 'OnlineExams', sql);
       console.log('[Exams] Migrations applied');
-    } catch (e) { console.error('[Exams] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

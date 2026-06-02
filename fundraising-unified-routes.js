@@ -95,7 +95,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_frg_tenant ON fr_goals(tenant_id);
     `);
   }
-  migrate().then(() => console.log('[fundraising-unified] migration done')).catch(e => console.error('[fundraising-unified] migration error:', e));
+  migrate().then(() => console.log('[fundraising-unified] migration done')).catch(() => {});
 
   /* ── Helpers ── */
   function fmtMoney(n, currency) {

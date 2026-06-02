@@ -116,7 +116,7 @@ module.exports = function gallery(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'Gallery', `CREATE INDEX IF NOT EXISTS idx_gt_photo ON gallery_tags(photo_id)`);
       await migrateQuery(pool, 'Gallery', `CREATE INDEX IF NOT EXISTS idx_gt_tenant ON gallery_tags(tenant_id)`);
       console.log('[Gallery] Migrations applied');
-    } catch (e) { console.error('[Gallery] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

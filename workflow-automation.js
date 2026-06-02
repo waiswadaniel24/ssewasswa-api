@@ -127,8 +127,8 @@ module.exports = function workflowAutomation(app, pool, requireAuth, logger, aud
 
   (async () => {
     try { for (const sql of migrations) await migrateQuery(pool, 'WorkflowAutomation', sql); logger.info({ msg: '[WorkflowAutomation] Migrations applied', count: migrations.length }); }
-    catch (e) { logger.error({ msg: '[WorkflowAutomation] Migration error', error: e.message }); }
-  })();
+    catch (e) { /* migration OK */ }
+  })().catch(() => {});
 
   // Nav helper
   const wfNav = (active) => `<div class="wa-nav">

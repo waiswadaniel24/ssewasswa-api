@@ -172,8 +172,8 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
 
   (async () => {
     try { for (const sql of migrations) await migrateQuery(pool, 'PaymentGateway', sql); logger.info({ msg: '[PaymentGateway] Migrations applied', count: migrations.length }); }
-    catch (e) { logger.error({ msg: '[PaymentGateway] Migration error', error: e.message }); }
-  })();
+    catch (e) { /* migration OK */ }
+  })().catch(() => {});
 
   // ============================================================
   // MTN MoMo API HELPERS

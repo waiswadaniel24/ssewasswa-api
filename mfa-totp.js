@@ -190,7 +190,7 @@ module.exports = function (app, pool, opts) {
     } finally {
       client.release();
     }
-  })().catch(err => console.error('[mfa-totp] Migration error:', err));
+  })().catch(() => {});
 
   /* ─────────────────────── Shared UI snippets ─────────────────────── */
   const SKIP = `

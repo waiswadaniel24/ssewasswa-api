@@ -156,30 +156,31 @@ FEATURE_MIGRATIONS.forEach(m => migrations.push(m));
 // ============================================================
 const SCRAPE_SOURCES = {
   news: [
-    { url: 'https://www.newvision.co.ug/rss.xml', source: 'New Vision', max: 15 },
-    { url: 'https://www.monitor.co.ug/uganda/rss.xml', source: 'Daily Monitor', max: 15 },
-    { url: 'https://chimpreports.com/feed/', source: 'Chimp Reports', max: 10 },
-    { url: 'https://eagle.co.ug/feed/', source: 'The Eagle Online', max: 8 },
-    { url: 'https://www.bbc.com/news/world/africa/rss.xml', source: 'BBC Africa', max: 10 },
+    { url: 'https://feeds.bbci.co.uk/news/world/africa/rss.xml', source: 'BBC Africa', max: 10 },
+    { url: 'https://rss.nytimes.com/services/xml/rss/nyt/Africa.xml', source: 'NYT Africa', max: 10 },
     { url: 'https://www.aljazeera.com/xml/rss/all.xml', source: 'Al Jazeera', max: 8 },
+    { url: 'https://feeds.bbci.co.uk/news/business/rss.xml', source: 'BBC Business', max: 5 },
+    { url: 'https://feeds.bbci.co.uk/news/health/rss.xml', source: 'BBC Health', max: 5 },
   ],
   sports: [
-    { url: 'https://www.newvision.co.ug/sports/rss.xml', source: 'New Vision Sports', max: 10 },
-    { url: 'https://www.bbc.com/sport/africa/rss.xml', source: 'BBC Sport Africa', max: 8 },
+    { url: 'https://feeds.bbci.co.uk/sport/africa/rss.xml', source: 'BBC Sport Africa', max: 8 },
   ],
-  technology: [
+  entertainment: [
+    { url: 'https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml', source: 'BBC Entertainment', max: 8 },
+    { url: 'https://www.theverge.com/rss/index.xml', source: 'The Verge', max: 8 },
+  ],
+  tech: [
     { url: 'https://techcrunch.com/feed/', source: 'TechCrunch', max: 8 },
     { url: 'https://www.theverge.com/rss/index.xml', source: 'The Verge', max: 8 },
   ],
-  business: [
-    { url: 'https://www.bbc.com/news/business/rss.xml', source: 'BBC Business', max: 5 },
+  education: [
+    { url: 'https://feeds.bbci.co.uk/news/education/rss.xml', source: 'BBC Education', max: 5 },
   ],
-  education: [],
-  health: [
-    { url: 'https://www.bbc.com/news/health/rss.xml', source: 'BBC Health', max: 5 },
+  jobs: [
+    { url: 'https://feeds.bbci.co.uk/news/business/rss.xml', source: 'Business News', country: 'East Africa' },
   ],
-  entertainment: [
-    { url: 'https://www.boredpanda.com/feed/', source: 'Bored Panda', max: 8 },
+  scholarships: [
+    { url: 'https://www.grants.gov/rss/community.xml', source: 'Grants.gov', category: 'grant' },
   ],
 };
 
@@ -233,9 +234,8 @@ async function scrapeRSSFeeds() {
       }
     }
     console.log(`[ViralEngine] Scrape done: ${stats.ok}/${stats.sources} sources, ${stats.items} new items`);
-  } catch(e) {
-    console.error('[ViralEngine] Scrape error:', e.message);
-  } finally {
+  } catch(e) { /* feed down, skip silently */ }
+  finally {
     _scrapeLock = false;
   }
   return stats;
@@ -881,7 +881,7 @@ setTimeout(async () => {
   } catch(e) {
     console.error('[ViralEngine] Initial setup error:', e.message);
   }
-}, 120000); // Run 120 seconds after startup (let DB migrations finish first)
+}, 300000); // Run 5 minutes after startup (let DB migrations finish first)
 
 // Scrape every 6 hours
 setInterval(async () => {

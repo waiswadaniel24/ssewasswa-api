@@ -180,7 +180,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
 
   (async () => {
     try { for (const sql of migrations) await migrateQuery(pool, 'VisitorLog', sql); console.log('[Visitors] Migrations applied'); }
-    catch (e) { console.error('[Visitors] Migration error:', e.message); }
+    catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

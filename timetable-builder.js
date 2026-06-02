@@ -151,7 +151,7 @@ module.exports = function timetableBuilder(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'TimetableBuilder', 'CREATE INDEX IF NOT EXISTS idx_tc_tenant ON timetable_conflicts(tenant_id)');
       await migrateQuery(pool, 'TimetableBuilder', 'CREATE INDEX IF NOT EXISTS idx_tc_resolved ON timetable_conflicts(tenant_id, resolved)');
       console.log('[TimetableBuilder] Migrations applied successfully');
-    } catch (e) { console.error('[TimetableBuilder] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

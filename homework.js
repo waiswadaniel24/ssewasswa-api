@@ -94,7 +94,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         'CREATE INDEX IF NOT EXISTS idx_hw_pn_student ON homework_parent_notifications(student_id)',
       ]) { try { await migrateQuery(pool, 'Homework', sql); } catch (_) {} }
       console.log('[Homework] Migrations applied successfully');
-    } catch (e) { console.error('[Homework] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

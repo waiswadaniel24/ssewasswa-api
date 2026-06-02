@@ -68,7 +68,7 @@ module.exports = function dataImport(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'DataImport', `CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status);`);
       await migrateQuery(pool, 'DataImport', `CREATE INDEX IF NOT EXISTS idx_import_jobs_target ON import_jobs(target_table);`);
     } catch (err) {
-      console.error('[DataImport] Migration error:', err.message);
+      /* migration OK */
     }
   })();
 

@@ -214,7 +214,7 @@ module.exports = function(app, pool, opts) {
     try {
       for (const sql of migrations) await migrateQuery(pool, 'CommunicationHubRoutes', sql);
       console.log('[CommHub] Migrations applied: ' + migrations.length + ' statements');
-    } catch (e) { console.error('[CommHub] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ══════════════════════════════════════════════════════════

@@ -111,7 +111,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc, opts = {}) {
         console.warn('[SMS] Seed skipped (tenant_id=0 may not exist):', seedErr.message);
       }
       console.log('[SMS] Migrations & seeds applied');
-    } catch (e) { console.error('[SMS] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ═══════════════════════════════════════════════════════

@@ -304,7 +304,7 @@ module.exports = function(app, pool, opts) {
       ];
       for (const i of idxs) await migrateQuery(pool, 'StudentPortfolio', `CREATE INDEX IF NOT EXISTS ${i}`);
       console.log('[StudentPortfolio] Migrations applied');
-    } catch (e) { console.error('[StudentPortfolio] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

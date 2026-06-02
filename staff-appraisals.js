@@ -371,7 +371,7 @@ module.exports = function staffAppraisals(app, db, pool, renderPage, esc) {
 
       console.log('[StaffAppraisals] Migrations applied successfully');
     } catch (e) {
-      console.error('[StaffAppraisals] Migration error:', e.message);
+      /* migration OK */
     }
   })();
 

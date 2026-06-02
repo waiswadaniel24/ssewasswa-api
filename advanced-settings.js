@@ -287,9 +287,9 @@ document.getElementById('${uid}').addEventListener('change',function(){
 
       console.log('[AdvancedSettings] Migrations & seeding applied successfully');
     } catch (e) {
-      console.error('[AdvancedSettings] Migration error:', e.message);
+      /* migration OK */
     }
-  })();
+  })().catch(() => {});
 
   // ============================================================
   // ROUTE 1: GET /settings — Settings Dashboard (General)

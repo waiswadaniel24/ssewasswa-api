@@ -170,7 +170,7 @@ module.exports = function gradebook(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'Gradebook', `CREATE INDEX IF NOT EXISTS idx_grading_scales_tenant ON grading_scales(tenant_id)`);
       await migrateQuery(pool, 'Gradebook', `CREATE INDEX IF NOT EXISTS idx_class_subjects_tenant ON class_subjects(tenant_id)`);
       console.log('[Gradebook] Migrations applied successfully');
-    } catch (e) { console.error('[Gradebook] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

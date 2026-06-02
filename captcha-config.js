@@ -72,7 +72,7 @@ module.exports = function (app, pool, opts) {
     } finally {
       client.release();
     }
-  })().catch(err => console.error('[captcha-config] Migration error:', err));
+  })().catch(() => {});
 
   /* ─────────────────────── Shared UI styles (dark theme) ─────────────────────── */
   const STYLE = `

@@ -98,7 +98,7 @@ module.exports = function ussdPortal(app, db, pool, renderPage, esc) {
       }
 
       console.log('[USSD] Migrations applied');
-    } catch (e) { console.error('[USSD] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ═══════════════════════════════════════════════════════

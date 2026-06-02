@@ -111,7 +111,7 @@ module.exports = function (app, pool, opts) {
     CREATE INDEX IF NOT EXISTS idx_sec_audit_tenant ON security_audit_events(tenant_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sec_blocklist_ip ON security_ip_blocklist(tenant_id, ip_address);
     CREATE INDEX IF NOT EXISTS idx_sec_sessions_tenant ON security_sessions(tenant_id, last_activity DESC);
-  `).catch(err => console.warn('[security-auth-dashboard] Migration error:', err.message));
+  `).catch(() => {});
 
   /* ─────────────────────── Shared styles ─────────────────────── */
   const STYLE = `

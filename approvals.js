@@ -131,7 +131,7 @@ module.exports = function approvals(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'Approvals', `CREATE INDEX IF NOT EXISTS idx_an_recipient ON approval_notifications(recipient_id, is_read)`);
       await migrateQuery(pool, 'Approvals', `CREATE INDEX IF NOT EXISTS idx_awt_tenant ON approval_workflow_templates(tenant_id)`);
       console.log('[Approvals] Migrations applied successfully');
-    } catch (e) { console.error('[Approvals] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

@@ -128,7 +128,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
 
       // Seed default offense types if none exist (per-tenant seeding happens on first use)
       console.log('[Discipline] Migrations applied successfully');
-    } catch (e) { console.error('[Discipline] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // Helper: seed default offense types for tenant

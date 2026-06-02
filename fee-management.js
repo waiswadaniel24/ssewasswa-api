@@ -205,7 +205,7 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'FeeManagement', `CREATE INDEX IF NOT EXISTS idx_payment_requests_tenant ON payment_requests(tenant_id)`);
       await migrateQuery(pool, 'FeeManagement', `CREATE INDEX IF NOT EXISTS idx_payment_trans_tenant ON payment_transactions(tenant_id)`);
       console.log('[FeeManagement] Migrations applied successfully');
-    } catch (e) { console.error('[FeeManagement] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

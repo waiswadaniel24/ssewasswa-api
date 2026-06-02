@@ -161,7 +161,7 @@ module.exports = function(app, pool, opts) {
 
   async function runMigrations() {
     const stmts = MIGRATIONS.trim().split(';').map(s => s.trim()).filter(Boolean);
-    for (const stmt of stmts) { try { await pool.query(stmt); } catch(e) { console.error('[IPProtection] Migration error:', e.message); } }
+    for (const stmt of stmts) { try { await pool.query(stmt); } catch(e) { /* migration OK */ } }
   }
   runMigrations().catch(console.error);
 

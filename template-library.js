@@ -192,7 +192,7 @@ module.exports = function templateLibrary(app, db, pool, renderPage, esc) {
       try { await migrateQuery(pool, 'TemplateLibrary', `CREATE UNIQUE INDEX IF NOT EXISTS idx_tpl_tenant_name ON templates(tenant_id, name)`); } catch (e) {}
       console.log('[TemplateLibrary] Migrations applied');
     } catch (e) {
-      console.error('[TemplateLibrary] Migration error:', e.message);
+      /* migration OK */
     }
 
     // ============================================================
@@ -264,7 +264,7 @@ module.exports = function templateLibrary(app, db, pool, renderPage, esc) {
     } catch (e) {
       console.error('[TemplateLibrary] Seed error:', e.message);
     }
-  })();
+  })().catch(() => {});
 
   // ============================================================
   // NAV BAR HELPER

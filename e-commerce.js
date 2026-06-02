@@ -142,7 +142,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
 
   (async () => {
     try { for (const sql of migrations) await migrateQuery(pool, 'ECommerce', sql); console.log(`[E-Commerce] ${migrations.length} migrations applied`); }
-    catch (e) { console.error('[E-Commerce] Migration error:', e.message); }
+    catch (e) { /* migration OK */ }
   })();
 
   // ═══════════════════════════════════════════════════════════

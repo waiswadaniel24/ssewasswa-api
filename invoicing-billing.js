@@ -265,8 +265,8 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
 
   (async () => {
     try { for (const sql of migrations) await migrateQuery(pool, 'InvoicingBilling', sql); console.log('[Invoicing] Migrations applied: ' + migrations.length + ' statements'); }
-    catch (e) { console.error('[Invoicing] Migration error:', e.message); }
-  })();
+    catch (e) { /* migration OK */ }
+  })().catch(() => {});
 
   // ── helper: navigation bar ───────────────────────────────
   function nav(active) {

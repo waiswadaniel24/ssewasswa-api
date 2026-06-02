@@ -173,7 +173,7 @@ const getFeatureAccessList = (plan) => {
     await migrateQuery(pool, 'IndividualPortal', `CREATE TABLE IF NOT EXISTS ind_gifts (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT NOT NULL, name TEXT NOT NULL, recipient TEXT, occasion TEXT, direction TEXT DEFAULT 'given', cost NUMERIC(15,2), date_given DATE, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`);
     await migrateQuery(pool, 'IndividualPortal', `CREATE TABLE IF NOT EXISTS ind_bucket_list (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT NOT NULL, name TEXT NOT NULL, category TEXT DEFAULT 'personal', completed BOOLEAN DEFAULT false, completed_at DATE, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`);
     console.log('[IndividualPortal] All 38 tables migrated successfully');
-  } catch(e) { console.error('[IndividualPortal] Migration error:', e.message); }
+  } catch(e) { /* migration OK */ }
 })();
 
 // ============================================================

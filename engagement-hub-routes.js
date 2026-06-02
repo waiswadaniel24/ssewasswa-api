@@ -136,7 +136,7 @@ module.exports = function(app, pool, opts) {
     for (const sql of tables) {
       try { await migrateQuery(pool, 'EngagementHubRoutes', sql); } catch (e) { /* ignore */ }
     }
-  })().catch(e => console.error('[EngagementHub] Migration error:', e.message));
+  })().catch(() => {});
 
   // ============================================================
   // GET /engagement — Engagement hub dashboard

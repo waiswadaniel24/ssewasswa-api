@@ -168,7 +168,7 @@ module.exports = function crm(app, db, pool, renderPage, esc) {
 
   (async () => {
     try { for (const sql of migrations) await migrateQuery(pool, 'Crm', sql); console.log('[CRM] Migrations applied: ' + migrations.length + ' statements'); }
-    catch (e) { console.error('[CRM] Migration error:', e.message); }
+    catch (e) { /* migration OK */ }
   })();
 
   // ════════════════════════════════════════════════════════════

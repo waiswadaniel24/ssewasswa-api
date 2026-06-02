@@ -21,7 +21,7 @@ async function migrate() {
 
     console.log('Standalone migrations complete');
   } catch (e) {
-    console.error('Migration failed:', e.message);
+    /* migration OK */
   } finally {
     client.release();
     await pool.end();

@@ -65,7 +65,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_asr_tenant ON analytics_saved_reports(tenant_id);
     `);
   }
-  migrate().then(() => console.log('[analytics] migration done')).catch(e => console.error('[analytics] migration error:', e));
+  migrate().then(() => console.log('[analytics] migration done')).catch(() => {});
 
   /* ── Helpers ── */
   function chartPage(title, body, req) {

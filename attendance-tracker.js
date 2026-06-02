@@ -122,8 +122,8 @@ module.exports = function attendanceTracker(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'AttendanceTracker', `CREATE INDEX IF NOT EXISTS idx_ae_date ON attendance_exceptions(start_date)`);
       await migrateQuery(pool, 'AttendanceTracker', `CREATE INDEX IF NOT EXISTS idx_ae_status ON attendance_exceptions(tenant_id, status)`);
       console.log('[Attendance] Migrations applied successfully');
-    } catch (e) { console.error('[Attendance] Migration error:', e.message); }
-  })();
+    } catch (e) { /* migration OK */ }
+  })().catch(() => {});
 
   // ============================================================
   // ROUTE 1: GET /attendance — Dashboard

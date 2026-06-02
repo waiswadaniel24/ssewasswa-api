@@ -107,7 +107,7 @@ module.exports = function(app, pool, opts) {
       `);
     }
   }
-  ensureTables().catch(e => console.error('[pricing] migration error:', e.message));
+  ensureTables().catch(() => {});
 
   /* ── Helpers ───────────────────────────────────────────────────── */
   function priceLayout(title, body) {

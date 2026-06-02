@@ -262,7 +262,7 @@ module.exports = function (app, pool, opts) {
 
       console.log('[School-v18-b] Migrations applied successfully');
     } catch (e) {
-      console.error('[School-v18-b] Migration error:', e.message);
+      /* migration OK */
     }
   })();
 

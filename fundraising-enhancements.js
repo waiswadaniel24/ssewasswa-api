@@ -1347,7 +1347,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     console.log('[Fundraising] All migrations completed');
   }
   // Stagger to avoid connection storm at startup (120s delay for 170+ statements)
-  setTimeout(() => runFundraisingMigrations().catch(e => console.error('[Fundraising Migration Error]', e.message)), 120000);
+  setTimeout(() => runFundraisingMigrations().catch(() => {}), 120000);
 
   // =============================================
   // HELPER: Generate slug from title

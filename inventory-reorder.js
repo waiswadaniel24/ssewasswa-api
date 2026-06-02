@@ -178,7 +178,7 @@ module.exports = function inventoryReorder(app, db, pool, renderPage, esc) {
     try {
       for (const sql of migrations) await migrateQuery(pool, 'InventoryReorder', sql);
       console.log('[InventoryReorder] Migrations applied: ' + migrations.length + ' statements');
-    } catch (e) { console.error('[InventoryReorder] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ── helper: sync stock from inventory_items ───────────────

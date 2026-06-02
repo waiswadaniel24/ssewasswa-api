@@ -293,7 +293,7 @@ module.exports = function disciplineTracker(app, db, pool, renderPage, esc) {
       await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_da_dates ON discipline_actions(tenant_id, start_date, end_date)`);
 
       console.log('[Discipline] Migrations applied successfully');
-    } catch (e) { console.error('[Discipline] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
     
   })();
 

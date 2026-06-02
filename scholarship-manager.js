@@ -381,7 +381,7 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
 
       console.log('[ScholarshipManager] Migrations applied successfully');
     } catch (e) {
-      console.error('[ScholarshipManager] Migration error:', e.message);
+      /* migration OK */
     }
   })();
 

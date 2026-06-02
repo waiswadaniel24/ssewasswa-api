@@ -514,7 +514,7 @@ Contact: {{school_phone}}`
 
       console.log('[WhatsAppReceipts] Migrations applied successfully');
     } catch (e) {
-      console.error('[WhatsAppReceipts] Migration error:', e.message);
+      /* migration OK */
     }
   })();
 

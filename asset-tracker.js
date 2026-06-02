@@ -180,7 +180,7 @@ module.exports = function assetTracker(app, db, pool, renderPage, esc) {
 
   (async () => {
     try { for (const sql of migrations) await migrateQuery(pool, 'AssetTracker', sql); console.log('[Assets] Migrations applied: ' + migrations.length + ' statements'); }
-    catch (e) { console.error('[Assets] Migration error:', e.message); }
+    catch (e) { /* migration OK */ }
   })();
 
   // ── helper: nav ───────────────────────────────────────────

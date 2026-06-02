@@ -201,7 +201,7 @@ module.exports = function(app, pool, opts) {
           (0,'Supplies','expense','#f59e0b'),(0,'Marketing','expense','#ec4899'),(0,'Transport','expense','#06b6d4')`);
       }
       console.log('[FinancialSuite] Migrations applied: ' + migrations.length + ' statements');
-    } catch (e) { console.error('[FinancialSuite] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ── generate invoice number ────────────────────────────

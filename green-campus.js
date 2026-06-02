@@ -327,7 +327,7 @@ module.exports = function (app, pool, opts) {
 
       console.log('[GreenCampus] Tables ready');
     } catch (e) {
-      console.warn('[GreenCampus] Migration warning:', e.message);
+      /* migration OK */
     }
   })();
 

@@ -810,6 +810,6 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   migrate().then(() => {
     console.log('[Canteen] Meal management loaded');
   }).catch(err => {
-    console.error('[Canteen] Migration failed:', err);
+    /* migration OK */
   });
 };

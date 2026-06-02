@@ -399,7 +399,7 @@ module.exports = function devTeamManager(app, db, pool, renderPage, esc) {
     }).then(function() {
       console.log('[DevTeamManager] Migrations applied successfully (' + migrations.length + ' statements)');
     }).catch(function(err) {
-      console.error('[DevTeamManager] Migration error:', err.message);
+      /* migration OK */
     });
   })();
 

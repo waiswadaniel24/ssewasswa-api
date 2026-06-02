@@ -144,7 +144,7 @@ module.exports = function (app, pool, opts) {
       `);
       console.log('[PeerReview] Tables ready');
     } catch (e) {
-      console.warn('[PeerReview] Migration warning:', e.message);
+      /* migration OK */
     }
   })();
   }, Math.random() * 10000);

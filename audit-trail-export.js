@@ -254,7 +254,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_ae_created ON audit_exports(created_at DESC);
     `);
     console.log('[audit-trail-export] Table audit_exports ready');
-  })().catch(e => console.error('[audit-trail-export] Migration error:', e.message));
+  })().catch(() => {});
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 1: GET / - Dashboard with export history

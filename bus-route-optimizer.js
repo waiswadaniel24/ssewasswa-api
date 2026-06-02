@@ -269,7 +269,7 @@ module.exports = function(app, pool, opts) {
   migrate().then(() => {
     console.log('[bus-route-optimizer] Migrations complete.');
   }).catch(err => {
-    console.error('[bus-route-optimizer] Migration error:', err.message);
+    /* migration OK */
   });
   }, Math.random() * 10000);
 

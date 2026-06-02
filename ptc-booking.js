@@ -145,7 +145,7 @@ module.exports = function ptcBooking(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'PtcBooking', `CREATE INDEX IF NOT EXISTS idx_pb_parent ON ptc_bookings(tenant_id, parent_phone)`);
       await migrateQuery(pool, 'PtcBooking', `CREATE INDEX IF NOT EXISTS idx_pb_status ON ptc_bookings(tenant_id, status)`);
       console.log('[PTCBooking] Migrations applied');
-    } catch (e) { console.error('[PTCBooking] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

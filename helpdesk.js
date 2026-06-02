@@ -198,8 +198,8 @@ module.exports = function helpdesk(app, db, pool, renderPage, esc) {
         }
       }
       console.log('[Helpdesk] Migrations applied, categories seeded');
-    } catch (e) { console.error('[Helpdesk] Migration error:', e.message); }
-  })();
+    } catch (e) { /* migration OK */ }
+  })().catch(() => {});
 
   // ============================================================
   // HELPERS

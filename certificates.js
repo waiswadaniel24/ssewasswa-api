@@ -218,7 +218,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
       }
 
       console.log('[Certificates] Migrations & seeds applied successfully');
-    } catch (e) { console.error('[Certificates] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

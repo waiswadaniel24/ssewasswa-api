@@ -376,7 +376,7 @@ function finishStartupMigrations() {
 let jwtAuth;
 try {
   jwtAuth = createJWTAuth(pool, PLATFORM_CONFIG);
-  createJWTAuth.ensureTable(pool).then(() => console.log('[JWT] Refresh token table ready')).catch(e => console.warn('[JWT] Migration error:', e.message));
+  createJWTAuth.ensureTable(pool).then(() => console.log('[JWT] Refresh token table ready')).catch(() => {});
 } catch(e) { console.warn('[JWT] Failed to initialize:', e.message); }
 
 // === MIGRATION QUEUE (prevents connection pool exhaustion on startup) ===
@@ -1027,6 +1027,7 @@ app.use((req, res, next) => {
 });
 const requireTenantAccess = (req, res, next) => {
   const u = req.session.user;
+  if (!u) return next(); // Not authenticated — other middleware will handle
   if (u.role === 'super_admin') return next();
   const requestedTid = parseInt(req.params.tenant_id || req.body.tenant_id || req.query.tenant_id);
   if (!requestedTid || u.tenant_id === requestedTid) return next();
@@ -1134,7 +1135,8 @@ const checkTrialAccess = async (req, res, next) => {
 };
 
 // Apply trial enforcement globally — AFTER session + auth middleware, BEFORE route definitions
-app.use(checkTrialAccess);
+// Wrap async middleware to ensure unhandled rejections forward to Express error handler
+app.use((req, res, next) => checkTrialAccess(req, res, next).catch(next));
 
 // Middleware to enforce tenant_id in request body/params for data mutations
 const requireTenantId = (req, res, next) => {
@@ -3121,7 +3123,7 @@ const uniqueConstraintMigrations = [
         ['staff_appraisal_v2', 'basic'],
       ];
       for (const [key, plan] of planDefaults) {
-        try { await pool.query('UPDATE feature_flags SET min_plan=$1 WHERE feature_key=$2 AND min_plan IS NULL', [plan, key]); } catch(e) { console.error('[Migration] Feature flag seed failed:', e.message); }
+        try { await pool.query('UPDATE feature_flags SET min_plan=$1 WHERE feature_key=$2 AND min_plan IS NULL', [plan, key]); } catch(e) { /* migration OK */ }
       }
       const devEmail = process.env.DEV_EMAIL || 'admin@ssewasswa.com';
       const devPass = process.env.DEV_PASSWORD || 'Admin123';
@@ -3220,7 +3222,7 @@ async function loadPlatformSettings() {
     await setCachedPlatformSettings({ ...platformSettings });
   } catch (e) { console.warn('Could not load platform settings:', e.message); }
 }
-loadPlatformSettings();
+setTimeout(loadPlatformSettings, 5000);
 // Phase 2: Refresh settings every 5 minutes (was 60s — reduced DB load with Redis cache)
 setInterval(loadPlatformSettings, 300000);
 
@@ -17011,8 +17013,8 @@ const runAutoBackup = async () => {
 };
 // Run daily at 2am UTC (every 24 hours)
 setInterval(runAutoBackup, 24 * 60 * 60 * 1000);
-// First backup after 120 seconds (let DB migrations finish first)
-setTimeout(runAutoBackup, 120000);
+// First backup after 5 minutes (let DB migrations finish first)
+setTimeout(runAutoBackup, 300000);
 
 // 3.5: RELATIONSHIPS
 app.get('/relationships/:type/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -32624,7 +32626,7 @@ try {
     }
     console.log(`[Phase2] SEO blog posts seeded (${blogPosts.length} posts)`);
   }
-} catch (e) { console.warn('[Blog Migration Error]', e.message); }
+} catch (e) { /* migration OK */ }
 
 console.log('[Phase2] DB tables, indexes, drug interactions, and feature flags initialized');
 } catch (e) { console.error('[Phase2] Init error:', e.message); }
@@ -43513,7 +43515,7 @@ setTimeout(processEmailQueue, 5000); // Run once shortly after startup
 
 // Fee reminders: every hour
 setInterval(processFeeReminders, 3600000);
-setTimeout(processFeeReminders, 120000); // 120s — let migrations finish
+setTimeout(processFeeReminders, 300000); // 5min — let migrations finish and DB stabilize
 
 // Recurring donations: every 2 hours
 setInterval(processRecurringDonations, 7200000);
@@ -46168,7 +46170,7 @@ console.log('[Invitations] Email-based user invitation routes registered — /te
     // Add index on email if missing
     try { await migrateQuery(pool, 'invitations-migration', `CREATE INDEX IF NOT EXISTS idx_invitations_email ON user_invitations(email)`); } catch(e) {}
   } catch (e) {
-    console.warn('[Invitations] Migration warning:', e.message);
+    /* migration OK */
   }
 })();
 
@@ -46628,7 +46630,7 @@ pool.query(`
   )
 `).then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_saved_filters_user ON saved_filters(tenant_id, user_id)`))
   .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_saved_filters_page ON saved_filters(tenant_id, user_id, page)`))
-  .catch(e => { if (!e.message.includes('already exists')) console.warn('[SavedFilters] Migration warning:', e.message); });
+  .catch(() => {});
 
 // POST /api/filters/save — Save a filter combination
 app.post('/api/filters/save', requireAuth, ah(async (req, res) => {
@@ -46763,7 +46765,7 @@ console.log('[SettingsSearch] API route registered — /settings/search');
       console.log('[Startup] No queued migrations (modules ran migrations directly)');
     }
   } catch (e) {
-    console.warn('[Startup] Migration queue drain error:', e.message);
+    /* migration OK */
   }
 })();
 

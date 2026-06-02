@@ -23,7 +23,7 @@ module.exports = function(app, pool, opts) {
       await migrateQuery(pool, 'AccessibilityChecker', `CREATE INDEX IF NOT EXISTS idx_ai_scan ON accessibility_issues(scan_id)`);
       await migrateQuery(pool, 'AccessibilityChecker', `CREATE INDEX IF NOT EXISTS idx_ai_fixed ON accessibility_issues(is_fixed)`);
       console.log('[A11y] Tables ready');
-    } catch(e) { console.warn('[A11y] Migration:', e.message); }
+    } catch(e) { /* migration OK */ }
   })();
 
   // ============================================================

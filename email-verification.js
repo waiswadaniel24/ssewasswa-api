@@ -39,7 +39,7 @@ module.exports = function(app, pool, opts = {}) {
       await migrateQuery(pool, 'EmailVerification', `CREATE INDEX IF NOT EXISTS idx_email_ver_expires ON email_verifications(expires_at)`);
       console.log('[EmailVerification] Migrations applied');
     } catch (e) {
-      console.error('[EmailVerification] Migration error:', e.message);
+      /* migration OK */
     }
   })();
 

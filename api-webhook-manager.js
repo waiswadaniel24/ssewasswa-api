@@ -131,7 +131,7 @@ module.exports = function(app, pool, opts) {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_activity_tenant ON integration_activity_log(tenant_id)`);
   }
 
-  migrate().catch(e => console.error('Integration migration error:', e));
+  migrate().catch(() => {});
 
   /* ── Activity logger ────────────────────────────────────────── */
   async function logActivity(tid, type, keyId, webhookId, details, ip) {

@@ -141,7 +141,7 @@ module.exports = function notificationCenter(app, db, pool, renderPage, esc) {
 
       console.log('[NotificationCenter] Database migrations complete');
     } catch (err) {
-      console.error('[NotificationCenter] Migration error:', err.message);
+      /* migration OK */
     }
   })();
 

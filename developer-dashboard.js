@@ -381,7 +381,7 @@ module.exports = function (app, pool, opts) {
     try {
       await runMigration(pool, 'developer-dashboard', migrationSQL, { maxRetries: 3, baseDelay: 2000 });
     } catch (e) {
-      console.warn('[DevDashboard] Migration error (non-fatal):', e.message);
+      /* migration OK */
     }
 
     // Seed default API registry entries

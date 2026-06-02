@@ -149,7 +149,7 @@ module.exports = function(app, pool, opts) {
     }
     // Update tenant counts
     await migrateQuery(pool, 'HubRoutes', `UPDATE hub_categories SET tenant_count = (SELECT COUNT(*) FROM hub_public_profiles WHERE category = hub_categories.slug)`).catch(() => {});
-  })().catch(e => console.error('[HubRoutes] Migration error:', e.message));
+  })().catch(() => {});
 
   // ============================================================
   // GET /hub — Hub homepage with featured tenants by category

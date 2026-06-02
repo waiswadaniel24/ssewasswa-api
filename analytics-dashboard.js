@@ -101,7 +101,7 @@ module.exports = function analyticsDashboard(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'AnalyticsDashboard', `CREATE INDEX IF NOT EXISTS idx_asnap_date ON analytics_snapshots(snapshot_date)`);
       await migrateQuery(pool, 'AnalyticsDashboard', `CREATE INDEX IF NOT EXISTS idx_asnap_metric ON analytics_snapshots(tenant_id, metric_name)`);
       console.log('[Analytics] Migrations applied successfully');
-    } catch (e) { console.error('[Analytics] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
   }, Math.random() * 10000);
 

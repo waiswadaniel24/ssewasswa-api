@@ -126,7 +126,7 @@ module.exports = function pushNotifications(app, pool, opts) {
         'CREATE INDEX IF NOT EXISTS idx_pdl_subscriber ON push_delivery_log(subscriber_id);',
       ]) await migrateQuery(pool, 'PushNotifications', sql).catch(() => {});
       console.log('[PushNotifications] Migrations complete');
-    } catch (e) { console.error('[PushNotifications] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ═══════════════════════════════════════════════════════

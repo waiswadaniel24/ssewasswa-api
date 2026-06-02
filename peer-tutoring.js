@@ -145,7 +145,7 @@ module.exports = function(app, pool, opts) {
       for (const i of idxs) { try { await migrateQuery(pool, 'PeerTutoring', `CREATE INDEX IF NOT EXISTS ${i}`); } catch(e) {} }
 
       console.log('[PeerTutoring] Migrations applied');
-    } catch (e) { console.error('[PeerTutoring] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

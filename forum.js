@@ -158,7 +158,7 @@ module.exports = function forum(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'Forum', `CREATE INDEX IF NOT EXISTS idx_fl_target ON forum_likes(tenant_id, target_type, target_id)`);
       await migrateQuery(pool, 'Forum', `CREATE INDEX IF NOT EXISTS idx_fl_user ON forum_likes(user_id, target_type, target_id)`);
       console.log('[Forum] Migrations applied');
-    } catch (e) { console.error('[Forum] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

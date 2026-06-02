@@ -77,7 +77,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_cp_published ON content_published(tenant_id, published_at);
     `);
   }
-  migrate().then(() => console.log('[content-aggregation] migration done')).catch(e => console.error('[content-aggregation] migration error:', e));
+  migrate().then(() => console.log('[content-aggregation] migration done')).catch(() => {});
 
   /* ── Helpers ── */
   function dashPage(title, body, req) {

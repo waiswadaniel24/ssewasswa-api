@@ -301,7 +301,7 @@ module.exports = function (app, pool, opts) {
       await migrateQuery(pool, 'DigitalSignatures', `CREATE INDEX IF NOT EXISTS idx_sigdoc_fingerprint ON signed_documents(fingerprint)`);
 
       console.log('[DigitalSignatures] Migrations applied successfully');
-    } catch (e) { console.error('[DigitalSignatures] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

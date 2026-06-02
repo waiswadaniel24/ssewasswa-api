@@ -82,7 +82,7 @@ module.exports = function (app, pool, opts) {
     CREATE INDEX IF NOT EXISTS idx_tenant_api_keys_tenant ON tenant_api_keys(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_tenant_integrations_tenant ON tenant_integrations(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_tenant_settings_tenant ON tenant_settings(tenant_id);
-  `).catch(err => console.warn('[tenant-admin-dashboard] Migration error:', err.message));
+  `).catch(() => {});
 
   /* ─────────────────────── Shared styles ─────────────────────── */
   const STYLE = `

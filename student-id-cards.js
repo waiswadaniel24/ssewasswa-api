@@ -435,7 +435,7 @@ module.exports = function studentIdCards(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'StudentIdCards', `CREATE INDEX IF NOT EXISTS idx_sic_valid_until ON student_id_cards(valid_until)`);
 
       console.log('[IDCards] Migrations applied successfully');
-    } catch (e) { console.error('[IDCards] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

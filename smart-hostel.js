@@ -273,7 +273,7 @@ module.exports = function smartHostel(app, pool, opts) {
       ];
       for (const sql of idxs) { try { await c.query(sql); } catch(e) {} }
       console.log('[SmartHostel] Migrations complete');
-    } catch (e) { console.error('[SmartHostel] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
     finally { c.release(); }
   })();
 

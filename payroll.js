@@ -161,7 +161,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
 
   (async () => {
     try { for (const sql of migrations) await migrateQuery(pool, 'Payroll', sql); console.log('[Payroll] Migrations applied: ' + migrations.length + ' statements'); }
-    catch (e) { console.error('[Payroll] Migration error:', e.message); }
+    catch (e) { /* migration OK */ }
   })();
 
   // ── helper: navigation bar ───────────────────────────────

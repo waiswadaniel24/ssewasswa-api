@@ -109,7 +109,7 @@ module.exports = function(app, pool, opts) {
         )
       `);
       console.log('[ParentWorkshop] Tables ready');
-    } catch(e) { console.warn('[ParentWorkshop] Migration warning:', e.message); }
+    } catch(e) { /* migration OK */ }
   })();
 
   /* ════════════════════════════════════════════

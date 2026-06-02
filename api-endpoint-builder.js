@@ -69,7 +69,7 @@ module.exports = function(app, pool, opts) {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_call_logs_endpoint ON api_call_logs(endpoint_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_call_logs_created ON api_call_logs(created_at)`);
   }
-  migrate().catch(e => console.error('API Endpoint Builder migration error:', e));
+  migrate().catch(() => {});
 
   /* ── Execute endpoint SQL safely ─────────────────────────────── */
   async function executeEndpointSQL(sql, params, schoolId) {

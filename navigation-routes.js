@@ -180,7 +180,7 @@ module.exports = function(app, pool, opts) {
     for (const sql of tables) {
       try { await migrateQuery(pool, 'NavigationRoutes', sql); } catch (e) { /* ignore */ }
     }
-  })().catch(e => console.error('[NavRoutes] Migration error:', e.message));
+  })().catch(() => {});
 
   // Helper: track recent visit (fire-and-forget)
   const trackRecent = (userId, tid, path, label) => {

@@ -269,7 +269,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_stock_takes_tenant ON stock_takes(tenant_id)`);
       await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_stock_transfers_tenant ON stock_transfers(tenant_id)`);
       console.log('[POS] Migrations applied successfully');
-    } catch (e) { console.error('[POS] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

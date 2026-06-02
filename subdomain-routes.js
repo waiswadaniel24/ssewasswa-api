@@ -60,7 +60,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_domver_domain ON subdomain_domain_verification(domain);
     `);
   }
-  ensureTables().catch(e => console.error('[subdomain] migration error:', e.message));
+  ensureTables().catch(() => {});
 
   /* ── Helpers ───────────────────────────────────────────────────── */
   function validSubdomain(s) {

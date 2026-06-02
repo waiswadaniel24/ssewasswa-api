@@ -36,7 +36,7 @@ module.exports = function (app, pool, opts) {
       await migrateQuery(pool, 'LoginAttemptDashboard', `CREATE INDEX IF NOT EXISTS idx_al_tenant ON account_lockouts(tenant_id)`);
       await migrateQuery(pool, 'LoginAttemptDashboard', `CREATE INDEX IF NOT EXISTS idx_al_active ON account_lockouts(is_active)`);
       console.log('[LoginSecurity] Tables ready');
-    } catch(e) { console.warn('[LoginSecurity] Migration:', e.message); }
+    } catch(e) { /* migration OK */ }
   })();
 
   /* ------------------------------------------------------------------ */

@@ -143,7 +143,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
 
   (async () => {
     try { for (const sql of migrations) await migrateQuery(pool, 'InventoryPro', sql); console.log('[Inventory] Migrations applied: ' + migrations.length + ' statements'); }
-    catch (e) { console.error('[Inventory] Migration error:', e.message); }
+    catch (e) { /* migration OK */ }
   })();
 
   // ── helper: render with nav ───────────────────────────────

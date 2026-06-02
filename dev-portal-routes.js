@@ -75,7 +75,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_dau_created ON dev_api_usage(tenant_id, created_at);
     `);
   }
-  migrate().then(() => console.log('[dev-portal] migration done')).catch(e => console.error('[dev-portal] migration error:', e));
+  migrate().then(() => console.log('[dev-portal] migration done')).catch(() => {});
 
   /* ── Helpers ── */
   function generateApiKey() {

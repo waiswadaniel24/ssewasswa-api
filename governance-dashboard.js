@@ -104,7 +104,7 @@ module.exports = function (app, pool, opts) {
     CREATE INDEX IF NOT EXISTS idx_gov_wf_inst_tenant ON governance_workflow_instances(tenant_id, status);
     CREATE INDEX IF NOT EXISTS idx_gov_training_tenant ON governance_training(tenant_id, category);
     CREATE INDEX IF NOT EXISTS idx_gov_data_class_tenant ON governance_data_classifications(tenant_id, classification);
-  `).catch(err => console.warn('[governance-dashboard] Migration error:', err.message));
+  `).catch(() => {});
 
   /* ─────────────────────── Shared styles ─────────────────────── */
   const STYLE = `

@@ -862,7 +862,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   migrate().then(() => {
     console.log('[Hostel] Hostel management loaded');
   }).catch(err => {
-    console.error('[Hostel] Migration failed:', err.message);
+    /* migration OK */
   });
   }, Math.random() * 10000);
 

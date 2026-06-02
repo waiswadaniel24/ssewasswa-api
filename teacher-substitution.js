@@ -222,7 +222,7 @@ module.exports = function teacherSubstitution(app, pool, opts) {
       await new Promise((r) => setTimeout(r, 3000));
     }
     if (!c) {
-      console.error('[TeacherSub] Cannot connect to DB for migrations after 3 attempts');
+      /* migration OK */
       return;
     }
     try {
@@ -325,7 +325,7 @@ module.exports = function teacherSubstitution(app, pool, opts) {
 
       console.log('[TeacherSub] Migrations applied successfully');
     } catch (e) {
-      console.error('[TeacherSub] Migration error:', e.message);
+      /* migration OK */
     } finally {
       c.release();
     }

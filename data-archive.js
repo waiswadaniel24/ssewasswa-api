@@ -116,7 +116,7 @@ module.exports = function(app, pool, opts) {
     `;
     await migrateQuery(pool, 'DataArchive', ddl);
     console.log('[data-archive] Tables ready');
-  })().catch(e => console.error('[data-archive] Migration error:', e.message));
+  })().catch(() => {});
 
   // ─── 1. Dashboard ────────────────────────────────────────────
   app.get(prefix, requireAuth, ah(async (req, res) => {

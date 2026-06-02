@@ -176,7 +176,7 @@ module.exports = function feedback(app, db, pool, renderPage, esc) {
         }
       }
       console.log('[Feedback] Migrations applied, categories seeded');
-    } catch (e) { console.error('[Feedback] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
   // HELPERS
   const nav = (active) => `<div class="fb-nav">

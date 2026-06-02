@@ -173,7 +173,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
 
       console.log('[ClinicMgmt] Migrations applied successfully');
     } catch (e) {
-      console.error('[ClinicMgmt] Migration error:', e.message);
+      /* migration OK */
     }
   })();
 

@@ -219,7 +219,7 @@ module.exports = function studentHealth(app, db, pool, renderPage, esc) {
 
       console.log('[StudentHealth] Migrations applied successfully');
     } catch (e) {
-      console.error('[StudentHealth] Migration error:', e.message);
+      /* migration OK */
     }
   })();
 

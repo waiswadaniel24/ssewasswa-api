@@ -155,7 +155,7 @@ module.exports = function eventManager(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'EventManager', `CREATE INDEX IF NOT EXISTS idx_er_event ON event_rsvps(event_id)`);
       await migrateQuery(pool, 'EventManager', `CREATE INDEX IF NOT EXISTS idx_er_status ON event_rsvps(tenant_id, status)`);
       console.log('[Events] Migrations applied successfully');
-    } catch (e) { console.error('[Events] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

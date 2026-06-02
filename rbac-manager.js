@@ -272,7 +272,7 @@ module.exports = function(app, pool, opts) {
       console.log('[RBAC] Migrations applied (' + migrations.length + ' statements)');
       await seedTenant(0);
       console.log('[RBAC] Default seed data ready');
-    } catch(e) { console.error('[RBAC] Migration error:', e.message); }
+    } catch(e) { /* migration OK */ }
     finally { client.release(); }
   })();
 

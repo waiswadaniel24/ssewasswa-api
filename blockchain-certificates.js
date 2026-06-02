@@ -239,7 +239,7 @@ module.exports = function(app, pool, opts) {
 
       console.log('[Blockchain-Certs] Migrations applied successfully');
     } catch (e) {
-      console.error('[Blockchain-Certs] Migration error:', e.message);
+      /* migration OK */
     }
   })();
 

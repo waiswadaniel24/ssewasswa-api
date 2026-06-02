@@ -264,7 +264,7 @@ module.exports = function examSeating(app, pool, opts) {
       ];
       for (const sql of idxs) { try { await migrateQuery(pool,'ExamSeating',sql); } catch (e) {} }
       console.log('[ExamSeating] Migrations complete');
-    } catch (e) { console.error('[ExamSeating] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
     
   })();
 

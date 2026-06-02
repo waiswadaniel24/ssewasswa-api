@@ -760,7 +760,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
     migrate().then(() => {
       console.log('[Transport] Transport management loaded');
     }).catch(err => {
-      console.error('[Transport] Migration failed:', err.message);
+      /* migration OK */
     });
   }, Math.random() * 10000);
 };

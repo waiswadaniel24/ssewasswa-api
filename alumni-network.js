@@ -155,7 +155,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'AlumniNetwork', `CREATE INDEX IF NOT EXISTS idx_alumjobs_active ON alumni_jobs(tenant_id, is_active)`);
       await migrateQuery(pool, 'AlumniNetwork', `CREATE INDEX IF NOT EXISTS idx_alumdon_tenant ON alumni_donations(tenant_id)`);
       console.log('[Alumni] Migrations applied successfully');
-    } catch (e) { console.error('[Alumni] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

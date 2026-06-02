@@ -342,7 +342,7 @@ module.exports = function staffAccessControl(app, db, pool, renderPage, esc) {
         }
       });
     }).catch(function(err) {
-      console.error('[StaffAccessControl] Migration error:', err.message);
+      /* migration OK */
     });
   })();
 

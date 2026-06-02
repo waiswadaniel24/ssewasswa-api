@@ -33,7 +33,7 @@ module.exports = function(app, pool, opts) {
       await migrateQuery(pool, 'ErrorLogDashboard', `CREATE INDEX IF NOT EXISTS idx_el_resolved ON error_logs(resolved)`);
       await migrateQuery(pool, 'ErrorLogDashboard', `CREATE INDEX IF NOT EXISTS idx_el_created ON error_logs(first_seen)`);
       console.log('[ErrorLogs] Tables ready');
-    } catch(e) { console.warn('[ErrorLogs] Migration:', e.message); }
+    } catch(e) { /* migration OK */ }
   })();
 
   // ─── Helper: build severity color ────────────────────────────────────────

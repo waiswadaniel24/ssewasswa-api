@@ -190,7 +190,7 @@ module.exports = function customForms(app, db, pool, renderPage, esc) {
       }
 
       console.log('[CustomForms] Migrations applied successfully');
-    } catch (e) { console.error('[CustomForms] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

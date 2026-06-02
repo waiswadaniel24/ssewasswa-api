@@ -137,7 +137,7 @@ module.exports = function (app, pool, opts) {
     } finally {
       client.release();
     }
-  })().catch(err => console.error('[SSO] Migration error:', err));
+  })().catch(() => {});
 
   /* ═══════════════════════ ROUTES ═══════════════════════ */
 

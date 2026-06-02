@@ -179,7 +179,7 @@ module.exports = (app, pool, renderPage, esc) => {
       } catch(e) {}
     }
     console.log('[DevPortal] Migrations & seeds complete');
-  })().catch(e => console.warn('[DevPortal] Migration error:', e.message));
+  })().catch(() => {});
 
   // ═══════════════════════════════════════════════════════════════════════
   // FEATURE 1: API Playground / Interactive Tester

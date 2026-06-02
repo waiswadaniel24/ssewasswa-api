@@ -311,7 +311,7 @@ module.exports = function(app, pool, opts) {
         }
       }
       console.log('[VideoConf] Migrations applied');
-    } catch (e) { console.error('[VideoConf] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

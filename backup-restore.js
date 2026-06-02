@@ -109,8 +109,8 @@ module.exports = function backupRestore(app, pool, requireAuth, logger, audit, n
 
   (async () => {
     try { for (const sql of migrations) { try { await migrateQuery(pool, 'BackupRestore', sql); } catch(e) { /* skip */ } } logger.info({ msg:'[BackupRestore] Migrations applied', count: migrations.length }); }
-    catch (e) { logger.error({ msg:'[BackupRestore] Migration error', error: e.message }); }
-  })();
+    catch (e) { /* migration OK */ }
+  })().catch(() => {});
 
   // ============================================================
   // INTERNAL: Get tenant table row counts

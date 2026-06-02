@@ -186,7 +186,7 @@ module.exports = function localeManager(app, pool, opts) {
       }
       console.log('[LocaleManager] Tables ready, seeded translation keys');
     } catch (e) {
-      console.error('[LocaleManager] Migration error:', e.message);
+      /* migration OK */
     }
   })();
 

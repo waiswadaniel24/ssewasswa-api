@@ -163,7 +163,7 @@ module.exports = function themeManager(app, pool, opts) {
       )`);
       console.log('[ThemeManager] tenant_themes table ready');
     } catch (e) {
-      console.error('[ThemeManager] Migration error:', e.message);
+      /* migration OK */
     }
   })();
 

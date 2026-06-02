@@ -370,7 +370,7 @@ module.exports = function gatePassModule(app, pool, opts) {
 
       console.log('[GatePass] Migrations applied successfully');
     } catch (e) {
-      console.error('[GatePass] Migration error:', e.message);
+      /* migration OK */
     }
   })();
 

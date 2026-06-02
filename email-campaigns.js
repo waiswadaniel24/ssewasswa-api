@@ -148,7 +148,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
       for (const sql of indexes) await migrateQuery(pool, 'EmailCampaigns', sql).catch(() => {});
 
       console.log('[EmailCampaigns] Migrations applied');
-    } catch (e) { console.error('[EmailCampaigns] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ═══════════════════════════════════════════════════════

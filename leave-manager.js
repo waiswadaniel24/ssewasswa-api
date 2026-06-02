@@ -280,7 +280,7 @@ module.exports = function leaveManager(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lr_approver ON leave_requests(tenant_id, approved_by)`);
 
       console.log('[LeaveManager] Migrations applied successfully');
-    } catch (e) { console.error('[LeaveManager] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

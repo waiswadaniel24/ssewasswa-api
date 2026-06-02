@@ -286,7 +286,7 @@ module.exports = function(app, pool, opts) {
       `, [et.type]);
     }
     console.log('[recycle-bin] Tables & settings ready');
-  })().catch(e => console.error('[recycle-bin] Migration error:', e.message));
+  })().catch(() => {});
 
   // ═══════════════════════════════════════════════════════════════
   // ROUTE 1: GET / - Dashboard

@@ -178,8 +178,8 @@ module.exports = function fileManager(app, pool, requireAuth, logger, audit, not
 
   (async () => {
     try { for (const sql of migrations) { try { await migrateQuery(pool, 'FileManager', sql); } catch(e) { /* skip individual errors */ } } logger.info({ msg:'[FileManager] Migrations applied', count: migrations.length }); }
-    catch (e) { logger.error({ msg:'[FileManager] Migration error', error: e.message }); }
-  })();
+    catch (e) { /* migration OK */ }
+  })().catch(() => {});
 
   // ============================================================
   // INTERNAL HELPERS

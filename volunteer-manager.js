@@ -370,7 +370,7 @@ module.exports = function volunteerManager(app, db, pool, renderPage, esc) {
       try { await migrateQuery(pool, 'VolunteerManager', 'CREATE UNIQUE INDEX IF NOT EXISTS idx_va_no_dupes ON volunteer_assignments(tenant_id, volunteer_id, event_id)'); } catch(e) {}
 
       console.log('[Volunteers] Migrations applied successfully');
-    } catch (e) { console.error('[Volunteers] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

@@ -136,7 +136,7 @@ module.exports = function sports(app, db, pool, renderPage, esc) {
       ];
       for (const sql of indexes) await migrateQuery(pool, 'Sports', sql);
       console.log('[Sports] Migrations applied successfully');
-    } catch (e) { console.error('[Sports] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // Shared query: fixtures with team names

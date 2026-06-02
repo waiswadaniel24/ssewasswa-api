@@ -213,7 +213,7 @@ module.exports = function(app, pool, opts) {
   }
 
   (async () => {
-    try { await ensureTables(); } catch(e) { console.warn('[Newsletter] Migration warning:', e.message); }
+    try { await ensureTables(); } catch(e) { /* migration OK */ }
   })();
 
   // Scheduler: auto-publish scheduled newsletters

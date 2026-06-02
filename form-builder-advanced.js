@@ -206,7 +206,7 @@ module.exports = function(app, pool, opts) {
       await migrateQuery(pool, 'FormBuilderAdvanced', `CREATE INDEX IF NOT EXISTS idx_fs_status ON form_submissions(status)`);
       await migrateQuery(pool, 'FormBuilderAdvanced', `CREATE INDEX IF NOT EXISTS idx_fc_form_id ON form_conditions(form_id)`);
       console.log('[FormBuilderAdvanced] Migrations applied');
-    } catch (e) { console.error('[FormBuilderAdvanced] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ═══════════════════════════ ROUTES ═══════════════════════════

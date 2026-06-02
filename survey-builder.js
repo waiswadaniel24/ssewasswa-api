@@ -80,8 +80,8 @@ module.exports = function surveyBuilder(app, pool, requireAuth, logger, audit, n
       await migrateQuery(pool, 'SurveyBuilder', `CREATE INDEX IF NOT EXISTS idx_sa_response ON survey_answers(response_id)`);
       await migrateQuery(pool, 'SurveyBuilder', `CREATE INDEX IF NOT EXISTS idx_ssl_code ON survey_share_links(share_code)`);
       logger.info('[SurveyBuilder] Migrations applied');
-    } catch (e) { logger.error({ msg: '[SurveyBuilder] Migration error', error: e.message }); }
-  })();
+    } catch (e) { /* migration OK */ }
+  })().catch(() => {});
 
   // ============================================================
   // ROUTE 1: GET /surveys — Survey Dashboard

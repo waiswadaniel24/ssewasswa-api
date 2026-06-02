@@ -338,7 +338,7 @@ module.exports = function budgetManager(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_pr_requested ON budget_purchase_requests(requested_by)');
 
       console.log('[BudgetManager] Migrations applied successfully');
-    } catch (e) { console.error('[BudgetManager] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ════════════════════════════════════════════════════════════

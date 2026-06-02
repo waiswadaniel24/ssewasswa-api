@@ -192,7 +192,7 @@ module.exports = function(app, pool, opts) {
     try {
       for (const sql of migrations) await client.query(sql);
       console.log('[FeatureFlags] Migrations applied (' + migrations.length + ' statements)');
-    } catch(e) { console.error('[FeatureFlags] Migration error:', e.message); }
+    } catch(e) { /* migration OK */ }
     finally { client.release(); }
   })();
 

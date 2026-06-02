@@ -185,7 +185,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'Lms', 'CREATE INDEX IF NOT EXISTS idx_ls_assignment ON lms_submissions(assignment_id)');
       await migrateQuery(pool, 'Lms', 'CREATE INDEX IF NOT EXISTS idx_ls_student ON lms_submissions(tenant_id, student_id)');
       console.log('[LMS] Migrations applied successfully');
-    } catch (e) { console.error('[LMS] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

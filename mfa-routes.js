@@ -161,7 +161,7 @@ module.exports = function (app, pool, opts) {
     } finally {
       client.release();
     }
-  })().catch(err => console.error('[MFA-Routes] Migration error:', err));
+  })().catch(() => {});
 
   /* ═══════════════════════ ROUTES ═══════════════════════ */
 

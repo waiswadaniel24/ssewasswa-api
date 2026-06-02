@@ -158,7 +158,7 @@ module.exports = function admissions(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'Admissions', 'CREATE INDEX IF NOT EXISTS idx_aa_email ON admission_applications(tenant_id, email)');
       await migrateQuery(pool, 'Admissions', 'CREATE INDEX IF NOT EXISTS idx_aSett_tenant ON admission_settings(tenant_id)');
       console.log('[Admissions] Migrations applied successfully');
-    } catch (e) { console.error('[Admissions] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

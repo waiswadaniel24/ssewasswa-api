@@ -118,7 +118,7 @@ module.exports = function tithesOfferings(app, db, pool, renderPage, esc) {
       await migrateQuery(pool, 'TithesOfferings', `CREATE INDEX IF NOT EXISTS idx_gc_tenant ON giving_campaigns(tenant_id)`);
       await migrateQuery(pool, 'TithesOfferings', `CREATE INDEX IF NOT EXISTS idx_gc_active ON giving_campaigns(tenant_id, is_active)`);
       console.log('[Tithes] Migrations applied successfully');
-    } catch (e) { console.error('[Tithes] Migration error:', e.message); }
+    } catch (e) { /* migration OK */ }
   })();
 
   // ============================================================

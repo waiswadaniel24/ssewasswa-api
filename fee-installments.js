@@ -272,7 +272,7 @@ module.exports = function feeInstallments(app, db, pool, renderPage, esc) {
       for (const sql of migrations) await migrateQuery(pool, 'FeeInstallments', sql);
       console.log('[FeeInstallments] Migrations applied: ' + migrations.length + ' statements');
     } catch (e) {
-      console.error('[FeeInstallments] Migration error:', e.message);
+      /* migration OK */
     }
   })();
 

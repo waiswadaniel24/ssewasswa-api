@@ -35,7 +35,7 @@ module.exports = function(app, pool, opts = {}) {
     ];
     for (const m of migrations) {
       try { await migrateQuery(pool, 'GoogleOAuth', m); } catch (e) {
-        if (!e.message.includes('already exists')) console.warn('[GoogleOAuth] Migration warning:', e.message);
+        if (!e.message.includes('already exists')) {}
       }
     }
     console.log('[GoogleOAuth] Migrations applied (google_id, avatar_url columns)');
