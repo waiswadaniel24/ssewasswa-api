@@ -863,7 +863,7 @@ document.querySelectorAll('.faq-item').forEach(function(item){
 </body>
 </html>`;
     res.send(html);
-  });
+  }
 
   // ============================================================
   // REGISTRATION

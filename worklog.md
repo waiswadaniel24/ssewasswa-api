@@ -294,3 +294,29 @@ Stage Summary:
 - All 5 remaining gap items implemented and committed
 - 2 commits ahead of origin/main (blocked by GitHub account suspension)
 - GitHub account needs to be restored or new account created to push
+---
+Task ID: db-resilience
+Agent: Main Agent
+Task: Fix 500 error on root page — DB connection exhaustion causing cascading failures
+
+Work Log:
+- Tested site: / returns 200 (static HTML), /health returns 503 "Database unreachable"
+- Root cause: DB connection pool (25 max) exhausted by 500+ SQL migrations on every startup
+- finishStartupMigrations() fired ALL remaining queued queries simultaneously after guard removed
+- Landing page redirected logged-in users to /dashboard which needs DB → 500 if DB down
+- 500 error handler sent raw JSON to browsers with generic message
+
+Changes Made:
+1. **server.js — finishStartupMigrations() gradual drain**: Changed from burst-fire to max 3 concurrent with async chain
+2. **public-portal.js — DB-resilient landing page**: Added pool.query('SELECT 1') test before redirecting logged-in users; serves static landing page if DB unreachable
+3. **server.js — Smart 500 error handler**: Detects DB connection errors, shows friendly "Temporarily Unavailable" HTML page with auto-retry countdown (10s); only sends JSON when Accept:json without Accept:html
+4. **server.js — Health endpoint resilience**: Added .catch() on individual metric queries so partial data still returns; included uptime/memory in 503 response
+5. **server.js — Migration skip cache**: Records `_migration_last_success` timestamp in platform_settings; skips full 500+ migration loop if last success was < 30 minutes ago (prevents connection exhaustion on rapid restarts)
+6. **public-portal.js — Refactored**: Extracted landing page into _serveLandingPage() function, added route handler with DB health check
+
+Stage Summary:
+- Commit: 3c45293 pushed to main, Render deploy triggered
+- 5 targeted fixes address the DB connection exhaustion root cause and its symptoms
+- Site should no longer show raw JSON error to users — instead shows friendly page with retry
+- Migration skip cache prevents 500+ queries on rapid server restarts (common on Render free tier)
+- Landing page always serves even when DB is down
