@@ -11,6 +11,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis }) => {
 
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -32,16 +33,8 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
 
   // ─── Database Migrations ──────────────────────────────────
   (async () => {
-    let c = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      c = await pool.connect().catch(() => null);
-      if (c) break;
-      console.warn(`[Discipline] DB connection attempt ${attempt}/3 failed, retrying in 3s...`);
-      await new Promise(r => setTimeout(r, 3000));
-    }
-    if (!c) { console.error('[Discipline] Cannot connect to DB for migrations after 3 attempts'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS discipline_incidents (
+      await migrateQuery(pool, 'Discipline', `CREATE TABLE IF NOT EXISTS discipline_incidents (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         student_id INTEGER NOT NULL, reporter_id INTEGER NOT NULL,
         type VARCHAR(100), category VARCHAR(50), severity VARCHAR(20) DEFAULT 'minor',
@@ -56,7 +49,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         created_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ, updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS discipline_consequences (
+      await migrateQuery(pool, 'Discipline', `CREATE TABLE IF NOT EXISTS discipline_consequences (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         incident_id INTEGER, student_id INTEGER NOT NULL,
         type VARCHAR(50) NOT NULL, subtype VARCHAR(50),
@@ -66,7 +59,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS discipline_merits (
+      await migrateQuery(pool, 'Discipline', `CREATE TABLE IF NOT EXISTS discipline_merits (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         student_id INTEGER NOT NULL, category VARCHAR(100),
         description TEXT, points INTEGER DEFAULT 0,
@@ -74,7 +67,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS discipline_offense_types (
+      await migrateQuery(pool, 'Discipline', `CREATE TABLE IF NOT EXISTS discipline_offense_types (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         name VARCHAR(255) NOT NULL, category VARCHAR(50),
         severity VARCHAR(20) DEFAULT 'minor',
@@ -83,7 +76,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS discipline_settings (
+      await migrateQuery(pool, 'Discipline', `CREATE TABLE IF NOT EXISTS discipline_settings (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         point_thresholds JSONB DEFAULT '[{"points":5,"action":"verbal_warning","label":"5 pts - Verbal Warning"},{"points":10,"action":"parent_meeting","label":"10 pts - Parent Meeting"},{"points":15,"action":"counseling_referral","label":"15 pts - Counseling Referral"},{"points":20,"action":"suspension","label":"20 pts - Suspension"},{"points":30,"action":"expulsion_referral","label":"30 pts - Expulsion Referral"}]',
         auto_notify_parent BOOLEAN DEFAULT true,
@@ -92,7 +85,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS discipline_committee (
+      await migrateQuery(pool, 'Discipline', `CREATE TABLE IF NOT EXISTS discipline_committee (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         incident_id INTEGER, student_id INTEGER NOT NULL,
         hearing_date TIMESTAMPTZ, hearing_location VARCHAR(255),
@@ -105,7 +98,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS discipline_demerit_history (
+      await migrateQuery(pool, 'Discipline', `CREATE TABLE IF NOT EXISTS discipline_demerit_history (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         student_id INTEGER NOT NULL, incident_id INTEGER,
         points INTEGER NOT NULL, reason TEXT,
@@ -131,12 +124,11 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         'CREATE INDEX IF NOT EXISTS idx_dcom_incident ON discipline_committee(incident_id)',
         'CREATE INDEX IF NOT EXISTS idx_ddh_tenant ON discipline_demerit_history(tenant_id)',
         'CREATE INDEX IF NOT EXISTS idx_ddh_student ON discipline_demerit_history(student_id)',
-      ]) { try { await c.query(sql); } catch (_) {} }
+      ]) { try { await migrateQuery(pool, 'Discipline', sql); } catch (_) {} }
 
       // Seed default offense types if none exist (per-tenant seeding happens on first use)
       console.log('[Discipline] Migrations applied successfully');
     } catch (e) { console.error('[Discipline] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // Helper: seed default offense types for tenant

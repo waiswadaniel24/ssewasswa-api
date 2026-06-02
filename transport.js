@@ -5,6 +5,7 @@
  * Features: Vehicles, Routes, Passengers, Incidents, Reports
  * 14 routes • PostgreSQL • tenant_id scoped
  */
+const { migrateQuery } = require('./db');
 module.exports = function transport(app, db, pool, renderPage, esc) {
 
   // ── Helpers ────────────────────────────────────────────────────────────────

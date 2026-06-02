@@ -17,6 +17,7 @@
 //   7. server.js async block (medical referrals → also ignored)
 // ============================================================
 
+const { migrateQuery } = require('./db');
 module.exports = async function (pool) {
   const results = { created: [], altered: [] };
 

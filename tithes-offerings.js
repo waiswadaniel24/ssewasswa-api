@@ -13,6 +13,7 @@
 // ============================================================
 // MODULE ENTRY POINT
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function tithesOfferings(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -82,17 +83,15 @@ module.exports = function tithesOfferings(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Tithes] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS tithes_records (
+      await migrateQuery(pool, 'TithesOfferings', `CREATE TABLE IF NOT EXISTS tithes_records (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         member_id INTEGER, member_name VARCHAR(255), type VARCHAR(20) DEFAULT 'tithe',
         amount DECIMAL(12,2) DEFAULT 0, payment_method VARCHAR(50), reference VARCHAR(100),
         date DATE NOT NULL, notes TEXT, campaign_id INTEGER, created_by INTEGER,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS giving_campaigns (
+      await migrateQuery(pool, 'TithesOfferings', `CREATE TABLE IF NOT EXISTS giving_campaigns (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255), description TEXT, target_amount DECIMAL(12,2) DEFAULT 0,
         start_date DATE, end_date DATE, is_active BOOLEAN DEFAULT true,
@@ -105,22 +104,21 @@ module.exports = function tithesOfferings(app, db, pool, renderPage, esc) {
         ['date','DATE NOT NULL'],['notes','TEXT'],['campaign_id','INTEGER'],['created_by','INTEGER'],
         ['created_at','TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of trCols) { try { await c.query(`ALTER TABLE tithes_records ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch(e){} }
+      for (const [col, def] of trCols) { try { await migrateQuery(pool, 'TithesOfferings', `ALTER TABLE tithes_records ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch(e){} }
       const gcCols = [
         ['name','VARCHAR(255)'],['description','TEXT'],['target_amount','DECIMAL(12,2) DEFAULT 0'],
         ['start_date','DATE'],['end_date','DATE'],['is_active','BOOLEAN DEFAULT true'],['created_at','TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of gcCols) { try { await c.query(`ALTER TABLE giving_campaigns ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch(e){} }
+      for (const [col, def] of gcCols) { try { await migrateQuery(pool, 'TithesOfferings', `ALTER TABLE giving_campaigns ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch(e){} }
       // Indexes
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_tr_tenant ON tithes_records(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_tr_date ON tithes_records(date)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_tr_type ON tithes_records(tenant_id, type)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_tr_member ON tithes_records(tenant_id, member_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_gc_tenant ON giving_campaigns(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_gc_active ON giving_campaigns(tenant_id, is_active)`);
+      await migrateQuery(pool, 'TithesOfferings', `CREATE INDEX IF NOT EXISTS idx_tr_tenant ON tithes_records(tenant_id)`);
+      await migrateQuery(pool, 'TithesOfferings', `CREATE INDEX IF NOT EXISTS idx_tr_date ON tithes_records(date)`);
+      await migrateQuery(pool, 'TithesOfferings', `CREATE INDEX IF NOT EXISTS idx_tr_type ON tithes_records(tenant_id, type)`);
+      await migrateQuery(pool, 'TithesOfferings', `CREATE INDEX IF NOT EXISTS idx_tr_member ON tithes_records(tenant_id, member_id)`);
+      await migrateQuery(pool, 'TithesOfferings', `CREATE INDEX IF NOT EXISTS idx_gc_tenant ON giving_campaigns(tenant_id)`);
+      await migrateQuery(pool, 'TithesOfferings', `CREATE INDEX IF NOT EXISTS idx_gc_active ON giving_campaigns(tenant_id, is_active)`);
       console.log('[Tithes] Migrations applied successfully');
     } catch (e) { console.error('[Tithes] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

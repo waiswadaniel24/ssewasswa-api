@@ -6,6 +6,7 @@
 // ============================================================
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function examSeating(app, pool, opts) {
   const esc = opts.esc || (s => String(s == null ? '' : (typeof s === 'object' ? JSON.stringify(s) : s))
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'));
@@ -157,15 +158,8 @@ module.exports = function examSeating(app, pool, opts) {
   // DATABASE MIGRATIONS
   // ============================================================
   (async () => {
-    let c = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      c = await pool.connect().catch(() => null);
-      if (c) break;
-      await new Promise(r => setTimeout(r, 3000));
-    }
-    if (!c) { console.error('[ExamSeating] DB connection failed'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS exam_seating_plans (
+      await migrateQuery(pool,'ExamSeating',`CREATE TABLE IF NOT EXISTS exam_seating_plans (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         exam_id INTEGER,
@@ -195,9 +189,9 @@ module.exports = function examSeating(app, pool, opts) {
         ['notes', 'TEXT'], ['created_by', 'INTEGER'], ['created_at', 'TIMESTAMPTZ DEFAULT NOW()'],
         ['updated_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, typ] of planCols) { try { await c.query(`ALTER TABLE exam_seating_plans ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {} }
+      for (const [col, typ] of planCols) { try { await migrateQuery(pool,'ExamSeating',`ALTER TABLE exam_seating_plans ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {} }
 
-      await c.query(`CREATE TABLE IF NOT EXISTS exam_seats (
+      await migrateQuery(pool,'ExamSeating',`CREATE TABLE IF NOT EXISTS exam_seats (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         plan_id INTEGER NOT NULL REFERENCES exam_seating_plans(id) ON DELETE CASCADE,
@@ -221,9 +215,9 @@ module.exports = function examSeating(app, pool, opts) {
         ['needs_accommodation', 'BOOLEAN DEFAULT false'], ['is_empty', 'BOOLEAN DEFAULT false'],
         ['assigned_at', 'TIMESTAMPTZ'], ['manual_override', 'BOOLEAN DEFAULT false']
       ];
-      for (const [col, typ] of seatCols) { try { await c.query(`ALTER TABLE exam_seats ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {} }
+      for (const [col, typ] of seatCols) { try { await migrateQuery(pool,'ExamSeating',`ALTER TABLE exam_seats ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {} }
 
-      await c.query(`CREATE TABLE IF NOT EXISTS room_layout_templates (
+      await migrateQuery(pool,'ExamSeating',`CREATE TABLE IF NOT EXISTS room_layout_templates (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL DEFAULT '',
@@ -241,10 +235,10 @@ module.exports = function examSeating(app, pool, opts) {
         ['type', 'VARCHAR(20) NOT NULL DEFAULT \'custom\''], ['aisle_after', 'INTEGER'],
         ['created_by', 'INTEGER'], ['created_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, typ] of tmplCols) { try { await c.query(`ALTER TABLE room_layout_templates ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {} }
+      for (const [col, typ] of tmplCols) { try { await migrateQuery(pool,'ExamSeating',`ALTER TABLE room_layout_templates ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {} }
 
       // Seed prebuilt templates
-      const existingPrebuilt = (await c.query(`SELECT COUNT(*)::int AS c FROM room_layout_templates WHERE tenant_id=0 AND type='prebuilt'`)).rows[0].c;
+      const existingPrebuilt = (await migrateQuery(pool,'ExamSeating',`SELECT COUNT(*)::int AS c FROM room_layout_templates WHERE tenant_id=0 AND type='prebuilt'`)).rows[0].c;
       if (existingPrebuilt === 0) {
         const prebuilt = [
           ['Small Classroom', '5 rows x 6 columns — 30 seats', 5, 6, 3],
@@ -253,7 +247,7 @@ module.exports = function examSeating(app, pool, opts) {
           ['Exam Hall', '15 rows x 20 columns — 300 seats', 15, 20, 10]
         ];
         for (const [name, desc, rows, cols, aisle] of prebuilt) {
-          await c.query(`INSERT INTO room_layout_templates (tenant_id, name, description, rows, cols, type, aisle_after) VALUES (0, $1, $2, $3, $4, 'prebuilt', $5)`,
+          await migrateQuery(pool,'ExamSeating',`INSERT INTO room_layout_templates (tenant_id, name, description, rows, cols, type, aisle_after) VALUES (0, $1, $2, $3, $4, 'prebuilt', $5)`,
             [name, desc, rows, cols, aisle]);
         }
       }
@@ -268,10 +262,10 @@ module.exports = function examSeating(app, pool, opts) {
         'CREATE INDEX IF NOT EXISTS idx_rlt_tenant ON room_layout_templates(tenant_id)',
         'CREATE INDEX IF NOT EXISTS idx_rlt_type ON room_layout_templates(tenant_id, type)'
       ];
-      for (const sql of idxs) { try { await c.query(sql); } catch (e) {} }
+      for (const sql of idxs) { try { await migrateQuery(pool,'ExamSeating',sql); } catch (e) {} }
       console.log('[ExamSeating] Migrations complete');
     } catch (e) { console.error('[ExamSeating] Migration error:', e.message); }
-    finally { c.release(); }
+    
   })();
 
   // ============================================================

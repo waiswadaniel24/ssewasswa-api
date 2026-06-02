@@ -3,6 +3,7 @@
 // === Achievements, Rewards Store, Streaks, Levels ===
 // ============================================================
 
+const { migrateQuery } = require('./db');
 const ENG_MIGRATIONS = [
   // Daily Challenges
   `CREATE TABLE IF NOT EXISTS daily_challenges (

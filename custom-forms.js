@@ -13,6 +13,7 @@
 // ============================================================
 // MODULE ENTRY POINT
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function customForms(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -105,21 +106,21 @@ module.exports = function customForms(app, db, pool, renderPage, esc) {
   (async () => {
     try {
       // Create tables in dependency order: forms first, then submissions, then fields/values
-      await pool.query(`CREATE TABLE IF NOT EXISTS custom_forms (
+      await migrateQuery(pool, 'CustomForms', `CREATE TABLE IF NOT EXISTS custom_forms (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         title VARCHAR(500) NOT NULL, description TEXT, status VARCHAR(20) DEFAULT 'draft',
         is_public BOOLEAN DEFAULT false, allow_anonymous BOOLEAN DEFAULT false,
         created_by INTEGER, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await pool.query(`CREATE TABLE IF NOT EXISTS form_submissions (
+      await migrateQuery(pool, 'CustomForms', `CREATE TABLE IF NOT EXISTS form_submissions (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         form_id INTEGER, respondent_id INTEGER, respondent_name VARCHAR(255),
         respondent_email VARCHAR(255), ip_address VARCHAR(45),
         submitted_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await pool.query(`CREATE TABLE IF NOT EXISTS custom_fields (
+      await migrateQuery(pool, 'CustomForms', `CREATE TABLE IF NOT EXISTS custom_fields (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         form_id INTEGER, field_type VARCHAR(50), label VARCHAR(255),
         placeholder TEXT, help_text TEXT, is_required BOOLEAN DEFAULT false,
@@ -127,19 +128,19 @@ module.exports = function customForms(app, db, pool, renderPage, esc) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await pool.query(`CREATE TABLE IF NOT EXISTS custom_field_values (
+      await migrateQuery(pool, 'CustomForms', `CREATE TABLE IF NOT EXISTS custom_field_values (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         submission_id INTEGER, field_id INTEGER, field_label VARCHAR(255),
         field_value TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await pool.query(`CREATE TABLE IF NOT EXISTS form_field_options (
+      await migrateQuery(pool, 'CustomForms', `CREATE TABLE IF NOT EXISTS form_field_options (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         field_id INTEGER, option_label VARCHAR(255), option_value VARCHAR(255),
         sort_order INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await pool.query(`CREATE TABLE IF NOT EXISTS form_submission_files (
+      await migrateQuery(pool, 'CustomForms', `CREATE TABLE IF NOT EXISTS form_submission_files (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         submission_id INTEGER, field_id INTEGER, file_name VARCHAR(255),
         file_url TEXT, file_size INTEGER, uploaded_at TIMESTAMPTZ DEFAULT NOW()
@@ -163,7 +164,7 @@ module.exports = function customForms(app, db, pool, renderPage, esc) {
         `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='form_submissions' AND column_name='ip_address') THEN ALTER TABLE form_submissions ADD COLUMN ip_address VARCHAR(45); END IF; END $$`,
       ];
       for (const sql of alterMigrations) {
-        try { await pool.query(sql); } catch(e) { console.warn('[CustomForms] Alter warning:', e.message); }
+        try { await migrateQuery(pool, 'CustomForms', sql); } catch(e) { console.warn('[CustomForms] Alter warning:', e.message); }
       }
 
       // Create indexes — only if the target column exists
@@ -174,7 +175,7 @@ module.exports = function customForms(app, db, pool, renderPage, esc) {
         `CREATE INDEX IF NOT EXISTS idx_ffo_field ON form_field_options(field_id)`,
       ];
       for (const sql of indexMigrations) {
-        try { await pool.query(sql); } catch(e) { console.warn('[CustomForms] Index warning:', e.message); }
+        try { await migrateQuery(pool, 'CustomForms', sql); } catch(e) { console.warn('[CustomForms] Index warning:', e.message); }
       }
       // Conditional indexes on columns that may not exist yet
       const condIndexes = [
@@ -183,8 +184,8 @@ module.exports = function customForms(app, db, pool, renderPage, esc) {
       ];
       for (const ci of condIndexes) {
         try {
-          const colCheck = await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_name=$1 AND column_name=$2`, [ci.tbl, ci.col]);
-          if (colCheck.rows.length > 0) await pool.query(ci.sql);
+          const colCheck = await migrateQuery(pool, 'CustomForms', `SELECT 1 FROM information_schema.columns WHERE table_name=$1 AND column_name=$2`, [ci.tbl, ci.col]);
+          if (colCheck.rows.length > 0) await migrateQuery(pool, 'CustomForms', ci.sql);
         } catch(e) { console.warn('[CustomForms] Cond index warning:', e.message); }
       }
 

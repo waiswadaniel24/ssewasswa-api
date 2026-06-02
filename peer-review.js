@@ -6,6 +6,7 @@
  *           quality scoring, multiple revision rounds, statistics, calibration,
  *           plagiarism flagging, teacher oversight dashboard.
  */
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
   const { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT } = opts;
   const P = '#4f46e5', GRAY = '#6b7280';
@@ -95,7 +96,7 @@ module.exports = function (app, pool, opts) {
           created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
           updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
         )`);
-      await pool.query(`
+      await migrateQuery(pool, 'PeerReview', `
         CREATE TABLE IF NOT EXISTS peer_reviews (
           id                    SERIAL PRIMARY KEY,
           tenant_id             INT NOT NULL,
@@ -118,7 +119,7 @@ module.exports = function (app, pool, opts) {
           created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
           updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
         )`);
-      await pool.query(`
+      await migrateQuery(pool, 'PeerReview', `
         CREATE TABLE IF NOT EXISTS review_rubrics (
           id        SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL,
@@ -130,7 +131,7 @@ module.exports = function (app, pool, opts) {
           created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )`);
-      await pool.query(`
+      await migrateQuery(pool, 'PeerReview', `
         CREATE INDEX IF NOT EXISTS idx_pra_tenant ON peer_review_assignments(tenant_id);
         CREATE INDEX IF NOT EXISTS idx_pr_tenant ON peer_reviews(tenant_id);
         CREATE INDEX IF NOT EXISTS idx_rr_tenant ON review_rubrics(tenant_id);

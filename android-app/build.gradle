@@ -1,0 +1,37 @@
+// Top-level build file for Comfort Zone TWA Android Wrapper
+//
+// TWA (Trusted Web Activity) wraps the existing PWA at https://ssewasswa.onrender.com
+// into a native Android APK. This is Google's recommended, FREE approach used by
+// Twitter Lite, Instagram Lite, and Pinterest.
+
+buildscript {
+    ext {
+        kotlin_version = '1.9.22'
+        androidx_browser_version = '1.7.0'
+        androidx_appcompat_version = '1.6.1'
+        androidx_core_version = '1.12.0'
+        material_version = '1.11.0'
+    }
+
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.2.2'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+// Clean task
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}

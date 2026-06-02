@@ -7,6 +7,7 @@
  * Tables: merch_products, merch_orders, merch_order_items, merch_campaigns
  * Routes under /merch
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -250,7 +251,7 @@ module.exports = function(app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'SchoolMerch', `
       CREATE TABLE IF NOT EXISTS merch_orders (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 1,
@@ -266,7 +267,7 @@ module.exports = function(app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'SchoolMerch', `
       CREATE TABLE IF NOT EXISTS merch_order_items (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 1,
@@ -279,7 +280,7 @@ module.exports = function(app, pool, opts) {
         quantity INT NOT NULL DEFAULT 1,
         subtotal NUMERIC(10,2) NOT NULL DEFAULT 0
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'SchoolMerch', `
       CREATE TABLE IF NOT EXISTS merch_campaigns (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 1,
@@ -291,7 +292,7 @@ module.exports = function(app, pool, opts) {
         active BOOLEAN DEFAULT true,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'SchoolMerch', `
       CREATE TABLE IF NOT EXISTS merch_stock_history (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 1,
@@ -304,17 +305,17 @@ module.exports = function(app, pool, opts) {
       )`);
 
     // Indexes
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mp_tenant ON merch_products(tenant_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mp_category ON merch_products(category)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mp_campaign ON merch_products(campaign_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mo_tenant ON merch_orders(tenant_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mo_user ON merch_orders(user_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mo_status ON merch_orders(status)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_moi_tenant ON merch_order_items(tenant_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_moi_order ON merch_order_items(order_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mc_tenant ON merch_campaigns(tenant_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_msh_tenant ON merch_stock_history(tenant_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_msh_product ON merch_stock_history(product_id)`);
+    await migrateQuery(pool, 'SchoolMerch', `CREATE INDEX IF NOT EXISTS idx_mp_tenant ON merch_products(tenant_id)`);
+    await migrateQuery(pool, 'SchoolMerch', `CREATE INDEX IF NOT EXISTS idx_mp_category ON merch_products(category)`);
+    await migrateQuery(pool, 'SchoolMerch', `CREATE INDEX IF NOT EXISTS idx_mp_campaign ON merch_products(campaign_id)`);
+    await migrateQuery(pool, 'SchoolMerch', `CREATE INDEX IF NOT EXISTS idx_mo_tenant ON merch_orders(tenant_id)`);
+    await migrateQuery(pool, 'SchoolMerch', `CREATE INDEX IF NOT EXISTS idx_mo_user ON merch_orders(user_id)`);
+    await migrateQuery(pool, 'SchoolMerch', `CREATE INDEX IF NOT EXISTS idx_mo_status ON merch_orders(status)`);
+    await migrateQuery(pool, 'SchoolMerch', `CREATE INDEX IF NOT EXISTS idx_moi_tenant ON merch_order_items(tenant_id)`);
+    await migrateQuery(pool, 'SchoolMerch', `CREATE INDEX IF NOT EXISTS idx_moi_order ON merch_order_items(order_id)`);
+    await migrateQuery(pool, 'SchoolMerch', `CREATE INDEX IF NOT EXISTS idx_mc_tenant ON merch_campaigns(tenant_id)`);
+    await migrateQuery(pool, 'SchoolMerch', `CREATE INDEX IF NOT EXISTS idx_msh_tenant ON merch_stock_history(tenant_id)`);
+    await migrateQuery(pool, 'SchoolMerch', `CREATE INDEX IF NOT EXISTS idx_msh_product ON merch_stock_history(product_id)`);
   })();
 
   // ═══════════════════════════════════════════════════════════════

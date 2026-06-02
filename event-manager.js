@@ -13,6 +13,7 @@
 // ============================================================
 // MODULE ENTRY POINT
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function eventManager(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -103,10 +104,8 @@ module.exports = function eventManager(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Events] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS events (
+      await migrateQuery(pool, 'EventManager', `CREATE TABLE IF NOT EXISTS events (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         title VARCHAR(255) NOT NULL, description TEXT, event_type VARCHAR(50) DEFAULT 'general',
         start_date TIMESTAMPTZ NOT NULL, end_date TIMESTAMPTZ, venue VARCHAR(255),
@@ -117,7 +116,7 @@ module.exports = function eventManager(app, db, pool, renderPage, esc) {
         tags TEXT[], created_by INTEGER REFERENCES users(id),
         created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS event_rsvps (
+      await migrateQuery(pool, 'EventManager', `CREATE TABLE IF NOT EXISTS event_rsvps (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
         user_id INTEGER REFERENCES users(id), name VARCHAR(255), email VARCHAR(255),
@@ -137,7 +136,7 @@ module.exports = function eventManager(app, db, pool, renderPage, esc) {
         ['tags','TEXT[]'],['created_by','INTEGER REFERENCES users(id)'],
         ['created_at','TIMESTAMPTZ DEFAULT NOW()'],['updated_at','TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of evCols) { try { await c.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch(e){} }
+      for (const [col, def] of evCols) { try { await migrateQuery(pool, 'EventManager', `ALTER TABLE events ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch(e){} }
       // ALTER TABLE IF NOT EXISTS — event_rsvps
       const rsvpCols = [
         ['user_id','INTEGER REFERENCES users(id)'],['name','VARCHAR(255)'],['email','VARCHAR(255)'],
@@ -146,18 +145,17 @@ module.exports = function eventManager(app, db, pool, renderPage, esc) {
         ['notes','TEXT'],['checked_in','BOOLEAN DEFAULT false'],
         ['checked_in_at','TIMESTAMPTZ'],['created_at','TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of rsvpCols) { try { await c.query(`ALTER TABLE event_rsvps ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch(e){} }
+      for (const [col, def] of rsvpCols) { try { await migrateQuery(pool, 'EventManager', `ALTER TABLE event_rsvps ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch(e){} }
       // Indexes
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ev_tenant ON events(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ev_start ON events(start_date)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ev_type ON events(tenant_id, event_type)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ev_published ON events(tenant_id, is_published)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_er_tenant ON event_rsvps(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_er_event ON event_rsvps(event_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_er_status ON event_rsvps(tenant_id, status)`);
+      await migrateQuery(pool, 'EventManager', `CREATE INDEX IF NOT EXISTS idx_ev_tenant ON events(tenant_id)`);
+      await migrateQuery(pool, 'EventManager', `CREATE INDEX IF NOT EXISTS idx_ev_start ON events(start_date)`);
+      await migrateQuery(pool, 'EventManager', `CREATE INDEX IF NOT EXISTS idx_ev_type ON events(tenant_id, event_type)`);
+      await migrateQuery(pool, 'EventManager', `CREATE INDEX IF NOT EXISTS idx_ev_published ON events(tenant_id, is_published)`);
+      await migrateQuery(pool, 'EventManager', `CREATE INDEX IF NOT EXISTS idx_er_tenant ON event_rsvps(tenant_id)`);
+      await migrateQuery(pool, 'EventManager', `CREATE INDEX IF NOT EXISTS idx_er_event ON event_rsvps(event_id)`);
+      await migrateQuery(pool, 'EventManager', `CREATE INDEX IF NOT EXISTS idx_er_status ON event_rsvps(tenant_id, status)`);
       console.log('[Events] Migrations applied successfully');
     } catch (e) { console.error('[Events] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

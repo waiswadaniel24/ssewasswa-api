@@ -10,6 +10,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 const formatDate = d => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const formatDateTime = d => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 const generateCode = () => Math.random().toString(36).substring(2, 10).toUpperCase();
@@ -63,26 +64,23 @@ module.exports = function surveyBuilder(app, pool, requireAuth, logger, audit, n
   // DATABASE MIGRATIONS
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { logger.warn('[SurveyBuilder] DB connect failed'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS surveys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, questions JSONB, is_active BOOLEAN DEFAULT true, responses_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`);
-      await c.query(`CREATE TABLE IF NOT EXISTS survey_responses (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, survey_id INTEGER REFERENCES surveys(id) ON DELETE CASCADE, respondent_email TEXT, answers JSONB, submitted_at TIMESTAMPTZ DEFAULT NOW())`);
-      await c.query(`CREATE TABLE IF NOT EXISTS survey_questions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, survey_id INTEGER REFERENCES surveys(id) ON DELETE CASCADE, question_text TEXT NOT NULL, question_type VARCHAR(30) NOT NULL DEFAULT 'text', options JSONB DEFAULT '[]'::jsonb, is_required BOOLEAN DEFAULT false, sort_order INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`);
-      await c.query(`CREATE TABLE IF NOT EXISTS survey_answers (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, response_id INTEGER REFERENCES survey_responses(id) ON DELETE CASCADE, question_id INTEGER REFERENCES survey_questions(id) ON DELETE CASCADE, answer_text TEXT, answer_json JSONB)`);
-      await c.query(`CREATE TABLE IF NOT EXISTS survey_share_links (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, survey_id INTEGER REFERENCES surveys(id) ON DELETE CASCADE, share_code VARCHAR(20) UNIQUE NOT NULL, is_active BOOLEAN DEFAULT true, expires_at TIMESTAMPTZ, max_responses INTEGER, response_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`);
+      await migrateQuery(pool, 'SurveyBuilder', `CREATE TABLE IF NOT EXISTS surveys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, questions JSONB, is_active BOOLEAN DEFAULT true, responses_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`);
+      await migrateQuery(pool, 'SurveyBuilder', `CREATE TABLE IF NOT EXISTS survey_responses (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, survey_id INTEGER REFERENCES surveys(id) ON DELETE CASCADE, respondent_email TEXT, answers JSONB, submitted_at TIMESTAMPTZ DEFAULT NOW())`);
+      await migrateQuery(pool, 'SurveyBuilder', `CREATE TABLE IF NOT EXISTS survey_questions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, survey_id INTEGER REFERENCES surveys(id) ON DELETE CASCADE, question_text TEXT NOT NULL, question_type VARCHAR(30) NOT NULL DEFAULT 'text', options JSONB DEFAULT '[]'::jsonb, is_required BOOLEAN DEFAULT false, sort_order INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`);
+      await migrateQuery(pool, 'SurveyBuilder', `CREATE TABLE IF NOT EXISTS survey_answers (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, response_id INTEGER REFERENCES survey_responses(id) ON DELETE CASCADE, question_id INTEGER REFERENCES survey_questions(id) ON DELETE CASCADE, answer_text TEXT, answer_json JSONB)`);
+      await migrateQuery(pool, 'SurveyBuilder', `CREATE TABLE IF NOT EXISTS survey_share_links (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, survey_id INTEGER REFERENCES surveys(id) ON DELETE CASCADE, share_code VARCHAR(20) UNIQUE NOT NULL, is_active BOOLEAN DEFAULT true, expires_at TIMESTAMPTZ, max_responses INTEGER, response_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`);
       // Extend surveys table with extra columns if missing
-      try { await c.query(`ALTER TABLE surveys ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'draft'`); } catch(e){}
-      try { await c.query(`ALTER TABLE surveys ADD COLUMN IF NOT EXISTS welcome_message TEXT`); } catch(e){}
-      try { await c.query(`ALTER TABLE surveys ADD COLUMN IF NOT EXISTS deadline TIMESTAMPTZ`); } catch(e){}
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sq_tenant ON survey_questions(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sq_survey ON survey_questions(survey_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sa_tenant ON survey_answers(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sa_response ON survey_answers(response_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ssl_code ON survey_share_links(share_code)`);
+      try { await migrateQuery(pool, 'SurveyBuilder', `ALTER TABLE surveys ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'draft'`); } catch(e){}
+      try { await migrateQuery(pool, 'SurveyBuilder', `ALTER TABLE surveys ADD COLUMN IF NOT EXISTS welcome_message TEXT`); } catch(e){}
+      try { await migrateQuery(pool, 'SurveyBuilder', `ALTER TABLE surveys ADD COLUMN IF NOT EXISTS deadline TIMESTAMPTZ`); } catch(e){}
+      await migrateQuery(pool, 'SurveyBuilder', `CREATE INDEX IF NOT EXISTS idx_sq_tenant ON survey_questions(tenant_id)`);
+      await migrateQuery(pool, 'SurveyBuilder', `CREATE INDEX IF NOT EXISTS idx_sq_survey ON survey_questions(survey_id)`);
+      await migrateQuery(pool, 'SurveyBuilder', `CREATE INDEX IF NOT EXISTS idx_sa_tenant ON survey_answers(tenant_id)`);
+      await migrateQuery(pool, 'SurveyBuilder', `CREATE INDEX IF NOT EXISTS idx_sa_response ON survey_answers(response_id)`);
+      await migrateQuery(pool, 'SurveyBuilder', `CREATE INDEX IF NOT EXISTS idx_ssl_code ON survey_share_links(share_code)`);
       logger.info('[SurveyBuilder] Migrations applied');
     } catch (e) { logger.error({ msg: '[SurveyBuilder] Migration error', error: e.message }); }
-    finally { c.release(); }
   })();
 
   // ============================================================

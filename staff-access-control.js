@@ -9,6 +9,7 @@
 //   staffAccessControl(app, db, pool, renderPage, esc);
 // ============================================================
 
+const { migrateQuery } = require('./db');
 module.exports = function staffAccessControl(app, db, pool, renderPage, esc) {
 
   // ============================================================

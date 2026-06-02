@@ -6,6 +6,7 @@
 // structured data, open graph auto-tags, Twitter cards,
 // auto-internal-links, 404 SEO handler, breadcrumb schema
 
+const { migrateQuery } = require('./db');
 const SEOT_MIGRATIONS = [
   // Auto Blog Posts
   `CREATE TABLE IF NOT EXISTS auto_blog_posts (

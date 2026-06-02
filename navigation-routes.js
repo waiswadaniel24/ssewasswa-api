@@ -2,6 +2,7 @@
 // NAVIGATION ROUTES — Unified portal-aware navigation system
 // Comfort Zone — Multi-tenant SaaS Platform
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = (opts && opts.esc) || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = (opts && opts.renderPage) || ((t,c,u) => c);
@@ -177,7 +178,7 @@ module.exports = function(app, pool, opts) {
       `CREATE INDEX IF NOT EXISTS idx_nav_recent_visited ON nav_recent(visited_at DESC)`
     ];
     for (const sql of tables) {
-      try { await pool.query(sql); } catch (e) { /* ignore */ }
+      try { await migrateQuery(pool, 'NavigationRoutes', sql); } catch (e) { /* ignore */ }
     }
   })().catch(e => console.error('[NavRoutes] Migration error:', e.message));
 

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Splash Screen Theme (Android 12+ compatible) -->
+    <style name="Theme.ComfortZone.Splash" parent="Theme.SplashScreen">
+        <!-- Splash screen background -->
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <!-- App icon in center of splash -->
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <!-- Duration the splash icon is shown (in milliseconds) -->
+        <item name="android:windowSplashScreenAnimationDuration">1000</item>
+        <!-- Background behind the splash icon -->
+        <item name="android:windowBackground">@color/splash_background</item>
+        <!-- Status bar color during splash -->
+        <item name="android:statusBarColor">@color/splash_background</item>
+        <!-- Navigation bar color during splash -->
+        <item name="android:navigationBarColor">@color/splash_background</item>
+    </style>
+
+    <!-- Base app theme (post-splash) -->
+    <style name="Theme.ComfortZone" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryDark">@color/primary_dark</item>
+        <item name="colorAccent">@color/accent</item>
+        <item name="android:statusBarColor">@color/primary</item>
+        <item name="android:navigationBarColor">@color/primary_dark</item>
+        <item name="android:windowBackground">@color/white</item>
+    </style>
+</resources>

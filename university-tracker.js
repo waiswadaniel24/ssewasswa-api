@@ -2,6 +2,7 @@
  * University Application Tracker
  * Track university applications, requirements, deadlines, offers, scholarships, and documents.
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -26,14 +27,14 @@ module.exports = function(app, pool, opts) {
         country TEXT NOT NULL DEFAULT 'USA', requirements_progress INTEGER NOT NULL DEFAULT 0,
         notes TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'UniversityTracker', `
       CREATE TABLE IF NOT EXISTS app_requirements (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 1,
         application_id INTEGER NOT NULL REFERENCES university_applications(id) ON DELETE CASCADE,
         requirement_type TEXT NOT NULL, completed BOOLEAN NOT NULL DEFAULT false,
         completed_at TIMESTAMPTZ, notes TEXT NOT NULL DEFAULT ''
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'UniversityTracker', `
       CREATE TABLE IF NOT EXISTS university_offers (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 1,
         application_id INTEGER NOT NULL REFERENCES university_applications(id) ON DELETE CASCADE,
@@ -41,7 +42,7 @@ module.exports = function(app, pool, opts) {
         response_deadline DATE, enrollment_decision TEXT NOT NULL DEFAULT 'pending',
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'UniversityTracker', `
       CREATE TABLE IF NOT EXISTS scholarship_applications_uni (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 1,
         student_id INTEGER NOT NULL, scholarship_name TEXT NOT NULL,

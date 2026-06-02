@@ -5,6 +5,7 @@
 // ============================================================
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function gallery(app, db, pool, renderPage, esc) {
   const requireAuth = (req, res, next) => {
     if (!req.session?.user) return res.redirect('/login');
@@ -69,20 +70,18 @@ module.exports = function gallery(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Gallery] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS gallery_albums (
+      await migrateQuery(pool, 'Gallery', `CREATE TABLE IF NOT EXISTS gallery_albums (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255), description TEXT, cover_url TEXT,
         is_public BOOLEAN DEFAULT true, photo_count INTEGER DEFAULT 0,
         created_by INTEGER, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS gallery_tags (
+      await migrateQuery(pool, 'Gallery', `CREATE TABLE IF NOT EXISTS gallery_tags (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         photo_id INTEGER, tag VARCHAR(100), created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS gallery_photos (
+      await migrateQuery(pool, 'Gallery', `CREATE TABLE IF NOT EXISTS gallery_photos (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         album_id INTEGER, title VARCHAR(255), description TEXT,
         url TEXT, thumbnail_url TEXT, file_name VARCHAR(255), file_size INTEGER,
@@ -96,7 +95,7 @@ module.exports = function gallery(app, db, pool, renderPage, esc) {
         ['is_public', 'BOOLEAN DEFAULT true'], ['photo_count', 'INTEGER DEFAULT 0'],
         ['created_by', 'INTEGER'], ['created_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of albumCols) { try { await c.query(`ALTER TABLE gallery_albums ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
+      for (const [col, def] of albumCols) { try { await migrateQuery(pool, 'Gallery', `ALTER TABLE gallery_albums ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
       const photoCols = [
         ['tenant_id', 'INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE'],
         ['album_id', 'INTEGER'], ['title', 'VARCHAR(255)'], ['description', 'TEXT'],
@@ -104,21 +103,20 @@ module.exports = function gallery(app, db, pool, renderPage, esc) {
         ['file_size', 'INTEGER'], ['width', 'INTEGER'], ['height', 'INTEGER'],
         ['mime_type', 'VARCHAR(100)'], ['uploaded_by', 'INTEGER'], ['created_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of photoCols) { try { await c.query(`ALTER TABLE gallery_photos ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
+      for (const [col, def] of photoCols) { try { await migrateQuery(pool, 'Gallery', `ALTER TABLE gallery_photos ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
       const tagCols = [
         ['tenant_id', 'INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE'],
         ['photo_id', 'INTEGER'], ['tag', 'VARCHAR(100)'], ['created_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of tagCols) { try { await c.query(`ALTER TABLE gallery_tags ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
+      for (const [col, def] of tagCols) { try { await migrateQuery(pool, 'Gallery', `ALTER TABLE gallery_tags ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
       // Indexes
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ga_tenant ON gallery_albums(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_gp_tenant ON gallery_photos(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_gp_album ON gallery_photos(album_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_gt_photo ON gallery_tags(photo_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_gt_tenant ON gallery_tags(tenant_id)`);
+      await migrateQuery(pool, 'Gallery', `CREATE INDEX IF NOT EXISTS idx_ga_tenant ON gallery_albums(tenant_id)`);
+      await migrateQuery(pool, 'Gallery', `CREATE INDEX IF NOT EXISTS idx_gp_tenant ON gallery_photos(tenant_id)`);
+      await migrateQuery(pool, 'Gallery', `CREATE INDEX IF NOT EXISTS idx_gp_album ON gallery_photos(album_id)`);
+      await migrateQuery(pool, 'Gallery', `CREATE INDEX IF NOT EXISTS idx_gt_photo ON gallery_tags(photo_id)`);
+      await migrateQuery(pool, 'Gallery', `CREATE INDEX IF NOT EXISTS idx_gt_tenant ON gallery_tags(tenant_id)`);
       console.log('[Gallery] Migrations applied');
     } catch (e) { console.error('[Gallery] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

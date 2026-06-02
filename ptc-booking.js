@@ -9,6 +9,7 @@
 // ============================================================
 
 'use strict';
+const { migrateQuery } = require('./db');
 module.exports = function ptcBooking(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -94,16 +95,14 @@ module.exports = function ptcBooking(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[PTCBooking] Cannot connect to DB for migrations'); return; }
     try {
       // Ensure tables exist
-      await c.query(`CREATE TABLE IF NOT EXISTS ptc_slots (
+      await migrateQuery(pool, 'PtcBooking', `CREATE TABLE IF NOT EXISTS ptc_slots (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         staff_id INTEGER, teacher_name VARCHAR(255), slot_date DATE NOT NULL,
         duration_minutes INTEGER DEFAULT 15, notes TEXT, status VARCHAR(20) DEFAULT 'open'
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS ptc_bookings (
+      await migrateQuery(pool, 'PtcBooking', `CREATE TABLE IF NOT EXISTS ptc_bookings (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         slot_id INTEGER NOT NULL REFERENCES ptc_slots(id) ON DELETE CASCADE,
         parent_name VARCHAR(255), parent_phone VARCHAR(255), concerns TEXT
@@ -120,7 +119,7 @@ module.exports = function ptcBooking(app, db, pool, renderPage, esc) {
         ['created_at', 'TIMESTAMPTZ DEFAULT NOW()'],
       ];
       for (const [col, def] of slotCols) {
-        try { await c.query(`ALTER TABLE ptc_slots ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
+        try { await migrateQuery(pool, 'PtcBooking', `ALTER TABLE ptc_slots ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
       }
 
       // ALTER TABLE ptc_bookings — add missing columns
@@ -132,22 +131,21 @@ module.exports = function ptcBooking(app, db, pool, renderPage, esc) {
         ['status', "VARCHAR(20) DEFAULT 'confirmed'"],
       ];
       for (const [col, def] of bookCols) {
-        try { await c.query(`ALTER TABLE ptc_bookings ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
+        try { await migrateQuery(pool, 'PtcBooking', `ALTER TABLE ptc_bookings ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
       }
 
       // Indexes
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ps_tenant ON ptc_slots(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ps_date ON ptc_slots(tenant_id, slot_date)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ps_status ON ptc_slots(tenant_id, status)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ps_teacher ON ptc_slots(tenant_id, teacher_name)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ps_class ON ptc_slots(tenant_id, class)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_pb_tenant ON ptc_bookings(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_pb_slot ON ptc_bookings(slot_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_pb_parent ON ptc_bookings(tenant_id, parent_phone)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_pb_status ON ptc_bookings(tenant_id, status)`);
+      await migrateQuery(pool, 'PtcBooking', `CREATE INDEX IF NOT EXISTS idx_ps_tenant ON ptc_slots(tenant_id)`);
+      await migrateQuery(pool, 'PtcBooking', `CREATE INDEX IF NOT EXISTS idx_ps_date ON ptc_slots(tenant_id, slot_date)`);
+      await migrateQuery(pool, 'PtcBooking', `CREATE INDEX IF NOT EXISTS idx_ps_status ON ptc_slots(tenant_id, status)`);
+      await migrateQuery(pool, 'PtcBooking', `CREATE INDEX IF NOT EXISTS idx_ps_teacher ON ptc_slots(tenant_id, teacher_name)`);
+      await migrateQuery(pool, 'PtcBooking', `CREATE INDEX IF NOT EXISTS idx_ps_class ON ptc_slots(tenant_id, class)`);
+      await migrateQuery(pool, 'PtcBooking', `CREATE INDEX IF NOT EXISTS idx_pb_tenant ON ptc_bookings(tenant_id)`);
+      await migrateQuery(pool, 'PtcBooking', `CREATE INDEX IF NOT EXISTS idx_pb_slot ON ptc_bookings(slot_id)`);
+      await migrateQuery(pool, 'PtcBooking', `CREATE INDEX IF NOT EXISTS idx_pb_parent ON ptc_bookings(tenant_id, parent_phone)`);
+      await migrateQuery(pool, 'PtcBooking', `CREATE INDEX IF NOT EXISTS idx_pb_status ON ptc_bookings(tenant_id, status)`);
       console.log('[PTCBooking] Migrations applied');
     } catch (e) { console.error('[PTCBooking] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

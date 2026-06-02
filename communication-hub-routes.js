@@ -8,6 +8,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = (opts && opts.esc) || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = (opts && opts.renderPage) || ((t,c,u) => c);
@@ -210,13 +211,10 @@ module.exports = function(app, pool, opts) {
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { console.error('[CommHub] Cannot connect to DB'); return; }
     try {
-      for (const sql of migrations) await client.query(sql);
+      for (const sql of migrations) await migrateQuery(pool, 'CommunicationHubRoutes', sql);
       console.log('[CommHub] Migrations applied: ' + migrations.length + ' statements');
     } catch (e) { console.error('[CommHub] Migration error:', e.message); }
-    finally { client.release(); }
   })();
 
   // ══════════════════════════════════════════════════════════

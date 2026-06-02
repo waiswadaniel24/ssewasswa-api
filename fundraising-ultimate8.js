@@ -3,6 +3,7 @@
  * 8 Features: Capital Campaigns, Tribute/Memorial, Crowdfunding Perks,
  * Thermometer Widgets, Donor Portal, Email Builder, Direct Mail, Donor Heatmaps
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
   const migrations = [
     `CREATE TABLE IF NOT EXISTS capital_campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT, total_goal NUMERIC DEFAULT 0, quiet_phase_goal NUMERIC DEFAULT 0, public_phase_start DATE, end_date DATE, current_total NUMERIC DEFAULT 0, status TEXT DEFAULT 'planning', created_at TIMESTAMPTZ DEFAULT NOW())`,

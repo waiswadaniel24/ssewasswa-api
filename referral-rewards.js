@@ -2,6 +2,7 @@
  * Referral Rewards Module
  * Parent referral rewards program — dashboard, tracking, claims, leaderboard, payouts
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -38,7 +39,7 @@ module.exports = function(app, pool, opts) {
         UNIQUE(tenant_id, user_id)
       );
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'ReferralRewards', `
       CREATE TABLE IF NOT EXISTS referral_tracking (
         id SERIAL PRIMARY KEY,
         tenant_id TEXT NOT NULL DEFAULT '${tid}',
@@ -53,7 +54,7 @@ module.exports = function(app, pool, opts) {
         UNIQUE(tenant_id, referee_id)
       );
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'ReferralRewards', `
       CREATE TABLE IF NOT EXISTS referral_rewards_config (
         id SERIAL PRIMARY KEY,
         tenant_id TEXT NOT NULL DEFAULT '${tid}',
@@ -67,7 +68,7 @@ module.exports = function(app, pool, opts) {
         UNIQUE(tenant_id, milestone)
       );
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'ReferralRewards', `
       CREATE TABLE IF NOT EXISTS referral_reward_claims (
         id SERIAL PRIMARY KEY,
         tenant_id TEXT NOT NULL DEFAULT '${tid}',
@@ -87,7 +88,7 @@ module.exports = function(app, pool, opts) {
         notes TEXT
       );
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'ReferralRewards', `
       CREATE TABLE IF NOT EXISTS referral_payouts (
         id SERIAL PRIMARY KEY,
         tenant_id TEXT NOT NULL DEFAULT '${tid}',
@@ -104,9 +105,9 @@ module.exports = function(app, pool, opts) {
       );
     `);
     // Seed default reward configs
-    const existing = await pool.query(`SELECT id FROM referral_rewards_config WHERE tenant_id = $1 LIMIT 1`, [tid]);
+    const existing = await migrateQuery(pool, 'ReferralRewards', `SELECT id FROM referral_rewards_config WHERE tenant_id = $1 LIMIT 1`, [tid]);
     if (existing.rows.length === 0) {
-      await pool.query(`
+      await migrateQuery(pool, 'ReferralRewards', `
         INSERT INTO referral_rewards_config (tenant_id, milestone, reward_type, reward_value, reward_label) VALUES
         ($1, 1, 'fee_discount', '10', '10% Fee Discount'),
         ($1, 5, 'cashback', '5000', 'Cashback 5,000'),

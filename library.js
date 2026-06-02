@@ -10,6 +10,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function library(app, db, pool, renderPage, esc) {
 
   // ── inline fallbacks ──────────────────────────────────────
@@ -147,11 +148,8 @@ module.exports = function library(app, db, pool, renderPage, esc) {
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { console.error('[Library] Cannot connect to DB for migrations'); return; }
-    try { for (const sql of migrations) await client.query(sql); console.log('[Library] Migrations applied: ' + migrations.length + ' statements'); }
+    try { for (const sql of migrations) await migrateQuery(pool, 'Library', sql); console.log('[Library] Migrations applied: ' + migrations.length + ' statements'); }
     catch (e) { console.error('[Library] Migration error:', e.message); }
-    finally { client.release(); }
   })();
 
   // ── nav helper ────────────────────────────────────────────

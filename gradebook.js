@@ -13,6 +13,7 @@
 // ============================================================
 // MODULE ENTRY POINT
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function gradebook(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -79,8 +80,6 @@ module.exports = function gradebook(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Gradebook] Cannot connect to DB for migrations'); return; }
     try {
       // Ensure grades table columns
       const gradesCols = [
@@ -98,7 +97,7 @@ module.exports = function gradebook(app, db, pool, renderPage, esc) {
         { name: 'created_by', type: 'INTEGER' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of gradesCols) { try { await c.query(`ALTER TABLE grades ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of gradesCols) { try { await migrateQuery(pool, 'Gradebook', `ALTER TABLE grades ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure marks table columns
       const marksCols = [
@@ -115,7 +114,7 @@ module.exports = function gradebook(app, db, pool, renderPage, esc) {
         { name: 'created_by', type: 'INTEGER' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of marksCols) { try { await c.query(`ALTER TABLE marks ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of marksCols) { try { await migrateQuery(pool, 'Gradebook', `ALTER TABLE marks ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure marksheets table columns
       const marksheetCols = [
@@ -133,7 +132,7 @@ module.exports = function gradebook(app, db, pool, renderPage, esc) {
         { name: 'generated_at', type: 'TIMESTAMPTZ DEFAULT NOW()' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of marksheetCols) { try { await c.query(`ALTER TABLE marksheets ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of marksheetCols) { try { await migrateQuery(pool, 'Gradebook', `ALTER TABLE marksheets ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure grading_scales table columns
       const scaleCols = [
@@ -146,7 +145,7 @@ module.exports = function gradebook(app, db, pool, renderPage, esc) {
         { name: 'description', type: 'TEXT' },
         { name: 'is_active', type: 'BOOLEAN DEFAULT true' }
       ];
-      for (const col of scaleCols) { try { await c.query(`ALTER TABLE grading_scales ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of scaleCols) { try { await migrateQuery(pool, 'Gradebook', `ALTER TABLE grading_scales ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure class_subjects table columns
       const csCols = [
@@ -157,22 +156,21 @@ module.exports = function gradebook(app, db, pool, renderPage, esc) {
         { name: 'is_active', type: 'BOOLEAN DEFAULT true' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of csCols) { try { await c.query(`ALTER TABLE class_subjects ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of csCols) { try { await migrateQuery(pool, 'Gradebook', `ALTER TABLE class_subjects ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Indexes
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_grades_tenant ON grades(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_grades_student ON grades(student_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_grades_class ON grades(class_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_marks_tenant ON marks(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_marks_student ON marks(student_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_marks_class ON marks(class_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_marksheets_tenant ON marksheets(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_marksheets_student ON marksheets(student_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_grading_scales_tenant ON grading_scales(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_class_subjects_tenant ON class_subjects(tenant_id)`);
+      await migrateQuery(pool, 'Gradebook', `CREATE INDEX IF NOT EXISTS idx_grades_tenant ON grades(tenant_id)`);
+      await migrateQuery(pool, 'Gradebook', `CREATE INDEX IF NOT EXISTS idx_grades_student ON grades(student_id)`);
+      await migrateQuery(pool, 'Gradebook', `CREATE INDEX IF NOT EXISTS idx_grades_class ON grades(class_id)`);
+      await migrateQuery(pool, 'Gradebook', `CREATE INDEX IF NOT EXISTS idx_marks_tenant ON marks(tenant_id)`);
+      await migrateQuery(pool, 'Gradebook', `CREATE INDEX IF NOT EXISTS idx_marks_student ON marks(student_id)`);
+      await migrateQuery(pool, 'Gradebook', `CREATE INDEX IF NOT EXISTS idx_marks_class ON marks(class_id)`);
+      await migrateQuery(pool, 'Gradebook', `CREATE INDEX IF NOT EXISTS idx_marksheets_tenant ON marksheets(tenant_id)`);
+      await migrateQuery(pool, 'Gradebook', `CREATE INDEX IF NOT EXISTS idx_marksheets_student ON marksheets(student_id)`);
+      await migrateQuery(pool, 'Gradebook', `CREATE INDEX IF NOT EXISTS idx_grading_scales_tenant ON grading_scales(tenant_id)`);
+      await migrateQuery(pool, 'Gradebook', `CREATE INDEX IF NOT EXISTS idx_class_subjects_tenant ON class_subjects(tenant_id)`);
       console.log('[Gradebook] Migrations applied successfully');
     } catch (e) { console.error('[Gradebook] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

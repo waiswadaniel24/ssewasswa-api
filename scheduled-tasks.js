@@ -1,5 +1,6 @@
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc;
   const ah = opts.ah || ((fn) => async (req, res, next) => { try { await fn(req, res, next); } catch (e) { res.status(500).json({ error: e.message }); } });

@@ -24,6 +24,7 @@
  *   POST /lost-found/item/:id/delete    — Soft-delete item
  */
 
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const renderPage = opts.renderPage || ((t, c, u) => c);
@@ -114,7 +115,7 @@ module.exports = function (app, pool, opts) {
       CREATE INDEX IF NOT EXISTS lfc_status ON lost_found_claims(status);
     `;
     for (const stmt of schema.split(';').map(s => s.trim()).filter(Boolean)) {
-      try { await pool.query(stmt); } catch (e) { /* table may already exist */ }
+      try { await migrateQuery(pool, 'LostFound', stmt); } catch (e) { /* table may already exist */ }
     }
   })();
 

@@ -3,6 +3,7 @@
  * Crypto, In-Kind, Planned Giving, Board Giving, Event Ticketing,
  * Auction Platform, Sponsorship Management, Donor Advised Funds
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
   const migrations = [
     `CREATE TABLE IF NOT EXISTS crypto_wallets (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, wallet_address TEXT NOT NULL, network TEXT NOT NULL, label TEXT, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,

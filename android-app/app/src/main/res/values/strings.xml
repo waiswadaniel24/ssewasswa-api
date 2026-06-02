@@ -1,0 +1,17 @@
+<resources>
+    <!-- App name shown on the Android home screen and app drawer -->
+    <string name="app_name">Comfort Zone</string>
+
+    <!-- TWA launch URL -->
+    <string name="launch_url">https://ssewasswa.onrender.com</string>
+
+    <!-- Host name for TWA verification -->
+    <string name="host_name">ssewasswa.onrender.com</string>
+
+    <!-- Assetlinks verification URL -->
+    <string name="assetlinks_url">https://ssewasswa.onrender.com/.well-known/assetlinks.json</string>
+
+    <!-- Error messages -->
+    <string name="error_no_chrome">Chrome is required to use this app. Please install Chrome from the Play Store.</string>
+    <string name="error_connection">Unable to connect. Please check your internet connection and try again.</string>
+</resources>

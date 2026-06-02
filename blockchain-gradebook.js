@@ -6,6 +6,7 @@
 // grade dispute resolution.
 // 12+ routes, PostgreSQL-backed, tenant-aware.
 // ============================================================
+const { migrateQuery } = require('./db');
 const crypto = require('crypto');
 
 module.exports = function(app, pool, opts) {
@@ -40,7 +41,7 @@ module.exports = function(app, pool, opts) {
   // ─── Database Migration ──────────────────────────────────
   (async () => {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS blockchain_grades (
+      await migrateQuery(pool, 'BlockchainGradebook', `CREATE TABLE IF NOT EXISTS blockchain_grades (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         student_id INT NOT NULL,
@@ -61,7 +62,7 @@ module.exports = function(app, pool, opts) {
     } catch(e) { console.warn('[BlockchainGradebook] Warn:', e.message); }
 
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS grade_attestations (
+      await migrateQuery(pool, 'BlockchainGradebook', `CREATE TABLE IF NOT EXISTS grade_attestations (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         grade_id INT NOT NULL,
@@ -75,7 +76,7 @@ module.exports = function(app, pool, opts) {
     } catch(e) { console.warn('[BlockchainGradebook] Warn:', e.message); }
 
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS transcript_requests (
+      await migrateQuery(pool, 'BlockchainGradebook', `CREATE TABLE IF NOT EXISTS transcript_requests (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         student_id INT NOT NULL,

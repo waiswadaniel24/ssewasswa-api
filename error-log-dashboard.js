@@ -4,13 +4,14 @@
  * Tables: error_logs, error_aggregates
  * Dark theme UI with SVG trend charts.
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc;
 
   // Auto-create tables
   (async () => {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS error_logs (
+      await migrateQuery(pool, 'ErrorLogDashboard', `CREATE TABLE IF NOT EXISTS error_logs (
         id SERIAL PRIMARY KEY, level TEXT DEFAULT 'error', message TEXT NOT NULL,
         stack_trace TEXT, source TEXT, path TEXT, method TEXT, status_code INT,
         user_id INT, ip_address TEXT, user_agent TEXT,
@@ -21,16 +22,16 @@ module.exports = function(app, pool, opts) {
         first_seen TIMESTAMPTZ DEFAULT NOW(), last_seen TIMESTAMPTZ,
         school_id INT DEFAULT 1
       )`);
-      await pool.query(`CREATE TABLE IF NOT EXISTS error_aggregates (
+      await migrateQuery(pool, 'ErrorLogDashboard', `CREATE TABLE IF NOT EXISTS error_aggregates (
         id SERIAL PRIMARY KEY, error_hash TEXT UNIQUE, level TEXT,
         message TEXT, source TEXT, total_count INT DEFAULT 1,
         last_occurrence TIMESTAMPTZ, is_resolved BOOLEAN DEFAULT false,
         school_id INT DEFAULT 1
       )`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_el_school ON error_logs(school_id)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_el_level ON error_logs(level)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_el_resolved ON error_logs(resolved)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_el_created ON error_logs(first_seen)`);
+      await migrateQuery(pool, 'ErrorLogDashboard', `CREATE INDEX IF NOT EXISTS idx_el_school ON error_logs(school_id)`);
+      await migrateQuery(pool, 'ErrorLogDashboard', `CREATE INDEX IF NOT EXISTS idx_el_level ON error_logs(level)`);
+      await migrateQuery(pool, 'ErrorLogDashboard', `CREATE INDEX IF NOT EXISTS idx_el_resolved ON error_logs(resolved)`);
+      await migrateQuery(pool, 'ErrorLogDashboard', `CREATE INDEX IF NOT EXISTS idx_el_created ON error_logs(first_seen)`);
       console.log('[ErrorLogs] Tables ready');
     } catch(e) { console.warn('[ErrorLogs] Migration:', e.message); }
   })();

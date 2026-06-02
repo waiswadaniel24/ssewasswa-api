@@ -1,6 +1,7 @@
 // ============================================================
 // === FEATURE MIGRATIONS ===
 // ============================================================
+const { migrateQuery } = require('./db');
 const featureMigrations = [
   // FEATURE 1: Online Exams & Quizzes
   `CREATE TABLE IF NOT EXISTS quizzes (

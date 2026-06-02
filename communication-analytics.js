@@ -6,6 +6,7 @@
 // bounce analysis, SVG charts — dark themed UI
 // ============================================================
 
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const { renderPage, ah, requireAuth, audit } = opts;

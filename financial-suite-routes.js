@@ -7,6 +7,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = (opts && opts.esc) || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = (opts && opts.renderPage) || ((t,c,u) => c);
@@ -189,21 +190,18 @@ module.exports = function(app, pool, opts) {
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { console.error('[FinancialSuite] Cannot connect to DB'); return; }
     try {
-      for (const sql of migrations) await client.query(sql);
+      for (const sql of migrations) await migrateQuery(pool, 'FinancialSuiteRoutes', sql);
       // Seed default categories if empty
-      const catCount = (await client.query('SELECT COUNT(*) FROM fin_categories WHERE tenant_id=0')).rows[0].count;
+      const catCount = (await migrateQuery(pool, 'FinancialSuiteRoutes', 'SELECT COUNT(*) FROM fin_categories WHERE tenant_id=0')).rows[0].count;
       if (parseInt(catCount) === 0) {
-        await client.query(`INSERT INTO fin_categories (tenant_id,name,type,color) VALUES
+        await migrateQuery(pool, 'FinancialSuiteRoutes', `INSERT INTO fin_categories (tenant_id,name,type,color) VALUES
           (0,'Consulting','income','#16a34a'),(0,'Products','income','#2563eb'),(0,'Services','income','#7c3aed'),
           (0,'Rent','expense','#dc2626'),(0,'Utilities','expense','#d97706'),(0,'Salaries','expense','#ef4444'),
           (0,'Supplies','expense','#f59e0b'),(0,'Marketing','expense','#ec4899'),(0,'Transport','expense','#06b6d4')`);
       }
       console.log('[FinancialSuite] Migrations applied: ' + migrations.length + ' statements');
     } catch (e) { console.error('[FinancialSuite] Migration error:', e.message); }
-    finally { client.release(); }
   })();
 
   // ── generate invoice number ────────────────────────────

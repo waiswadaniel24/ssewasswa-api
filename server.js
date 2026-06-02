@@ -431,6 +431,20 @@ app.get('/manifest.json', (req, res) => {
     launch_handler: { client_mode: "auto" }
   }));
 });
+// === ASSETLINKS.JSON — TWA (Trusted Web Activity) Android verification file ===
+// Must be served at /.well-known/assetlinks.json for Android TWA to verify domain ownership.
+// See android-app/assetlinks.json for instructions on replacing YOUR_SHA256_FINGERPRINT_HERE.
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  const assetlinksPath = path.join(__dirname, 'public', '.well-known', 'assetlinks.json');
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+  if (fs.existsSync(assetlinksPath)) {
+    res.sendFile(assetlinksPath);
+  } else {
+    res.status(404).json({ error: 'assetlinks.json not found. See android-app/assetlinks.json for setup instructions.' });
+  }
+});
+
 // === UPLOADS DIRECTORY FOR TENANT BRANDING ASSETS ===
 const uploadsTenantDir = path.join(__dirname, 'uploads', 'tenant');
 try { fs.mkdirSync(uploadsTenantDir, { recursive: true }); } catch(e) { /* ignore */ }

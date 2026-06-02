@@ -5,6 +5,7 @@
 // page analytics, device stats, geographic data, session tracking,
 // goal tracking, custom events, heatmap data
 
+const { migrateQuery } = require('./db');
 const AN_MIGRATIONS = [
   // Session tracking
   `CREATE TABLE IF NOT EXISTS analytics_sessions (

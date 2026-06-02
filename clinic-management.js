@@ -11,6 +11,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -132,10 +133,8 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[ClinicMgmt] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS clinic_visit_history (
+      await migrateQuery(pool, 'ClinicManagement', `CREATE TABLE IF NOT EXISTS clinic_visit_history (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         patient_id INTEGER NOT NULL,
@@ -149,7 +148,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS immunization_records (
+      await migrateQuery(pool, 'ClinicManagement', `CREATE TABLE IF NOT EXISTS immunization_records (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         patient_id INTEGER NOT NULL,
@@ -170,13 +169,11 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
         'CREATE INDEX IF NOT EXISTS idx_ir_vaccine ON immunization_records(vaccine_name)',
         'CREATE INDEX IF NOT EXISTS idx_cp_queue ON patient_queue(tenant_id, status)',
       ];
-      for (const sql of idxs) { try { await c.query(sql); } catch (_) { /* ignore */ } }
+      for (const sql of idxs) { try { await migrateQuery(pool, 'ClinicManagement', sql); } catch (_) { /* ignore */ } }
 
       console.log('[ClinicMgmt] Migrations applied successfully');
     } catch (e) {
       console.error('[ClinicMgmt] Migration error:', e.message);
-    } finally {
-      c.release();
     }
   })();
 

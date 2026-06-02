@@ -13,6 +13,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
 const formatDateTime = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
 
@@ -187,20 +188,17 @@ module.exports = function helpdesk(app, db, pool, renderPage, esc) {
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { console.warn('[Helpdesk] Cannot connect to DB'); return; }
     try {
-      for (const sql of migrations) await client.query(sql);
+      for (const sql of migrations) await migrateQuery(pool, 'Helpdesk', sql);
       // Seed categories per tenant
-      const tenants = (await client.query('SELECT id FROM tenants')).rows;
+      const tenants = (await migrateQuery(pool, 'Helpdesk', 'SELECT id FROM tenants')).rows;
       for (const t of tenants) {
         for (const seed of seedCategories) {
-          await client.query(seed.replace('(0,', `(${t.id},`).replace(' ON CONFLICT DO NOTHING', ' ON CONFLICT DO NOTHING'));
+          await migrateQuery(pool, 'Helpdesk', seed.replace('(0,', `(${t.id},`).replace(' ON CONFLICT DO NOTHING', ' ON CONFLICT DO NOTHING'));
         }
       }
       console.log('[Helpdesk] Migrations applied, categories seeded');
     } catch (e) { console.error('[Helpdesk] Migration error:', e.message); }
-    finally { client.release(); }
   })();
 
   // ============================================================

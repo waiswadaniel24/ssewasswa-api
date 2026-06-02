@@ -14,6 +14,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis }) => {
 
   // ── Helpers ───────────────────────────────────────────────
@@ -73,10 +74,8 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // DATABASE MIGRATIONS
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Scholarships] Cannot connect to DB'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS scholarship_programs (
+      await migrateQuery(pool, 'Scholarships', `CREATE TABLE IF NOT EXISTS scholarship_programs (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL, name VARCHAR(255) NOT NULL,
         type VARCHAR(50) NOT NULL DEFAULT 'academic', description TEXT, criteria JSONB DEFAULT '{}',
         award_amount NUMERIC(12,2) DEFAULT 0, coverage_type VARCHAR(20) DEFAULT 'partial',
@@ -85,7 +84,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         min_attendance NUMERIC(5,2) DEFAULT 75.0, deadline DATE, is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS scholarship_applications (
+      await migrateQuery(pool, 'Scholarships', `CREATE TABLE IF NOT EXISTS scholarship_applications (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL, program_id INTEGER NOT NULL,
         student_id INTEGER NOT NULL, status VARCHAR(30) DEFAULT 'draft', gpa NUMERIC(4,2),
         attendance_pct NUMERIC(5,2), financial_need_score NUMERIC(5,2) DEFAULT 0,
@@ -93,21 +92,21 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         score NUMERIC(5,2), reviewer_notes TEXT, awarded_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS scholarship_awards (
+      await migrateQuery(pool, 'Scholarships', `CREATE TABLE IF NOT EXISTS scholarship_awards (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL, program_id INTEGER NOT NULL,
         student_id INTEGER NOT NULL, application_id INTEGER, amount NUMERIC(12,2) DEFAULT 0,
         coverage_type VARCHAR(20) DEFAULT 'partial', start_date DATE, end_date DATE,
         renewal_conditions JSONB DEFAULT '{}', status VARCHAR(20) DEFAULT 'active',
         installments JSONB DEFAULT '[]', created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS scholarship_sponsors (
+      await migrateQuery(pool, 'Scholarships', `CREATE TABLE IF NOT EXISTS scholarship_sponsors (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL, name VARCHAR(255) NOT NULL,
         email VARCHAR(255), phone VARCHAR(50), company VARCHAR(255),
         pledge_amount NUMERIC(12,2) DEFAULT 0, donated_amount NUMERIC(12,2) DEFAULT 0,
         recognition_level VARCHAR(30) DEFAULT 'bronze', is_active BOOLEAN DEFAULT true,
         communication_log JSONB DEFAULT '[]', created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS scholarship_evaluations (
+      await migrateQuery(pool, 'Scholarships', `CREATE TABLE IF NOT EXISTS scholarship_evaluations (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL, application_id INTEGER NOT NULL,
         evaluator_id INTEGER NOT NULL, scores JSONB DEFAULT '{}', comments TEXT,
         recommendation VARCHAR(20) DEFAULT 'pending',
@@ -123,10 +122,9 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         'idx_sch_sponsor_tenant ON scholarship_sponsors(tenant_id)',
         'idx_sch_eval_tenant ON scholarship_evaluations(tenant_id)', 'idx_sch_eval_app ON scholarship_evaluations(tenant_id, application_id)',
       ];
-      for (const i of idxs) await c.query(`CREATE INDEX IF NOT EXISTS ${i}`);
+      for (const i of idxs) await migrateQuery(pool, 'Scholarships', `CREATE INDEX IF NOT EXISTS ${i}`);
       console.log('[Scholarships] Migrations applied');
     } catch (e) { console.error('[Scholarships] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

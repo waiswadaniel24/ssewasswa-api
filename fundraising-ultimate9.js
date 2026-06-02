@@ -3,6 +3,7 @@
  * Virtual Events, Galas, Wealth Screening, Grant Writing,
  * Tax Statements, Giving Days, Installment Plans, Engagement Scoring
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
   const M = [
     `CREATE TABLE IF NOT EXISTS virtual_events (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, event_type TEXT DEFAULT 'virtual' CHECK(event_type IN ('virtual','hybrid','in_person')), start_time TIMESTAMPTZ, end_time TIMESTAMPTZ, platform TEXT DEFAULT 'zoom', meeting_url TEXT, max_attendees INTEGER, ticket_price NUMERIC DEFAULT 0, total_registered INTEGER DEFAULT 0, total_attended INTEGER DEFAULT 0, status TEXT DEFAULT 'upcoming', created_at TIMESTAMPTZ DEFAULT NOW())`,

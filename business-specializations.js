@@ -2,6 +2,7 @@
 // BUSINESS SPECIALIZATIONS — Hotel, Restaurant, Retail, Salon,
 // Pharmacy, Gym, Hardware, Supermarket, Transport, Electronics
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, logger, audit, notify, ah, esc, renderPage, bcrypt) {
 
 // Add all tables to VALID_TABLES

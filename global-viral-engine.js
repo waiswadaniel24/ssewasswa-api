@@ -7,6 +7,7 @@
 // ============================================================
 
 // === DATABASE MIGRATIONS ===
+const { migrateQuery } = require('./db');
 const GLOBAL_VIRAL_MIGRATIONS = [
   // Global Search
   `CREATE TABLE IF NOT EXISTS global_search_logs (

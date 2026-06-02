@@ -11,6 +11,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 const crypto = require('crypto');
 
 module.exports = function (app, pool, opts) {
@@ -279,7 +280,7 @@ module.exports = function (app, pool, opts) {
         expires_at TIMESTAMPTZ,
         school_id INT DEFAULT 1
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'EncryptionKeyManager', `
       CREATE TABLE IF NOT EXISTS key_usage_log (
         id SERIAL PRIMARY KEY,
         key_id INT REFERENCES encryption_keys(id),
@@ -291,12 +292,12 @@ module.exports = function (app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         school_id INT DEFAULT 1
       )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_ek_school ON encryption_keys(school_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_ek_active ON encryption_keys(school_id, is_active)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_ek_next_rotation ON encryption_keys(next_rotation_at) WHERE is_active = true AND rotation_enabled = true');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_kul_key ON key_usage_log(key_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_kul_school ON key_usage_log(school_id, created_at DESC)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_kul_action ON key_usage_log(action)');
+    await migrateQuery(pool, 'EncryptionKeyManager', 'CREATE INDEX IF NOT EXISTS idx_ek_school ON encryption_keys(school_id)');
+    await migrateQuery(pool, 'EncryptionKeyManager', 'CREATE INDEX IF NOT EXISTS idx_ek_active ON encryption_keys(school_id, is_active)');
+    await migrateQuery(pool, 'EncryptionKeyManager', 'CREATE INDEX IF NOT EXISTS idx_ek_next_rotation ON encryption_keys(next_rotation_at) WHERE is_active = true AND rotation_enabled = true');
+    await migrateQuery(pool, 'EncryptionKeyManager', 'CREATE INDEX IF NOT EXISTS idx_kul_key ON key_usage_log(key_id)');
+    await migrateQuery(pool, 'EncryptionKeyManager', 'CREATE INDEX IF NOT EXISTS idx_kul_school ON key_usage_log(school_id, created_at DESC)');
+    await migrateQuery(pool, 'EncryptionKeyManager', 'CREATE INDEX IF NOT EXISTS idx_kul_action ON key_usage_log(action)');
   })().catch(function (err) { console.error('[encryption-key-manager] Table creation error:', err); });
 
   // ===========================================================================

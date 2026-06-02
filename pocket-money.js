@@ -3,6 +3,7 @@
  * Features: Wallet dashboard, top-up, spend, transfer, transaction history,
  *           admin controls, savings, SVG reports
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -149,7 +150,7 @@ module.exports = function(app, pool, opts) {
         UNIQUE(tenant_id, student_id)
       );
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'PocketMoney', `
       CREATE TABLE IF NOT EXISTS wallet_transactions (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 1,
@@ -165,7 +166,7 @@ module.exports = function(app, pool, opts) {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'PocketMoney', `
       CREATE TABLE IF NOT EXISTS wallet_savings (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 1,
@@ -180,11 +181,11 @@ module.exports = function(app, pool, opts) {
       );
     `);
     // Ensure student_id column exists (in case table was created without it)
-    try { await pool.query(`ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS student_id INT`); } catch(e) {}
-    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_wt_tenant ON wallet_transactions(tenant_id, student_id);`); } catch(e) {}
-    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_wt_type ON wallet_transactions(tenant_id, type);`); } catch(e) {}
-    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_wt_date ON wallet_transactions(tenant_id, created_at);`); } catch(e) {}
-    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_ws_account ON wallet_savings(tenant_id, account_id);`); } catch(e) {}
+    try { await migrateQuery(pool, 'PocketMoney', `ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS student_id INT`); } catch(e) {}
+    try { await migrateQuery(pool, 'PocketMoney', `CREATE INDEX IF NOT EXISTS idx_wt_tenant ON wallet_transactions(tenant_id, student_id);`); } catch(e) {}
+    try { await migrateQuery(pool, 'PocketMoney', `CREATE INDEX IF NOT EXISTS idx_wt_type ON wallet_transactions(tenant_id, type);`); } catch(e) {}
+    try { await migrateQuery(pool, 'PocketMoney', `CREATE INDEX IF NOT EXISTS idx_wt_date ON wallet_transactions(tenant_id, created_at);`); } catch(e) {}
+    try { await migrateQuery(pool, 'PocketMoney', `CREATE INDEX IF NOT EXISTS idx_ws_account ON wallet_savings(tenant_id, account_id);`); } catch(e) {}
   })().catch(e => console.error('pocket-money table init error:', e));
 
   // ── Helper: get or create wallet ──

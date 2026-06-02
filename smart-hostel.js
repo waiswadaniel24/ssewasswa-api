@@ -5,6 +5,7 @@
 // ============================================================
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function smartHostel(app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const renderPage = opts.renderPage || ((t, c, u) => c);
@@ -931,18 +932,17 @@ module.exports = function smartHostel(app, pool, opts) {
 
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await migrateQuery(pool, 'SmartHostel', 'BEGIN');
       // Free old room
-      await client.query('UPDATE hostel_rooms_smart SET current_occupants=GREATEST(current_occupants-1,0), status=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3', ['available', currentAlloc.room_id, tid]);
+      await migrateQuery(pool, 'SmartHostel', 'UPDATE hostel_rooms_smart SET current_occupants=GREATEST(current_occupants-1,0), status=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3', ['available', currentAlloc.room_id, tid]);
       // Fill new room
-      const newOcc = (await client.query('SELECT COUNT(*)::int AS c FROM room_allocations WHERE room_id=$1 AND tenant_id=$2 AND status=$3', [s.target_room_id, tid, 'active'])).rows[0].c;
-      await client.query('UPDATE room_allocations SET room_id=$1, bed_number=$2, updated_at=NOW() WHERE id=$3 AND tenant_id=$4', [s.target_room_id, newOcc + 1, currentAlloc.id, tid]);
-      await client.query('UPDATE hostel_rooms_smart SET current_occupants=current_occupants+1, status=CASE WHEN current_occupants+1>=capacity THEN $1 ELSE status END, updated_at=NOW() WHERE id=$2 AND tenant_id=$3', ['full', s.target_room_id, tid]);
-      await client.query('UPDATE room_swap_requests SET status=$1, reviewed_by=$2, reviewed_at=NOW() WHERE id=$3 AND tenant_id=$4', ['approved', req.session.user.id, s.id, tid]);
-      await client.query('COMMIT');
+      const newOcc = (await migrateQuery(pool, 'SmartHostel', 'SELECT COUNT(*)::int AS c FROM room_allocations WHERE room_id=$1 AND tenant_id=$2 AND status=$3', [s.target_room_id, tid, 'active'])).rows[0].c;
+      await migrateQuery(pool, 'SmartHostel', 'UPDATE room_allocations SET room_id=$1, bed_number=$2, updated_at=NOW() WHERE id=$3 AND tenant_id=$4', [s.target_room_id, newOcc + 1, currentAlloc.id, tid]);
+      await migrateQuery(pool, 'SmartHostel', 'UPDATE hostel_rooms_smart SET current_occupants=current_occupants+1, status=CASE WHEN current_occupants+1>=capacity THEN $1 ELSE status END, updated_at=NOW() WHERE id=$2 AND tenant_id=$3', ['full', s.target_room_id, tid]);
+      await migrateQuery(pool, 'SmartHostel', 'UPDATE room_swap_requests SET status=$1, reviewed_by=$2, reviewed_at=NOW() WHERE id=$3 AND tenant_id=$4', ['approved', req.session.user.id, s.id, tid]);
+      await migrateQuery(pool, 'SmartHostel', 'COMMIT');
       audit('swap_approved', { swap_id: s.id });
-    } catch (e) { await client.query('ROLLBACK'); throw e; }
-    finally { client.release(); }
+    } catch (e) { await migrateQuery(pool, 'SmartHostel', 'ROLLBACK'); throw e; }
     res.redirect('/smart-hostel/swaps');
   }));
 

@@ -14,6 +14,7 @@
 // ============================================================
 // MODULE ENTRY POINT
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function studentPortal(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -115,10 +116,8 @@ module.exports = function studentPortal(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[StudentPortal] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS student_submissions (
+      await migrateQuery(pool, 'StudentPortal', `CREATE TABLE IF NOT EXISTS student_submissions (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         student_id INTEGER NOT NULL, assignment_id INTEGER, assignment_title VARCHAR(255),
         subject VARCHAR(100), content TEXT, file_url TEXT,
@@ -132,13 +131,12 @@ module.exports = function studentPortal(app, db, pool, renderPage, esc) {
         ['status',"VARCHAR(20) DEFAULT 'submitted'"],['grade','DECIMAL(5,2)'],
         ['feedback','TEXT'],['submitted_at','TIMESTAMPTZ DEFAULT NOW()'],['graded_at','TIMESTAMPTZ']
       ];
-      for (const [col, def] of ssCols) { try { await c.query(`ALTER TABLE student_submissions ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch(e){} }
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ssub_tenant ON student_submissions(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ssub_student ON student_submissions(student_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ssub_status ON student_submissions(tenant_id, status)`);
+      for (const [col, def] of ssCols) { try { await migrateQuery(pool, 'StudentPortal', `ALTER TABLE student_submissions ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch(e){} }
+      await migrateQuery(pool, 'StudentPortal', `CREATE INDEX IF NOT EXISTS idx_ssub_tenant ON student_submissions(tenant_id)`);
+      await migrateQuery(pool, 'StudentPortal', `CREATE INDEX IF NOT EXISTS idx_ssub_student ON student_submissions(student_id)`);
+      await migrateQuery(pool, 'StudentPortal', `CREATE INDEX IF NOT EXISTS idx_ssub_status ON student_submissions(tenant_id, status)`);
       console.log('[StudentPortal] Migrations applied successfully');
     } catch (e) { console.error('[StudentPortal] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary brand colors matching the Comfort Zone PWA theme -->
+    <color name="primary">#059669</color>        <!-- Emerald green — matches PWA theme_color -->
+    <color name="primary_dark">#047857</color>    <!-- Darker green for status bar -->
+    <color name="primary_light">#10B981</color>   <!-- Lighter green for accents -->
+    <color name="accent">#F59E0B</color>          <!-- Amber accent color -->
+    <color name="accent_dark">#D97706</color>     <!-- Darker amber -->
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+    <color name="gray_light">#F3F4F6</color>
+    <color name="gray">#9CA3AF</color>
+    <color name="gray_dark">#374151</color>
+    <color name="background">#FFFFFF</color>       <!-- Matches PWA background_color -->
+    <color name="splash_background">#059669</color> <!-- Green splash screen -->
+    <color name="splash_text">#FFFFFF</color>       <!-- White text on splash -->
+</resources>

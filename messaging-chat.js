@@ -14,6 +14,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 function relativeTime(dateStr) {
   if (!dateStr) return '';
   const now = new Date(), d = new Date(dateStr);
@@ -201,14 +202,12 @@ module.exports = function messagingChat(app, pool, requireAuth, logger, audit, n
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { logger.warn('[ChatModule] Cannot connect to DB for migrations'); return; }
     try {
-      for (const sql of chatMigrations) { try { await client.query(sql); } catch(e) { /* skip individual migration errors */ } }
+      for (const sql of chatMigrations) { try { await migrateQuery(pool, 'MessagingChat', sql); } catch(e) { /* skip individual migration errors */ } }
       logger.info({ msg: '[ChatModule] Migrations applied', count: chatMigrations.length });
     } catch (e) {
       logger.error({ msg: '[ChatModule] Migration error', error: e.message });
-    } finally { client.release(); }
+    }
   })();
 
   // ============================================================

@@ -19,6 +19,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function timetableBuilder(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -110,10 +111,8 @@ module.exports = function timetableBuilder(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[TimetableBuilder] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS timetable_periods (
+      await migrateQuery(pool, 'TimetableBuilder', `CREATE TABLE IF NOT EXISTS timetable_periods (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         day_of_week INTEGER NOT NULL, period_number INTEGER NOT NULL,
         class_id INTEGER, subject_id INTEGER, teacher_id INTEGER,
@@ -122,7 +121,7 @@ module.exports = function timetableBuilder(app, db, pool, renderPage, esc) {
         notes TEXT, created_by INTEGER,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS timetable_conflicts (
+      await migrateQuery(pool, 'TimetableBuilder', `CREATE TABLE IF NOT EXISTS timetable_conflicts (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         period1_id INTEGER, period2_id INTEGER,
         conflict_type VARCHAR(50), description TEXT,
@@ -136,24 +135,23 @@ module.exports = function timetableBuilder(app, db, pool, renderPage, esc) {
         'term VARCHAR(50)','academic_year VARCHAR(20)',
         'notes TEXT','created_by INTEGER'];
       for (const col of tpCols) {
-        try { await c.query('ALTER TABLE timetable_periods ADD COLUMN IF NOT EXISTS ' + col); } catch (e) {}
+        try { await migrateQuery(pool, 'TimetableBuilder', 'ALTER TABLE timetable_periods ADD COLUMN IF NOT EXISTS ' + col); } catch (e) {}
       }
       // ALTER TABLE IF NOT EXISTS — timetable_conflicts
       const tcCols = ['period1_id INTEGER','period2_id INTEGER',
         'conflict_type VARCHAR(50)','description TEXT','resolved BOOLEAN DEFAULT false'];
       for (const col of tcCols) {
-        try { await c.query('ALTER TABLE timetable_conflicts ADD COLUMN IF NOT EXISTS ' + col); } catch (e) {}
+        try { await migrateQuery(pool, 'TimetableBuilder', 'ALTER TABLE timetable_conflicts ADD COLUMN IF NOT EXISTS ' + col); } catch (e) {}
       }
       // Indexes
-      await c.query('CREATE INDEX IF NOT EXISTS idx_tp_tenant ON timetable_periods(tenant_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_tp_day ON timetable_periods(tenant_id, day_of_week)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_tp_class ON timetable_periods(tenant_id, class_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_tp_teacher ON timetable_periods(tenant_id, teacher_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_tc_tenant ON timetable_conflicts(tenant_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_tc_resolved ON timetable_conflicts(tenant_id, resolved)');
+      await migrateQuery(pool, 'TimetableBuilder', 'CREATE INDEX IF NOT EXISTS idx_tp_tenant ON timetable_periods(tenant_id)');
+      await migrateQuery(pool, 'TimetableBuilder', 'CREATE INDEX IF NOT EXISTS idx_tp_day ON timetable_periods(tenant_id, day_of_week)');
+      await migrateQuery(pool, 'TimetableBuilder', 'CREATE INDEX IF NOT EXISTS idx_tp_class ON timetable_periods(tenant_id, class_id)');
+      await migrateQuery(pool, 'TimetableBuilder', 'CREATE INDEX IF NOT EXISTS idx_tp_teacher ON timetable_periods(tenant_id, teacher_id)');
+      await migrateQuery(pool, 'TimetableBuilder', 'CREATE INDEX IF NOT EXISTS idx_tc_tenant ON timetable_conflicts(tenant_id)');
+      await migrateQuery(pool, 'TimetableBuilder', 'CREATE INDEX IF NOT EXISTS idx_tc_resolved ON timetable_conflicts(tenant_id, resolved)');
       console.log('[TimetableBuilder] Migrations applied successfully');
     } catch (e) { console.error('[TimetableBuilder] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

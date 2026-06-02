@@ -3,6 +3,7 @@
  * Multi-tenant CSV import/export with column mapping, progress tracking,
  * retry logic, and export generation for 6 target tables.
  */
+const { migrateQuery } = require('./db');
 module.exports = function dataImport(app, db, pool, renderPage, esc) {
 
   /* ── Middleware ──────────────────────────────────────────────────── */
@@ -61,11 +62,11 @@ module.exports = function dataImport(app, db, pool, renderPage, esc) {
         'started_by INTEGER', 'started_at TIMESTAMPTZ', 'completed_at TIMESTAMPTZ',
       ];
       for (const col of alterCols) {
-        await pool.query(`ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS ${col};`);
+        await migrateQuery(pool, 'DataImport', `ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS ${col};`);
       }
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_import_jobs_tenant ON import_jobs(tenant_id);`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status);`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_import_jobs_target ON import_jobs(target_table);`);
+      await migrateQuery(pool, 'DataImport', `CREATE INDEX IF NOT EXISTS idx_import_jobs_tenant ON import_jobs(tenant_id);`);
+      await migrateQuery(pool, 'DataImport', `CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status);`);
+      await migrateQuery(pool, 'DataImport', `CREATE INDEX IF NOT EXISTS idx_import_jobs_target ON import_jobs(target_table);`);
     } catch (err) {
       console.error('[DataImport] Migration error:', err.message);
     }

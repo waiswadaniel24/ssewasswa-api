@@ -21,6 +21,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
   const { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT } = opts;
   const P = '#16a34a';
@@ -195,7 +196,7 @@ module.exports = function (app, pool, opts) {
   // ── table migrations ─────────────────────────────────────────────────
   (async function () {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS green_initiatives (
+      await migrateQuery(pool, 'GreenCampus', `CREATE TABLE IF NOT EXISTS green_initiatives (
         id BIGSERIAL PRIMARY KEY,
         tenant_id BIGINT NOT NULL,
         title VARCHAR(255) NOT NULL,
@@ -212,7 +213,7 @@ module.exports = function (app, pool, opts) {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       `);
 
-      await pool.query(`CREATE TABLE IF NOT EXISTS energy_readings (
+      await migrateQuery(pool, 'GreenCampus', `CREATE TABLE IF NOT EXISTS energy_readings (
         id BIGSERIAL PRIMARY KEY,
         tenant_id BIGINT NOT NULL,
         meter_id VARCHAR(100) NOT NULL,
@@ -225,7 +226,7 @@ module.exports = function (app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       `);
 
-      await pool.query(`CREATE TABLE IF NOT EXISTS waste_records (
+      await migrateQuery(pool, 'GreenCampus', `CREATE TABLE IF NOT EXISTS waste_records (
         id BIGSERIAL PRIMARY KEY,
         tenant_id BIGINT NOT NULL,
         waste_type TEXT DEFAULT 'general',
@@ -238,7 +239,7 @@ module.exports = function (app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       `);
 
-      await pool.query(`CREATE TABLE IF NOT EXISTS green_challenges (
+      await migrateQuery(pool, 'GreenCampus', `CREATE TABLE IF NOT EXISTS green_challenges (
         id BIGSERIAL PRIMARY KEY,
         tenant_id BIGINT NOT NULL,
         title VARCHAR(255) NOT NULL,
@@ -253,7 +254,7 @@ module.exports = function (app, pool, opts) {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       `);
 
-      await pool.query(`CREATE TABLE IF NOT EXISTS water_readings (
+      await migrateQuery(pool, 'GreenCampus', `CREATE TABLE IF NOT EXISTS water_readings (
         id BIGSERIAL PRIMARY KEY,
         tenant_id BIGINT NOT NULL,
         meter_id VARCHAR(100) NOT NULL,
@@ -264,7 +265,7 @@ module.exports = function (app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       `);
 
-      await pool.query(`CREATE TABLE IF NOT EXISTS tree_planting (
+      await migrateQuery(pool, 'GreenCampus', `CREATE TABLE IF NOT EXISTS tree_planting (
         id BIGSERIAL PRIMARY KEY,
         tenant_id BIGINT NOT NULL,
         species VARCHAR(255) NOT NULL,
@@ -279,7 +280,7 @@ module.exports = function (app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       `);
 
-      await pool.query(`CREATE TABLE IF NOT EXISTS sustainability_goals (
+      await migrateQuery(pool, 'GreenCampus', `CREATE TABLE IF NOT EXISTS sustainability_goals (
         id BIGSERIAL PRIMARY KEY,
         tenant_id BIGINT NOT NULL,
         title VARCHAR(255) NOT NULL,
@@ -294,7 +295,7 @@ module.exports = function (app, pool, opts) {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       `);
 
-      await pool.query(`CREATE TABLE IF NOT EXISTS green_certifications (
+      await migrateQuery(pool, 'GreenCampus', `CREATE TABLE IF NOT EXISTS green_certifications (
         id BIGSERIAL PRIMARY KEY,
         tenant_id BIGINT NOT NULL,
         cert_name VARCHAR(255) NOT NULL,
@@ -310,7 +311,7 @@ module.exports = function (app, pool, opts) {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       `);
 
-      await pool.query(`CREATE TABLE IF NOT EXISTS eco_clubs (
+      await migrateQuery(pool, 'GreenCampus', `CREATE TABLE IF NOT EXISTS eco_clubs (
         id BIGSERIAL PRIMARY KEY,
         tenant_id BIGINT NOT NULL,
         name VARCHAR(255) NOT NULL,

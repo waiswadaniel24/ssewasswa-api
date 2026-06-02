@@ -4,6 +4,7 @@
 // highlighting, note-taking, progress tracking, quiz integration.
 // 12+ routes, PostgreSQL-backed, tenant-aware.
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT } = opts;
   const P = '#4f46e5', GRAY = '#6b7280';
@@ -24,7 +25,7 @@ module.exports = function(app, pool, opts) {
   // ─── Database Migration ──────────────────────────────────
   (async () => {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS textbooks (
+      await migrateQuery(pool, 'SmartTextbook', `CREATE TABLE IF NOT EXISTS textbooks (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         title VARCHAR(255) NOT NULL,
@@ -43,7 +44,7 @@ module.exports = function(app, pool, opts) {
     } catch(e) { console.warn('[SmartTextbook] Warn:', e.message); }
 
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS textbook_chapters (
+      await migrateQuery(pool, 'SmartTextbook', `CREATE TABLE IF NOT EXISTS textbook_chapters (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         textbook_id INT NOT NULL,
@@ -61,7 +62,7 @@ module.exports = function(app, pool, opts) {
     } catch(e) { console.warn('[SmartTextbook] Warn:', e.message); }
 
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS textbook_progress (
+      await migrateQuery(pool, 'SmartTextbook', `CREATE TABLE IF NOT EXISTS textbook_progress (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         student_id INT NOT NULL,

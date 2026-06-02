@@ -9,6 +9,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function sports(app, db, pool, renderPage, esc) {
 
   const requireAuth = (req, res, next) => {
@@ -90,17 +91,15 @@ module.exports = function sports(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Sports] Cannot connect to DB'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS sports_teams (
+      await migrateQuery(pool, 'Sports', `CREATE TABLE IF NOT EXISTS sports_teams (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL, sport VARCHAR(50) DEFAULT 'football',
         coach_name VARCHAR(255), color VARCHAR(20) DEFAULT '#3b82f6',
         player_count INTEGER DEFAULT 0, wins INTEGER DEFAULT 0, losses INTEGER DEFAULT 0, draws INTEGER DEFAULT 0,
         is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS sports_players (
+      await migrateQuery(pool, 'Sports', `CREATE TABLE IF NOT EXISTS sports_players (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         team_id INTEGER NOT NULL REFERENCES sports_teams(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL, jersey_number INTEGER, position VARCHAR(50),
@@ -108,7 +107,7 @@ module.exports = function sports(app, db, pool, renderPage, esc) {
         yellow_cards INTEGER DEFAULT 0, red_cards INTEGER DEFAULT 0,
         is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS sports_fixtures (
+      await migrateQuery(pool, 'Sports', `CREATE TABLE IF NOT EXISTS sports_fixtures (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         home_team_id INTEGER REFERENCES sports_teams(id), away_team_id INTEGER REFERENCES sports_teams(id),
         sport VARCHAR(50), venue VARCHAR(255), match_date TIMESTAMPTZ,
@@ -121,7 +120,7 @@ module.exports = function sports(app, db, pool, renderPage, esc) {
         sports_fixtures: [['home_team_id','INTEGER'],['away_team_id','INTEGER'],['sport','VARCHAR(50)'],['venue','VARCHAR(255)'],['match_date','TIMESTAMPTZ'],['home_score','INTEGER'],['away_score','INTEGER'],['status',"VARCHAR(20) DEFAULT 'scheduled'"],['season','VARCHAR(50)'],['notes','TEXT']]
       };
       for (const [tbl, list] of Object.entries(cols)) {
-        for (const [col, typ] of list) { try { await c.query(`ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {} }
+        for (const [col, typ] of list) { try { await migrateQuery(pool, 'Sports', `ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {} }
       }
       const indexes = [
         'CREATE INDEX IF NOT EXISTS idx_st_tenant ON sports_teams(tenant_id)',
@@ -135,10 +134,9 @@ module.exports = function sports(app, db, pool, renderPage, esc) {
         'CREATE INDEX IF NOT EXISTS idx_sf_status ON sports_fixtures(tenant_id, status)',
         'CREATE INDEX IF NOT EXISTS idx_sf_date ON sports_fixtures(tenant_id, match_date)',
       ];
-      for (const sql of indexes) await c.query(sql);
+      for (const sql of indexes) await migrateQuery(pool, 'Sports', sql);
       console.log('[Sports] Migrations applied successfully');
     } catch (e) { console.error('[Sports] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // Shared query: fixtures with team names

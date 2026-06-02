@@ -12,6 +12,7 @@
  *  9. Funeral/Burial Fund
  * 10. AI Campaign Story Writer
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
 
   // =============================================

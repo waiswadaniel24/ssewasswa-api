@@ -20,6 +20,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function admissions(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -118,10 +119,8 @@ module.exports = function admissions(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Admissions] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS admission_applications (
+      await migrateQuery(pool, 'Admissions', `CREATE TABLE IF NOT EXISTS admission_applications (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         applicant_name VARCHAR(255), email VARCHAR(255), phone VARCHAR(50),
         date_of_birth DATE, gender VARCHAR(20), previous_school TEXT,
@@ -131,7 +130,7 @@ module.exports = function admissions(app, db, pool, renderPage, esc) {
         interview_date TIMESTAMPTZ, interview_notes TEXT,
         reviewed_by INTEGER, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS admission_settings (
+      await migrateQuery(pool, 'Admissions', `CREATE TABLE IF NOT EXISTS admission_settings (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         academic_year VARCHAR(20), term VARCHAR(50),
         application_deadline DATE, interview_required BOOLEAN DEFAULT true,
@@ -146,21 +145,20 @@ module.exports = function admissions(app, db, pool, renderPage, esc) {
         'address TEXT','medical_notes TEXT','documents JSONB DEFAULT \'[]\'::jsonb',
         'status VARCHAR(20) DEFAULT \'pending\'',
         'interview_date TIMESTAMPTZ','interview_notes TEXT','reviewed_by INTEGER'];
-      for (const col of aaCols) { try { await c.query('ALTER TABLE admission_applications ADD COLUMN IF NOT EXISTS ' + col); } catch(e){} }
+      for (const col of aaCols) { try { await migrateQuery(pool, 'Admissions', 'ALTER TABLE admission_applications ADD COLUMN IF NOT EXISTS ' + col); } catch(e){} }
       // ALTER TABLE — admission_settings
       const asCols = ['academic_year VARCHAR(20)','term VARCHAR(50)',
         'application_deadline DATE','interview_required BOOLEAN DEFAULT true',
         'required_documents TEXT[]','min_age INTEGER','max_age INTEGER',
         'fee DECIMAL(12,2) DEFAULT 0','status VARCHAR(20) DEFAULT \'open\''];
-      for (const col of asCols) { try { await c.query('ALTER TABLE admission_settings ADD COLUMN IF NOT EXISTS ' + col); } catch(e){} }
+      for (const col of asCols) { try { await migrateQuery(pool, 'Admissions', 'ALTER TABLE admission_settings ADD COLUMN IF NOT EXISTS ' + col); } catch(e){} }
       // Indexes
-      await c.query('CREATE INDEX IF NOT EXISTS idx_aa_tenant ON admission_applications(tenant_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_aa_status ON admission_applications(tenant_id, status)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_aa_email ON admission_applications(tenant_id, email)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_aSett_tenant ON admission_settings(tenant_id)');
+      await migrateQuery(pool, 'Admissions', 'CREATE INDEX IF NOT EXISTS idx_aa_tenant ON admission_applications(tenant_id)');
+      await migrateQuery(pool, 'Admissions', 'CREATE INDEX IF NOT EXISTS idx_aa_status ON admission_applications(tenant_id, status)');
+      await migrateQuery(pool, 'Admissions', 'CREATE INDEX IF NOT EXISTS idx_aa_email ON admission_applications(tenant_id, email)');
+      await migrateQuery(pool, 'Admissions', 'CREATE INDEX IF NOT EXISTS idx_aSett_tenant ON admission_settings(tenant_id)');
       console.log('[Admissions] Migrations applied successfully');
     } catch (e) { console.error('[Admissions] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

@@ -2,6 +2,7 @@
  * Funnel Analytics Module — School SaaS Portal
  * Conversion funnel visualization for enrollment, payment, attendance & custom funnels.
  */
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const tenantId = (req) => req.session?.user?.tenant_id || 0;

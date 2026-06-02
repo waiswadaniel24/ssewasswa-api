@@ -13,6 +13,7 @@
 // ============================================================
 // MODULE ENTRY POINT
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function disciplineTracker(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -186,17 +187,9 @@ module.exports = function disciplineTracker(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    let c = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      c = await pool.connect().catch(() => null);
-      if (c) break;
-      console.warn(`[DisciplineTracker] DB connection attempt ${attempt}/3 failed, retrying in 3s...`);
-      await new Promise(r => setTimeout(r, 3000));
-    }
-    if (!c) { console.error('[DisciplineTracker] Cannot connect to DB for migrations after 3 attempts'); return; }
     try {
       // -- Table 1: behavior_categories ---------------------------------
-      await c.query(`CREATE TABLE IF NOT EXISTS behavior_categories (
+      await migrateQuery(pool,'DisciplineTracker',`CREATE TABLE IF NOT EXISTS behavior_categories (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(100) NOT NULL,
@@ -213,11 +206,11 @@ module.exports = function disciplineTracker(app, db, pool, renderPage, esc) {
         ['points','INTEGER DEFAULT 0'],['is_active','BOOLEAN DEFAULT true']
       ];
       for (const [col, typ] of bcCols) {
-        try { await c.query(`ALTER TABLE behavior_categories ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch(e) {}
+        try { await migrateQuery(pool,'DisciplineTracker',`ALTER TABLE behavior_categories ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch(e) {}
       }
 
       // -- Table 2: discipline_incidents --------------------------------
-      await c.query(`CREATE TABLE IF NOT EXISTS discipline_incidents (
+      await migrateQuery(pool,'DisciplineTracker',`CREATE TABLE IF NOT EXISTS discipline_incidents (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
@@ -249,11 +242,11 @@ module.exports = function disciplineTracker(app, db, pool, renderPage, esc) {
         ['resolution_notes','TEXT'],['created_at','TIMESTAMPTZ DEFAULT NOW()'],['updated_at','TIMESTAMPTZ DEFAULT NOW()']
       ];
       for (const [col, typ] of diCols) {
-        try { await c.query(`ALTER TABLE discipline_incidents ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch(e) {}
+        try { await migrateQuery(pool,'DisciplineTracker',`ALTER TABLE discipline_incidents ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch(e) {}
       }
 
       // -- Table 3: discipline_actions ----------------------------------
-      await c.query(`CREATE TABLE IF NOT EXISTS discipline_actions (
+      await migrateQuery(pool,'DisciplineTracker',`CREATE TABLE IF NOT EXISTS discipline_actions (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         incident_id INTEGER REFERENCES discipline_incidents(id) ON DELETE CASCADE,
@@ -277,31 +270,31 @@ module.exports = function disciplineTracker(app, db, pool, renderPage, esc) {
         ['notes','TEXT'],['created_at','TIMESTAMPTZ DEFAULT NOW()']
       ];
       for (const [col, typ] of daCols) {
-        try { await c.query(`ALTER TABLE discipline_actions ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch(e) {}
+        try { await migrateQuery(pool,'DisciplineTracker',`ALTER TABLE discipline_actions ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch(e) {}
       }
 
       // -- Indexes ------------------------------------------------------
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_bc_tenant ON behavior_categories(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_bc_active ON behavior_categories(tenant_id, is_active)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_bc_severity ON behavior_categories(tenant_id, severity)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_di_tenant ON discipline_incidents(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_di_student ON discipline_incidents(tenant_id, student_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_di_status ON discipline_incidents(tenant_id, status)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_di_severity ON discipline_incidents(tenant_id, severity)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_di_category ON discipline_incidents(tenant_id, category_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_di_date ON discipline_incidents(tenant_id, incident_date)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_di_reported ON discipline_incidents(tenant_id, reported_by)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_da_tenant ON discipline_actions(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_da_incident ON discipline_actions(tenant_id, incident_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_da_student ON discipline_actions(tenant_id, student_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_da_status ON discipline_actions(tenant_id, status)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_da_type ON discipline_actions(tenant_id, action_type)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_da_assigned ON discipline_actions(tenant_id, assigned_by)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_da_dates ON discipline_actions(tenant_id, start_date, end_date)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_bc_tenant ON behavior_categories(tenant_id)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_bc_active ON behavior_categories(tenant_id, is_active)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_bc_severity ON behavior_categories(tenant_id, severity)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_di_tenant ON discipline_incidents(tenant_id)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_di_student ON discipline_incidents(tenant_id, student_id)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_di_status ON discipline_incidents(tenant_id, status)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_di_severity ON discipline_incidents(tenant_id, severity)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_di_category ON discipline_incidents(tenant_id, category_id)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_di_date ON discipline_incidents(tenant_id, incident_date)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_di_reported ON discipline_incidents(tenant_id, reported_by)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_da_tenant ON discipline_actions(tenant_id)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_da_incident ON discipline_actions(tenant_id, incident_id)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_da_student ON discipline_actions(tenant_id, student_id)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_da_status ON discipline_actions(tenant_id, status)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_da_type ON discipline_actions(tenant_id, action_type)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_da_assigned ON discipline_actions(tenant_id, assigned_by)`);
+      await migrateQuery(pool,'DisciplineTracker',`CREATE INDEX IF NOT EXISTS idx_da_dates ON discipline_actions(tenant_id, start_date, end_date)`);
 
       console.log('[Discipline] Migrations applied successfully');
     } catch (e) { console.error('[Discipline] Migration error:', e.message); }
-    finally { c.release(); }
+    
   })();
 
   // ============================================================
@@ -630,24 +623,24 @@ module.exports = function disciplineTracker(app, db, pool, renderPage, esc) {
 
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await migrateQuery(pool, 'DisciplineTracker', 'BEGIN');
 
       // Get category info for auto-action
-      const cat = (await client.query(
+      const cat = (await migrateQuery(pool, 'DisciplineTracker', 
         `SELECT * FROM behavior_categories WHERE id=$1 AND tenant_id=$2`, [category_id, tid]
       )).rows[0];
 
       // Get student phone if not provided
       let phone = parent_phone || '';
       if (!phone && student_id) {
-        const studentPhone = (await client.query(
+        const studentPhone = (await migrateQuery(pool, 'DisciplineTracker', 
           `SELECT guardian_phone FROM students WHERE id=$1 AND tenant_id=$2`, [student_id, tid]
         )).rows[0];
         if (studentPhone) phone = studentPhone.guardian_phone || '';
       }
 
       // Insert incident
-      const result = await client.query(
+      const result = await migrateQuery(pool, 'DisciplineTracker', 
         `INSERT INTO discipline_incidents (tenant_id, student_id, category_id, reported_by, incident_date, location, description, witnesses, evidence_path, severity, parent_phone)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
         [tid, student_id, category_id, user.id, incident_date || new Date().toISOString(), location || null, description.trim(), witnesses || null, evidence_path || null, severity || 'minor', phone || null]
@@ -660,7 +653,7 @@ module.exports = function disciplineTracker(app, db, pool, renderPage, esc) {
         const validTypes = ['warning', 'counseling', 'detention', 'suspension', 'expulsion', 'community_service', 'parent_meeting'];
         const finalType = validTypes.includes(actionType) ? actionType : 'warning';
         const durDays = finalType === 'detention' ? 1 : finalType === 'suspension' ? 3 : 0;
-        await client.query(
+        await migrateQuery(pool, 'DisciplineTracker', 
           `INSERT INTO discipline_actions (tenant_id, incident_id, student_id, action_type, description, duration_days, assigned_by, status)
            VALUES ($1,$2,$3,$4,$5,$6,$7,'active')`,
           [tid, incidentId, student_id, finalType, `Auto-assigned for category: ${cat.name}`, durDays, user.id]
@@ -670,13 +663,13 @@ module.exports = function disciplineTracker(app, db, pool, renderPage, esc) {
       // Parent notification
       const shouldNotify = notify_parent === '1' || notify_parent === 'true';
       if (shouldNotify && phone) {
-        await client.query(
+        await migrateQuery(pool, 'DisciplineTracker', 
           `UPDATE discipline_incidents SET parent_notified=true, parent_notified_at=NOW() WHERE id=$1 AND tenant_id=$2`,
           [incidentId, tid]
         );
         // Log SMS in sms_logs table if exists
         try {
-          await client.query(
+          await migrateQuery(pool, 'DisciplineTracker', 
             `INSERT INTO sms_logs (tenant_id, phone_number, message, message_type, reference_id, created_by)
              VALUES ($1,$2,$3,'discipline_notice',$4,$5)`,
             [tid, phone, `DISCIPLINE NOTICE: Your child has been involved in a ${severity || 'minor'} incident at school. Please contact the school administration for details. Ref: INC-${incidentId}`, incidentId, user.id]
@@ -686,14 +679,14 @@ module.exports = function disciplineTracker(app, db, pool, renderPage, esc) {
         }
       }
 
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'DisciplineTracker', 'COMMIT');
       req.session.flash = { type: 'success', msg: `Incident #${incidentId} reported successfully.${shouldNotify && phone ? ' Parent notified via SMS.' : ''}` };
       res.redirect('/discipline/incidents/' + incidentId);
     } catch (e) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'DisciplineTracker', 'ROLLBACK');
       req.session.flash = { type: 'error', msg: 'Failed to save incident: ' + e.message };
       res.redirect('/discipline/report');
-    } finally { client.release(); }
+    }
   }));
 
   // ============================================================

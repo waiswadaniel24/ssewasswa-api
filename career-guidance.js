@@ -1,3 +1,4 @@
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -355,11 +356,11 @@ module.exports = function(app, pool, opts) {
       Science: 'logical,numerical,verbal'
     };
 
-    const seeded = await pool.query(`SELECT COUNT(*)::int AS cnt FROM ${prefix}career_library WHERE tenant_id=$1`, [tid]);
+    const seeded = await migrateQuery(pool, 'CareerGuidance', `SELECT COUNT(*)::int AS cnt FROM ${prefix}career_library WHERE tenant_id=$1`, [tid]);
     if (seeded.rows[0].cnt === 0) {
       for (const c of CAREER_SEED) {
         const ak = catAptMap[c.category] || 'logical,verbal';
-        await pool.query(
+        await migrateQuery(pool, 'CareerGuidance', 
           `INSERT INTO ${prefix}career_library (tenant_id,title,category,description,required_subjects,education_level,salary_range,skills_needed,outlook,aptitude_keys) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
           [tid, c.title, c.category, c.description, c.required_subjects, c.education_level, c.salary_range, c.skills_needed, c.outlook, ak]
         );
@@ -367,10 +368,10 @@ module.exports = function(app, pool, opts) {
     }
 
     // Seed university programs
-    const uSeeded = await pool.query(`SELECT COUNT(*)::int AS cnt FROM ${prefix}university_programs WHERE tenant_id=$1`, [tid]);
+    const uSeeded = await migrateQuery(pool, 'CareerGuidance', `SELECT COUNT(*)::int AS cnt FROM ${prefix}university_programs WHERE tenant_id=$1`, [tid]);
     if (uSeeded.rows[0].cnt === 0) {
       for (const u of UNIVERSITY_SEED) {
-        await pool.query(
+        await migrateQuery(pool, 'CareerGuidance', 
           `INSERT INTO ${prefix}university_programs (tenant_id,university,program,requirements,location,careers_match,recommended_subjects) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [tid, u.university, u.program, u.requirements, u.location, u.careers_match, u.requirements]
         );

@@ -3,6 +3,7 @@
  * Features: AI Auto-Grading, Plagiarism Detection, AI Exam Question Generator
  */
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -264,7 +265,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_agr_assignment ON ai_grading_results(assignment_id);
       CREATE INDEX IF NOT EXISTS idx_agr_student ON ai_grading_results(student_id);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'AiAutoGrading', `
       CREATE TABLE IF NOT EXISTS plagiarism_checks (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id),
@@ -278,7 +279,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_pc_tenant ON plagiarism_checks(tenant_id);
       CREATE INDEX IF NOT EXISTS idx_pc_submission ON plagiarism_checks(submission_id);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'AiAutoGrading', `
       CREATE TABLE IF NOT EXISTS ai_generated_questions (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id),

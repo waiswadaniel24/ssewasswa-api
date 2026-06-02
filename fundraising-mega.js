@@ -14,6 +14,7 @@
 // 10. Donation Goals & Challenges
 // ============================================================
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
 
   // =============================================

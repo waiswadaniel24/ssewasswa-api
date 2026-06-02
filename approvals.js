@@ -13,6 +13,7 @@
 // ============================================================
 // MODULE ENTRY POINT
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function approvals(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -84,56 +85,53 @@ module.exports = function approvals(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Approvals] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS approval_workflow_templates (
+      await migrateQuery(pool, 'Approvals', `CREATE TABLE IF NOT EXISTS approval_workflow_templates (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255), description TEXT, entity_type VARCHAR(100),
         is_active BOOLEAN DEFAULT true, created_by INTEGER,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS approval_notifications (
+      await migrateQuery(pool, 'Approvals', `CREATE TABLE IF NOT EXISTS approval_notifications (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         request_id INTEGER, recipient_id INTEGER, message TEXT,
         is_read BOOLEAN DEFAULT false, sent_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS approval_workflows (
+      await migrateQuery(pool, 'Approvals', `CREATE TABLE IF NOT EXISTS approval_workflows (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255), description TEXT, entity_type VARCHAR(100),
         is_active BOOLEAN DEFAULT true, created_by INTEGER,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS approval_steps (
+      await migrateQuery(pool, 'Approvals', `CREATE TABLE IF NOT EXISTS approval_steps (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         workflow_id INTEGER, step_order INTEGER DEFAULT 1,
         step_name VARCHAR(255), approver_type VARCHAR(50), approver_id INTEGER,
         action_required VARCHAR(50) DEFAULT 'approve', is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS approval_actions (
+      await migrateQuery(pool, 'Approvals', `CREATE TABLE IF NOT EXISTS approval_actions (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         request_id INTEGER, step_id INTEGER, action VARCHAR(50),
         actor_id INTEGER, actor_name VARCHAR(255), comments TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS approval_requests (
+      await migrateQuery(pool, 'Approvals', `CREATE TABLE IF NOT EXISTS approval_requests (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         workflow_id INTEGER, entity_type VARCHAR(100), entity_id INTEGER,
         title VARCHAR(500), description TEXT, requester_id INTEGER, requester_name VARCHAR(255),
         status VARCHAR(50) DEFAULT 'pending', current_step INTEGER DEFAULT 1,
         created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_aw_tenant ON approval_workflows(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_as_workflow ON approval_steps(workflow_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ar_tenant ON approval_requests(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ar_status ON approval_requests(tenant_id, status)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_aa_request ON approval_actions(request_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_an_recipient ON approval_notifications(recipient_id, is_read)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_awt_tenant ON approval_workflow_templates(tenant_id)`);
+      await migrateQuery(pool, 'Approvals', `CREATE INDEX IF NOT EXISTS idx_aw_tenant ON approval_workflows(tenant_id)`);
+      await migrateQuery(pool, 'Approvals', `CREATE INDEX IF NOT EXISTS idx_as_workflow ON approval_steps(workflow_id)`);
+      await migrateQuery(pool, 'Approvals', `CREATE INDEX IF NOT EXISTS idx_ar_tenant ON approval_requests(tenant_id)`);
+      await migrateQuery(pool, 'Approvals', `CREATE INDEX IF NOT EXISTS idx_ar_status ON approval_requests(tenant_id, status)`);
+      await migrateQuery(pool, 'Approvals', `CREATE INDEX IF NOT EXISTS idx_aa_request ON approval_actions(request_id)`);
+      await migrateQuery(pool, 'Approvals', `CREATE INDEX IF NOT EXISTS idx_an_recipient ON approval_notifications(recipient_id, is_read)`);
+      await migrateQuery(pool, 'Approvals', `CREATE INDEX IF NOT EXISTS idx_awt_tenant ON approval_workflow_templates(tenant_id)`);
       console.log('[Approvals] Migrations applied successfully');
     } catch (e) { console.error('[Approvals] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

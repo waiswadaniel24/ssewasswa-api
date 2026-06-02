@@ -13,6 +13,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
 const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
 const fmtSize = (b) => { if (!b) return '0 B'; const u = ['B','KB','MB','GB']; const i = Math.floor(Math.log(b)/Math.log(1024)); return (b/Math.pow(1024,i)).toFixed(i>0?1:0)+' '+u[i]; };
@@ -107,11 +108,8 @@ module.exports = function backupRestore(app, pool, requireAuth, logger, audit, n
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { logger.warn('[BackupRestore] Cannot connect to DB'); return; }
-    try { for (const sql of migrations) { try { await client.query(sql); } catch(e) { /* skip */ } } logger.info({ msg:'[BackupRestore] Migrations applied', count: migrations.length }); }
+    try { for (const sql of migrations) { try { await migrateQuery(pool, 'BackupRestore', sql); } catch(e) { /* skip */ } } logger.info({ msg:'[BackupRestore] Migrations applied', count: migrations.length }); }
     catch (e) { logger.error({ msg:'[BackupRestore] Migration error', error: e.message }); }
-    finally { client.release(); }
   })();
 
   // ============================================================

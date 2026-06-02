@@ -2,6 +2,7 @@
  * Fundraising Unified — Consolidates all fundraising into one module
  * Comfort Zone SaaS Platform
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = (opts && opts.esc) || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = (opts && opts.renderPage) || ((t,c,u) => c);

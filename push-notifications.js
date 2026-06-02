@@ -7,6 +7,7 @@
  * Theme: Dark (#0f172a bg), Blue accents (#3b82f6)
  */
 'use strict';
+const { migrateQuery } = require('./db');
 module.exports = function pushNotifications(app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const renderPage = opts.renderPage || ((title, content, user) => content);
@@ -26,10 +27,9 @@ module.exports = function pushNotifications(app, pool, opts) {
   //  MIGRATIONS
   // ═══════════════════════════════════════════════════════
   (async () => {
-    const c = await pool.connect().catch(() => null);
     if (!c) return;
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS push_config (
+      await migrateQuery(pool, 'PushNotifications', `CREATE TABLE IF NOT EXISTS push_config (
         id SERIAL PRIMARY KEY,
         provider TEXT DEFAULT 'fcm',
         fcm_server_key TEXT,
@@ -40,7 +40,7 @@ module.exports = function pushNotifications(app, pool, opts) {
         is_active BOOLEAN DEFAULT true,
         school_id INT DEFAULT 1
       );`);
-      await c.query(`CREATE TABLE IF NOT EXISTS push_subscribers (
+      await migrateQuery(pool, 'PushNotifications', `CREATE TABLE IF NOT EXISTS push_subscribers (
         id SERIAL PRIMARY KEY,
         user_id INT,
         token TEXT NOT NULL,
@@ -51,7 +51,7 @@ module.exports = function pushNotifications(app, pool, opts) {
         last_active TIMESTAMPTZ,
         school_id INT DEFAULT 1
       );`);
-      await c.query(`CREATE TABLE IF NOT EXISTS push_campaigns (
+      await migrateQuery(pool, 'PushNotifications', `CREATE TABLE IF NOT EXISTS push_campaigns (
         id SERIAL PRIMARY KEY,
         title TEXT NOT NULL,
         body TEXT,
@@ -72,7 +72,7 @@ module.exports = function pushNotifications(app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         school_id INT DEFAULT 1
       );`);
-      await c.query(`CREATE TABLE IF NOT EXISTS push_delivery_log (
+      await migrateQuery(pool, 'PushNotifications', `CREATE TABLE IF NOT EXISTS push_delivery_log (
         id SERIAL PRIMARY KEY,
         campaign_id INT REFERENCES push_campaigns(id),
         subscriber_id INT REFERENCES push_subscribers(id),
@@ -111,7 +111,7 @@ module.exports = function pushNotifications(app, pool, opts) {
         ]
       };
       for (const [tbl, cols] of Object.entries(colDefs))
-        for (const col of cols) await c.query(`ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
+        for (const col of cols) await migrateQuery(pool, 'PushNotifications', `ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
       // Indexes
       for (const sql of [
         'CREATE INDEX IF NOT EXISTS idx_pc_school ON push_config(school_id);',
@@ -124,10 +124,9 @@ module.exports = function pushNotifications(app, pool, opts) {
         'CREATE INDEX IF NOT EXISTS idx_pdl_school ON push_delivery_log(school_id);',
         'CREATE INDEX IF NOT EXISTS idx_pdl_campaign ON push_delivery_log(campaign_id);',
         'CREATE INDEX IF NOT EXISTS idx_pdl_subscriber ON push_delivery_log(subscriber_id);',
-      ]) await c.query(sql).catch(() => {});
+      ]) await migrateQuery(pool, 'PushNotifications', sql).catch(() => {});
       console.log('[PushNotifications] Migrations complete');
     } catch (e) { console.error('[PushNotifications] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ═══════════════════════════════════════════════════════

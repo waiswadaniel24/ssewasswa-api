@@ -9,6 +9,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 const crypto = require('crypto');
 const { authenticator } = require('otplib');
 const fs = require('fs');
@@ -155,28 +156,20 @@ module.exports = function securityOps(app, pool, requireAuth, logger, audit, ren
 
   // Run new migrations on module load
   (async () => {
-    const client = await pool.connect().catch(() => null);
     if (!client) return;
     try {
-      for (const sql of newMigrations) await client.query(sql);
+      for (const sql of newMigrations) await migrateQuery(pool, 'SecurityOps', sql);
       logger.info({ msg: '[SecurityOps] New migrations applied', count: newMigrations.length });
     } catch (e) { logger.error({ msg: '[SecurityOps] New migration error', error: e.message }); }
-    finally { client.release(); }
   })();
 
   // Run migrations on module load
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { logger.warn('[SecurityOps] Cannot connect to DB for migrations'); return; }
     try {
-      for (const sql of securityMigrations) {
-        await client.query(sql);
-      }
+      for (const sql of securityMigrations) await migrateQuery(pool, 'SecurityOps', sql);
       logger.info({ msg: '[SecurityOps] Migrations applied successfully', count: securityMigrations.length });
     } catch (e) {
       logger.error({ msg: '[SecurityOps] Migration error', error: e.message });
-    } finally {
-      client.release();
     }
   })();
 

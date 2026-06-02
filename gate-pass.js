@@ -13,6 +13,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '\u2014';
 const fmtTime = (d) => d ? new Date(d).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
 const fmtDateTime = (d) => d ? fmtDate(d) + ' ' + fmtTime(d) : '\u2014';
@@ -238,17 +239,9 @@ module.exports = function gatePassModule(app, pool, opts) {
   // DATABASE MIGRATIONS
   // ============================================================
   (async function() {
-    let client = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      client = await pool.connect().catch(function() { return null; });
-      if (client) break;
-      console.warn('[GatePass] DB connection attempt ' + attempt + '/3 failed, retrying...');
-      await new Promise(function(r) { setTimeout(r, 3000); });
-    }
-    if (!client) { console.error('[GatePass] Cannot connect to DB for migrations'); return; }
-    try {
+        try {
       // -- Table 1: gate_passes (student exit passes) --------------------
-      await client.query(`CREATE TABLE IF NOT EXISTS gate_passes (
+      await migrateQuery(pool, 'GatePass', `CREATE TABLE IF NOT EXISTS gate_passes (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         student_id INTEGER REFERENCES students(id) ON DELETE SET NULL,
@@ -271,7 +264,7 @@ module.exports = function gatePassModule(app, pool, opts) {
       )`);
 
       // -- Table 2: visitor_passes ----------------------------------------
-      await client.query(`CREATE TABLE IF NOT EXISTS visitor_passes (
+      await migrateQuery(pool, 'GatePass', `CREATE TABLE IF NOT EXISTS visitor_passes (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         full_name VARCHAR(255) NOT NULL,
@@ -294,7 +287,7 @@ module.exports = function gatePassModule(app, pool, opts) {
       )`);
 
       // -- Table 3: late_arrivals -----------------------------------------
-      await client.query(`CREATE TABLE IF NOT EXISTS late_arrivals (
+      await migrateQuery(pool, 'GatePass', `CREATE TABLE IF NOT EXISTS late_arrivals (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         student_id INTEGER REFERENCES students(id) ON DELETE SET NULL,
@@ -328,7 +321,7 @@ module.exports = function gatePassModule(app, pool, opts) {
         ['updated_at','TIMESTAMPTZ DEFAULT NOW()']
       ];
       for (var i = 0; i < gpCols.length; i++) {
-        try { await client.query('ALTER TABLE gate_passes ADD COLUMN IF NOT EXISTS ' + gpCols[i][0] + ' ' + gpCols[i][1]); } catch(e) {}
+        try { await migrateQuery(pool, 'GatePass', 'ALTER TABLE gate_passes ADD COLUMN IF NOT EXISTS ' + gpCols[i][0] + ' ' + gpCols[i][1]); } catch(e) {}
       }
 
       // -- ALTER TABLE visitor_passes -------------------------------------
@@ -344,7 +337,7 @@ module.exports = function gatePassModule(app, pool, opts) {
         ['vehicle_plate','VARCHAR(30)'],['notes','TEXT'],['expires_at','TIMESTAMPTZ']
       ];
       for (var j = 0; j < vpCols.length; j++) {
-        try { await client.query('ALTER TABLE visitor_passes ADD COLUMN IF NOT EXISTS ' + vpCols[j][0] + ' ' + vpCols[j][1]); } catch(e) {}
+        try { await migrateQuery(pool, 'GatePass', 'ALTER TABLE visitor_passes ADD COLUMN IF NOT EXISTS ' + vpCols[j][0] + ' ' + vpCols[j][1]); } catch(e) {}
       }
 
       // -- ALTER TABLE late_arrivals --------------------------------------
@@ -358,28 +351,26 @@ module.exports = function gatePassModule(app, pool, opts) {
         ['parent_notified','BOOLEAN DEFAULT false']
       ];
       for (var k = 0; k < laCols.length; k++) {
-        try { await client.query('ALTER TABLE late_arrivals ADD COLUMN IF NOT EXISTS ' + laCols[k][0] + ' ' + laCols[k][1]); } catch(e) {}
+        try { await migrateQuery(pool, 'GatePass', 'ALTER TABLE late_arrivals ADD COLUMN IF NOT EXISTS ' + laCols[k][0] + ' ' + laCols[k][1]); } catch(e) {}
       }
 
       // -- Indexes -------------------------------------------------------
-      await client.query('CREATE INDEX IF NOT EXISTS idx_gp_tenant ON gate_passes(tenant_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_gp_status ON gate_passes(tenant_id, status)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_gp_student ON gate_passes(tenant_id, student_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_gp_date ON gate_passes(tenant_id, created_at)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_gp_qr ON gate_passes(tenant_id, qr_code)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_vp_tenant ON visitor_passes(tenant_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_vp_status ON visitor_passes(tenant_id, status)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_vp_qr ON visitor_passes(tenant_id, qr_code)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_vp_date ON visitor_passes(tenant_id, created_at)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_la_tenant ON late_arrivals(tenant_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_la_student ON late_arrivals(tenant_id, student_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_la_date ON late_arrivals(tenant_id, arrival_time)');
+      await migrateQuery(pool, 'GatePass', 'CREATE INDEX IF NOT EXISTS idx_gp_tenant ON gate_passes(tenant_id)');
+      await migrateQuery(pool, 'GatePass', 'CREATE INDEX IF NOT EXISTS idx_gp_status ON gate_passes(tenant_id, status)');
+      await migrateQuery(pool, 'GatePass', 'CREATE INDEX IF NOT EXISTS idx_gp_student ON gate_passes(tenant_id, student_id)');
+      await migrateQuery(pool, 'GatePass', 'CREATE INDEX IF NOT EXISTS idx_gp_date ON gate_passes(tenant_id, created_at)');
+      await migrateQuery(pool, 'GatePass', 'CREATE INDEX IF NOT EXISTS idx_gp_qr ON gate_passes(tenant_id, qr_code)');
+      await migrateQuery(pool, 'GatePass', 'CREATE INDEX IF NOT EXISTS idx_vp_tenant ON visitor_passes(tenant_id)');
+      await migrateQuery(pool, 'GatePass', 'CREATE INDEX IF NOT EXISTS idx_vp_status ON visitor_passes(tenant_id, status)');
+      await migrateQuery(pool, 'GatePass', 'CREATE INDEX IF NOT EXISTS idx_vp_qr ON visitor_passes(tenant_id, qr_code)');
+      await migrateQuery(pool, 'GatePass', 'CREATE INDEX IF NOT EXISTS idx_vp_date ON visitor_passes(tenant_id, created_at)');
+      await migrateQuery(pool, 'GatePass', 'CREATE INDEX IF NOT EXISTS idx_la_tenant ON late_arrivals(tenant_id)');
+      await migrateQuery(pool, 'GatePass', 'CREATE INDEX IF NOT EXISTS idx_la_student ON late_arrivals(tenant_id, student_id)');
+      await migrateQuery(pool, 'GatePass', 'CREATE INDEX IF NOT EXISTS idx_la_date ON late_arrivals(tenant_id, arrival_time)');
 
       console.log('[GatePass] Migrations applied successfully');
     } catch (e) {
       console.error('[GatePass] Migration error:', e.message);
-    } finally {
-      client.release();
     }
   })();
 

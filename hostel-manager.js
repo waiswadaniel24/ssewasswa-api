@@ -5,6 +5,7 @@
  * Features: Buildings, Rooms, Allocations, Maintenance, Reports, Bed Spaces
  * 14 routes • PostgreSQL • tenant_id scoped
  */
+const { migrateQuery } = require('./db');
 module.exports = function hostelManager(app, db, pool, renderPage, esc) {
 
   // ── Helpers ────────────────────────────────────────────────────────────────

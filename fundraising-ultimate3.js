@@ -6,6 +6,7 @@
  * Smart Thank You Engine, Micro-Donation Round-Ups, Donation Day Scheduler,
  * Campaign Seasonality Adjuster, Smart Amount Suggestions, Campaign A/B Testing Engine
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
 
   // =============================================

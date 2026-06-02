@@ -7,6 +7,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function staffAppraisals(app, db, pool, renderPage, esc) {
 
   // ── inline fallbacks ──────────────────────────────────────
@@ -230,11 +231,9 @@ module.exports = function staffAppraisals(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[StaffAppraisals] Cannot connect to DB for migrations'); return; }
     try {
       // Main appraisals table
-      await c.query(`CREATE TABLE IF NOT EXISTS staff_appraisals (
+      await migrateQuery(pool, 'StaffAppraisals', `CREATE TABLE IF NOT EXISTS staff_appraisals (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
         staff_id INTEGER,
@@ -258,7 +257,7 @@ module.exports = function staffAppraisals(app, db, pool, renderPage, esc) {
       )`);
 
       // Criteria table
-      await c.query(`CREATE TABLE IF NOT EXISTS appraisal_criteria (
+      await migrateQuery(pool, 'StaffAppraisals', `CREATE TABLE IF NOT EXISTS appraisal_criteria (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL,
@@ -271,7 +270,7 @@ module.exports = function staffAppraisals(app, db, pool, renderPage, esc) {
       )`);
 
       // Scores table
-      await c.query(`CREATE TABLE IF NOT EXISTS appraisal_scores (
+      await migrateQuery(pool, 'StaffAppraisals', `CREATE TABLE IF NOT EXISTS appraisal_scores (
         id SERIAL PRIMARY KEY,
         appraisal_id INTEGER REFERENCES staff_appraisals(id) ON DELETE CASCADE,
         criteria_id INTEGER REFERENCES appraisal_criteria(id) ON DELETE CASCADE,
@@ -304,7 +303,7 @@ module.exports = function staffAppraisals(app, db, pool, renderPage, esc) {
         ['created_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
       for (const [col, typ] of appCols) {
-        try { await c.query(`ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {}
+        try { await migrateQuery(pool, 'StaffAppraisals', `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {}
       }
 
       // ALTER TABLE IF NOT EXISTS — appraisal_criteria columns
@@ -319,7 +318,7 @@ module.exports = function staffAppraisals(app, db, pool, renderPage, esc) {
         ['created_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
       for (const [col, typ] of critCols) {
-        try { await c.query(`ALTER TABLE appraisal_criteria ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {}
+        try { await migrateQuery(pool, 'StaffAppraisals', `ALTER TABLE appraisal_criteria ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {}
       }
 
       // ALTER TABLE IF NOT EXISTS — appraisal_scores columns
@@ -332,24 +331,24 @@ module.exports = function staffAppraisals(app, db, pool, renderPage, esc) {
         ['created_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
       for (const [col, typ] of scoreCols) {
-        try { await c.query(`ALTER TABLE appraisal_scores ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {}
+        try { await migrateQuery(pool, 'StaffAppraisals', `ALTER TABLE appraisal_scores ADD COLUMN IF NOT EXISTS ${col} ${typ}`); } catch (e) {}
       }
 
       // Indexes
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sa_tenant ON staff_appraisals(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sa_staff ON staff_appraisals(tenant_id, staff_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sa_status ON staff_appraisals(tenant_id, status)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sa_dept ON staff_appraisals(tenant_id, department)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sa_period ON staff_appraisals(tenant_id, review_period)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ac_tenant ON appraisal_criteria(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ac_active ON appraisal_criteria(tenant_id, is_active)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_as_appraisal ON appraisal_scores(appraisal_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_as_criteria ON appraisal_scores(criteria_id)`);
+      await migrateQuery(pool, 'StaffAppraisals', `CREATE INDEX IF NOT EXISTS idx_sa_tenant ON staff_appraisals(tenant_id)`);
+      await migrateQuery(pool, 'StaffAppraisals', `CREATE INDEX IF NOT EXISTS idx_sa_staff ON staff_appraisals(tenant_id, staff_id)`);
+      await migrateQuery(pool, 'StaffAppraisals', `CREATE INDEX IF NOT EXISTS idx_sa_status ON staff_appraisals(tenant_id, status)`);
+      await migrateQuery(pool, 'StaffAppraisals', `CREATE INDEX IF NOT EXISTS idx_sa_dept ON staff_appraisals(tenant_id, department)`);
+      await migrateQuery(pool, 'StaffAppraisals', `CREATE INDEX IF NOT EXISTS idx_sa_period ON staff_appraisals(tenant_id, review_period)`);
+      await migrateQuery(pool, 'StaffAppraisals', `CREATE INDEX IF NOT EXISTS idx_ac_tenant ON appraisal_criteria(tenant_id)`);
+      await migrateQuery(pool, 'StaffAppraisals', `CREATE INDEX IF NOT EXISTS idx_ac_active ON appraisal_criteria(tenant_id, is_active)`);
+      await migrateQuery(pool, 'StaffAppraisals', `CREATE INDEX IF NOT EXISTS idx_as_appraisal ON appraisal_scores(appraisal_id)`);
+      await migrateQuery(pool, 'StaffAppraisals', `CREATE INDEX IF NOT EXISTS idx_as_criteria ON appraisal_scores(criteria_id)`);
 
       // Seed default criteria if none exist (for a quick start)
       // Wrapped in try/catch because tenant_id=0 may not exist in tenants table
       try {
-        const seedCheck = await c.query(`SELECT COUNT(*)::int as cnt FROM appraisal_criteria WHERE tenant_id = 0`);
+        const seedCheck = await migrateQuery(pool, 'StaffAppraisals', `SELECT COUNT(*)::int as cnt FROM appraisal_criteria WHERE tenant_id = 0`);
         if (seedCheck.rows[0].cnt === 0) {
           const defaults = [
             ['Job Knowledge', 'performance', 20],
@@ -362,7 +361,7 @@ module.exports = function staffAppraisals(app, db, pool, renderPage, esc) {
             ['Adaptability & Learning', 'skills', 5]
           ];
           for (let i = 0; i < defaults.length; i++) {
-            await c.query(`INSERT INTO appraisal_criteria (tenant_id, name, category, weight, display_order) VALUES (0, $1, $2, $3, $4)`,
+            await migrateQuery(pool, 'StaffAppraisals', `INSERT INTO appraisal_criteria (tenant_id, name, category, weight, display_order) VALUES (0, $1, $2, $3, $4)`,
               [defaults[i][0], defaults[i][1], defaults[i][2], i]);
           }
         }
@@ -373,8 +372,6 @@ module.exports = function staffAppraisals(app, db, pool, renderPage, esc) {
       console.log('[StaffAppraisals] Migrations applied successfully');
     } catch (e) {
       console.error('[StaffAppraisals] Migration error:', e.message);
-    } finally {
-      c.release();
     }
   })();
 

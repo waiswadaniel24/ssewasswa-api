@@ -10,6 +10,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function themeManager(app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const renderPage = opts.renderPage || ((t, c) => c);
@@ -137,7 +138,7 @@ module.exports = function themeManager(app, pool, opts) {
   // ============================================================
   (async () => {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS tenant_themes (
+      await migrateQuery(pool, 'ThemeManager', `CREATE TABLE IF NOT EXISTS tenant_themes (
         id SERIAL PRIMARY KEY,
         tenant_id INT UNIQUE,
         primary_color VARCHAR(7) DEFAULT '#4f46e5',

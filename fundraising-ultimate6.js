@@ -17,6 +17,7 @@
  * 14. Data Retention Policies
  * 15. Plugin Marketplace
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
 
   // =============================================

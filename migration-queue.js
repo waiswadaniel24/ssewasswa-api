@@ -27,6 +27,7 @@
  *   await migrationQueue.drain();  // Process all queued migrations
  */
 
+const { migrateQuery } = require('./db');
 class MigrationQueue {
   constructor(pool, concurrency = 3) {
     this.pool = pool;

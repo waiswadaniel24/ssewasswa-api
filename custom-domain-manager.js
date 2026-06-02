@@ -2,6 +2,7 @@
  * Custom Domain Manager
  * Manage custom domains, DNS verification, SSL certificates, and redirect rules.
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc;
 

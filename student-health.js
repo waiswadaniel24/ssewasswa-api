@@ -11,6 +11,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function studentHealth(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -112,8 +113,6 @@ module.exports = function studentHealth(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[StudentHealth] Cannot connect to DB for migrations'); return; }
     try {
       // -- ALTER student_health: add missing columns ----------------------
       const shCols = [
@@ -133,11 +132,11 @@ module.exports = function studentHealth(app, db, pool, renderPage, esc) {
         ['created_by', 'INTEGER'],
       ];
       for (const [col, type] of shCols) {
-        try { await c.query(`ALTER TABLE student_health ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (e) { /* ignore */ }
+        try { await migrateQuery(pool, 'StudentHealth', `ALTER TABLE student_health ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (e) { /* ignore */ }
       }
 
       // -- CREATE health_visits -------------------------------------------
-      await c.query(`CREATE TABLE IF NOT EXISTS health_visits (
+      await migrateQuery(pool, 'StudentHealth', `CREATE TABLE IF NOT EXISTS health_visits (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         student_id INTEGER NOT NULL,
@@ -155,7 +154,7 @@ module.exports = function studentHealth(app, db, pool, renderPage, esc) {
       )`);
 
       // -- CREATE health_screenings ---------------------------------------
-      await c.query(`CREATE TABLE IF NOT EXISTS health_screenings (
+      await migrateQuery(pool, 'StudentHealth', `CREATE TABLE IF NOT EXISTS health_screenings (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         student_id INTEGER NOT NULL,
@@ -185,7 +184,7 @@ module.exports = function studentHealth(app, db, pool, renderPage, esc) {
         ['created_at', 'TIMESTAMPTZ DEFAULT NOW()'],
       ];
       for (const [col, type] of hvCols) {
-        try { await c.query(`ALTER TABLE health_visits ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (e) { /* ignore */ }
+        try { await migrateQuery(pool, 'StudentHealth', `ALTER TABLE health_visits ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (e) { /* ignore */ }
       }
 
       // -- ALTER health_screenings: add missing columns --------------------
@@ -201,28 +200,26 @@ module.exports = function studentHealth(app, db, pool, renderPage, esc) {
         ['created_at', 'TIMESTAMPTZ DEFAULT NOW()'],
       ];
       for (const [col, type] of hsCols) {
-        try { await c.query(`ALTER TABLE health_screenings ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (e) { /* ignore */ }
+        try { await migrateQuery(pool, 'StudentHealth', `ALTER TABLE health_screenings ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (e) { /* ignore */ }
       }
 
       // -- INDEXES --------------------------------------------------------
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sh_tenant ON student_health(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sh_student ON student_health(student_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sh_blood ON student_health(tenant_id, blood_group)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_hv_tenant ON health_visits(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_hv_student ON health_visits(student_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_hv_date ON health_visits(visit_date)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_hv_status ON health_visits(tenant_id, status)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_hs_tenant ON health_screenings(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_hs_student ON health_screenings(student_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_hs_date ON health_screenings(screening_date)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_hs_type ON health_screenings(tenant_id, screening_type)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_hs_status ON health_screenings(tenant_id, status)`);
+      await migrateQuery(pool, 'StudentHealth', `CREATE INDEX IF NOT EXISTS idx_sh_tenant ON student_health(tenant_id)`);
+      await migrateQuery(pool, 'StudentHealth', `CREATE INDEX IF NOT EXISTS idx_sh_student ON student_health(student_id)`);
+      await migrateQuery(pool, 'StudentHealth', `CREATE INDEX IF NOT EXISTS idx_sh_blood ON student_health(tenant_id, blood_group)`);
+      await migrateQuery(pool, 'StudentHealth', `CREATE INDEX IF NOT EXISTS idx_hv_tenant ON health_visits(tenant_id)`);
+      await migrateQuery(pool, 'StudentHealth', `CREATE INDEX IF NOT EXISTS idx_hv_student ON health_visits(student_id)`);
+      await migrateQuery(pool, 'StudentHealth', `CREATE INDEX IF NOT EXISTS idx_hv_date ON health_visits(visit_date)`);
+      await migrateQuery(pool, 'StudentHealth', `CREATE INDEX IF NOT EXISTS idx_hv_status ON health_visits(tenant_id, status)`);
+      await migrateQuery(pool, 'StudentHealth', `CREATE INDEX IF NOT EXISTS idx_hs_tenant ON health_screenings(tenant_id)`);
+      await migrateQuery(pool, 'StudentHealth', `CREATE INDEX IF NOT EXISTS idx_hs_student ON health_screenings(student_id)`);
+      await migrateQuery(pool, 'StudentHealth', `CREATE INDEX IF NOT EXISTS idx_hs_date ON health_screenings(screening_date)`);
+      await migrateQuery(pool, 'StudentHealth', `CREATE INDEX IF NOT EXISTS idx_hs_type ON health_screenings(tenant_id, screening_type)`);
+      await migrateQuery(pool, 'StudentHealth', `CREATE INDEX IF NOT EXISTS idx_hs_status ON health_screenings(tenant_id, status)`);
 
       console.log('[StudentHealth] Migrations applied successfully');
     } catch (e) {
       console.error('[StudentHealth] Migration error:', e.message);
-    } finally {
-      c.release();
     }
   })();
 

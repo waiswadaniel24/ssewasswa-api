@@ -12,6 +12,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function advancedSettings(app, db, pool, renderPage, esc) {
 
   // ============================================================
@@ -133,11 +134,9 @@ document.getElementById('${uid}').addEventListener('change',function(){
   // DATABASE MIGRATIONS (async IIFE at module load)
   // ============================================================
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { console.warn('[AdvancedSettings] Cannot connect to DB for migrations'); return; }
     try {
       // --- system_settings ---
-      await client.query(`CREATE TABLE IF NOT EXISTS system_settings (
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE TABLE IF NOT EXISTS system_settings (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         setting_key VARCHAR(100) NOT NULL,
@@ -151,22 +150,22 @@ document.getElementById('${uid}').addEventListener('change',function(){
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(tenant_id, setting_key)
       )`);
-      await client.query(`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS tenant_id INTEGER NOT NULL DEFAULT 0`);
-      await client.query(`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS setting_key VARCHAR(100) NOT NULL DEFAULT ''`);
-      await client.query(`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS setting_value TEXT`);
-      await client.query(`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS setting_type VARCHAR(20) DEFAULT 'string'`);
-      await client.query(`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'general'`);
-      await client.query(`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS description TEXT`);
-      await client.query(`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT false`);
-      await client.query(`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS updated_by INTEGER`);
-      await client.query(`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
-      await client.query(`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`);
-      await client.query(`CREATE INDEX IF NOT EXISTS idx_system_settings_tenant ON system_settings(tenant_id)`);
-      await client.query(`CREATE INDEX IF NOT EXISTS idx_system_settings_key ON system_settings(setting_key)`);
-      await client.query(`CREATE INDEX IF NOT EXISTS idx_system_settings_cat ON system_settings(category)`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS tenant_id INTEGER NOT NULL DEFAULT 0`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS setting_key VARCHAR(100) NOT NULL DEFAULT ''`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS setting_value TEXT`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS setting_type VARCHAR(20) DEFAULT 'string'`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'general'`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS description TEXT`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT false`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS updated_by INTEGER`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`);
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE INDEX IF NOT EXISTS idx_system_settings_tenant ON system_settings(tenant_id)`);
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE INDEX IF NOT EXISTS idx_system_settings_key ON system_settings(setting_key)`);
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE INDEX IF NOT EXISTS idx_system_settings_cat ON system_settings(category)`);
 
       // --- activity_log ---
-      await client.query(`CREATE TABLE IF NOT EXISTS activity_log (
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE TABLE IF NOT EXISTS activity_log (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         user_id INTEGER REFERENCES users(id),
@@ -179,23 +178,23 @@ document.getElementById('${uid}').addEventListener('change',function(){
         status VARCHAR(20) DEFAULT 'success',
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await client.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS tenant_id INTEGER NOT NULL DEFAULT 0`);
-      await client.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS user_id INTEGER`);
-      await client.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS action VARCHAR(100) NOT NULL DEFAULT ''`);
-      await client.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS entity_type VARCHAR(50)`);
-      await client.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS entity_id INTEGER`);
-      await client.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS details TEXT`);
-      await client.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45)`);
-      await client.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS user_agent TEXT`);
-      await client.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'success'`);
-      await client.query(`ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
-      await client.query(`CREATE INDEX IF NOT EXISTS idx_activity_log_tenant ON activity_log(tenant_id)`);
-      await client.query(`CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_id)`);
-      await client.query(`CREATE INDEX IF NOT EXISTS idx_activity_log_action ON activity_log(action)`);
-      await client.query(`CREATE INDEX IF NOT EXISTS idx_activity_log_created ON activity_log(created_at)`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS tenant_id INTEGER NOT NULL DEFAULT 0`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS user_id INTEGER`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS action VARCHAR(100) NOT NULL DEFAULT ''`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS entity_type VARCHAR(50)`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS entity_id INTEGER`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS details TEXT`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45)`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS user_agent TEXT`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'success'`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE INDEX IF NOT EXISTS idx_activity_log_tenant ON activity_log(tenant_id)`);
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_id)`);
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE INDEX IF NOT EXISTS idx_activity_log_action ON activity_log(action)`);
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE INDEX IF NOT EXISTS idx_activity_log_created ON activity_log(created_at)`);
 
       // --- scheduled_tasks ---
-      await client.query(`CREATE TABLE IF NOT EXISTS scheduled_tasks (
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE TABLE IF NOT EXISTS scheduled_tasks (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         task_name VARCHAR(100) NOT NULL,
@@ -210,23 +209,23 @@ document.getElementById('${uid}').addEventListener('change',function(){
         is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await client.query(`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS tenant_id INTEGER NOT NULL DEFAULT 0`);
-      await client.query(`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_name VARCHAR(100) NOT NULL DEFAULT ''`);
-      await client.query(`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_type VARCHAR(50) DEFAULT 'custom'`);
-      await client.query(`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS cron_expression VARCHAR(100)`);
-      await client.query(`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS payload JSONB DEFAULT '{}'`);
-      await client.query(`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMPTZ`);
-      await client.query(`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ`);
-      await client.query(`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS run_count INTEGER DEFAULT 0`);
-      await client.query(`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS failure_count INTEGER DEFAULT 0`);
-      await client.query(`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS last_error TEXT`);
-      await client.query(`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`);
-      await client.query(`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
-      await client.query(`CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_tenant ON scheduled_tasks(tenant_id)`);
-      await client.query(`CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_active ON scheduled_tasks(is_active)`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS tenant_id INTEGER NOT NULL DEFAULT 0`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_name VARCHAR(100) NOT NULL DEFAULT ''`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_type VARCHAR(50) DEFAULT 'custom'`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS cron_expression VARCHAR(100)`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS payload JSONB DEFAULT '{}'`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMPTZ`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS run_count INTEGER DEFAULT 0`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS failure_count INTEGER DEFAULT 0`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS last_error TEXT`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_tenant ON scheduled_tasks(tenant_id)`);
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_active ON scheduled_tasks(is_active)`);
 
       // --- webhook_endpoints ---
-      await client.query(`CREATE TABLE IF NOT EXISTS webhook_endpoints (
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE TABLE IF NOT EXISTS webhook_endpoints (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(100) NOT NULL,
@@ -240,22 +239,22 @@ document.getElementById('${uid}').addEventListener('change',function(){
         created_by INTEGER REFERENCES users(id),
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await client.query(`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS tenant_id INTEGER NOT NULL DEFAULT 0`);
-      await client.query(`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS name VARCHAR(100) NOT NULL DEFAULT ''`);
-      await client.query(`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS url TEXT`);
-      await client.query(`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS secret VARCHAR(255)`);
-      await client.query(`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS events TEXT[] DEFAULT '{}'`);
-      await client.query(`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`);
-      await client.query(`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS last_triggered_at TIMESTAMPTZ`);
-      await client.query(`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS success_count INTEGER DEFAULT 0`);
-      await client.query(`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS failure_count INTEGER DEFAULT 0`);
-      await client.query(`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS created_by INTEGER`);
-      await client.query(`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
-      await client.query(`CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_tenant ON webhook_endpoints(tenant_id)`);
-      await client.query(`CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_active ON webhook_endpoints(is_active)`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS tenant_id INTEGER NOT NULL DEFAULT 0`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS name VARCHAR(100) NOT NULL DEFAULT ''`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS url TEXT`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS secret VARCHAR(255)`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS events TEXT[] DEFAULT '{}'`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS last_triggered_at TIMESTAMPTZ`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS success_count INTEGER DEFAULT 0`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS failure_count INTEGER DEFAULT 0`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS created_by INTEGER`);
+      await migrateQuery(pool, 'AdvancedSettings', `ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_tenant ON webhook_endpoints(tenant_id)`);
+      await migrateQuery(pool, 'AdvancedSettings', `CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_active ON webhook_endpoints(is_active)`);
 
       // --- Seed default settings for all existing tenants ---
-      const tenants = await client.query('SELECT id FROM tenants').catch(() => ({ rows: [] }));
+      const tenants = await migrateQuery(pool, 'AdvancedSettings', 'SELECT id FROM tenants').catch(() => ({ rows: [] }));
       const defaultSettings = [
         ['platform_name', 'Comfort Platform', 'string', 'general', 'Display name of the platform'],
         ['timezone', 'Africa/Kampala', 'string', 'general', 'Default timezone for the platform'],
@@ -278,7 +277,7 @@ document.getElementById('${uid}').addEventListener('change',function(){
 
       for (const tenant of tenants.rows) {
         for (const [key, value, type, category, description] of defaultSettings) {
-          await client.query(
+          await migrateQuery(pool, 'AdvancedSettings', 
             `INSERT INTO system_settings (tenant_id, setting_key, setting_value, setting_type, category, description)
              VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (tenant_id, setting_key) DO NOTHING`,
             [tenant.id, key, value, type, category, description]
@@ -289,8 +288,6 @@ document.getElementById('${uid}').addEventListener('change',function(){
       console.log('[AdvancedSettings] Migrations & seeding applied successfully');
     } catch (e) {
       console.error('[AdvancedSettings] Migration error:', e.message);
-    } finally {
-      client.release();
     }
   })();
 

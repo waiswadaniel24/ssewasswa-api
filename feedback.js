@@ -13,6 +13,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
 const formatDateTime = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
 
@@ -166,19 +167,16 @@ module.exports = function feedback(app, db, pool, renderPage, esc) {
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { console.warn('[Feedback] Cannot connect to DB'); return; }
     try {
-      for (const sql of migrations) await client.query(sql);
-      const tenants = (await client.query('SELECT id FROM tenants')).rows;
+      for (const sql of migrations) await migrateQuery(pool, 'Feedback', sql);
+      const tenants = (await migrateQuery(pool, 'Feedback', 'SELECT id FROM tenants')).rows;
       for (const t of tenants) {
         for (const seed of seedCategories) {
-          await client.query(seed.replace('(0,', `(${t.id},`));
+          await migrateQuery(pool, 'Feedback', seed.replace('(0,', `(${t.id},`));
         }
       }
       console.log('[Feedback] Migrations applied, categories seeded');
     } catch (e) { console.error('[Feedback] Migration error:', e.message); }
-    finally { client.release(); }
   })();
   // HELPERS
   const nav = (active) => `<div class="fb-nav">

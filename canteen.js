@@ -5,6 +5,7 @@
  * Features: Menu planner, Ordering, Order queue, Inventory, Sales reports
  * 13 routes • PostgreSQL • tenant_id scoped
  */
+const { migrateQuery } = require('./db');
 module.exports = function canteen(app, db, pool, renderPage, esc) {
 
   // ── Helpers ────────────────────────────────────────────────────────────────

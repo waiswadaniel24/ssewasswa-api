@@ -14,6 +14,7 @@
 // ============================================================
 // MODULE ENTRY POINT
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function analyticsDashboard(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -83,10 +84,8 @@ module.exports = function analyticsDashboard(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Analytics] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS analytics_snapshots (
+      await migrateQuery(pool, 'AnalyticsDashboard', `CREATE TABLE IF NOT EXISTS analytics_snapshots (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         metric_name VARCHAR(100), metric_value DECIMAL(15,2) DEFAULT 0,
         dimensions JSONB DEFAULT '{}', snapshot_date DATE NOT NULL,
@@ -96,13 +95,12 @@ module.exports = function analyticsDashboard(app, db, pool, renderPage, esc) {
         ['metric_name','VARCHAR(100)'],['metric_value','DECIMAL(15,2) DEFAULT 0'],
         ['dimensions',"JSONB DEFAULT '{}'"],['snapshot_date','DATE NOT NULL'],['created_at','TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of asCols) { try { await c.query(`ALTER TABLE analytics_snapshots ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch(e){} }
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_asnap_tenant ON analytics_snapshots(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_asnap_date ON analytics_snapshots(snapshot_date)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_asnap_metric ON analytics_snapshots(tenant_id, metric_name)`);
+      for (const [col, def] of asCols) { try { await migrateQuery(pool, 'AnalyticsDashboard', `ALTER TABLE analytics_snapshots ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch(e){} }
+      await migrateQuery(pool, 'AnalyticsDashboard', `CREATE INDEX IF NOT EXISTS idx_asnap_tenant ON analytics_snapshots(tenant_id)`);
+      await migrateQuery(pool, 'AnalyticsDashboard', `CREATE INDEX IF NOT EXISTS idx_asnap_date ON analytics_snapshots(snapshot_date)`);
+      await migrateQuery(pool, 'AnalyticsDashboard', `CREATE INDEX IF NOT EXISTS idx_asnap_metric ON analytics_snapshots(tenant_id, metric_name)`);
       console.log('[Analytics] Migrations applied successfully');
     } catch (e) { console.error('[Analytics] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // Helper: bar chart HTML from data

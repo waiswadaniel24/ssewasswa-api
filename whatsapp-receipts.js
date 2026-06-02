@@ -12,6 +12,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function whatsappReceipts(app, db, pool, renderPage, esc) {
 
   // ── Inline fallbacks & middleware ──────────────────────────────────
@@ -418,10 +419,8 @@ Contact: {{school_phone}}`
   //  DATABASE MIGRATIONS (async IIFE at module load)
   // ══════════════════════════════════════════════════════════════════
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[WhatsAppReceipts] Cannot connect to DB'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS whatsapp_receipt_log (
+      await migrateQuery(pool, 'WhatsappReceipts', `CREATE TABLE IF NOT EXISTS whatsapp_receipt_log (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         recipient_phone VARCHAR(20) NOT NULL,
@@ -436,7 +435,7 @@ Contact: {{school_phone}}`
         error_message TEXT
       );`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS whatsapp_templates (
+      await migrateQuery(pool, 'WhatsappReceipts', `CREATE TABLE IF NOT EXISTS whatsapp_templates (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         receipt_type VARCHAR(50) NOT NULL,
@@ -465,7 +464,7 @@ Contact: {{school_phone}}`
         'error_message TEXT',
       ];
       for (const col of logCols) {
-        await c.query(`ALTER TABLE whatsapp_receipt_log ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
+        await migrateQuery(pool, 'WhatsappReceipts', `ALTER TABLE whatsapp_receipt_log ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
       }
 
       // ALTER TABLE IF NOT EXISTS — whatsapp_templates
@@ -482,7 +481,7 @@ Contact: {{school_phone}}`
         'updated_at TIMESTAMPTZ DEFAULT NOW()',
       ];
       for (const col of tmplCols) {
-        await c.query(`ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
+        await migrateQuery(pool, 'WhatsappReceipts', `ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
       }
 
       // Indexes
@@ -495,7 +494,7 @@ Contact: {{school_phone}}`
         'CREATE INDEX IF NOT EXISTS idx_wa_tmpl_tid_type ON whatsapp_templates(tenant_id, receipt_type);',
         'CREATE INDEX IF NOT EXISTS idx_wa_tmpl_active ON whatsapp_templates(tenant_id, is_active);',
       ]) {
-        await c.query(sql).catch(() => {});
+        await migrateQuery(pool, 'WhatsappReceipts', sql).catch(() => {});
       }
 
       // Seed default templates for tenant_id 0 (system defaults)
@@ -503,7 +502,7 @@ Contact: {{school_phone}}`
       try {
         for (const [type, content] of Object.entries(DEFAULT_TEMPLATES)) {
           const vars = [...content.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]).filter((v, i, a) => a.indexOf(v) === i);
-          await c.query(`
+          await migrateQuery(pool, 'WhatsappReceipts', `
             INSERT INTO whatsapp_templates (tenant_id, receipt_type, template_name, template_content, variables, is_default)
             VALUES (0, $1, $2, $3, $4, true)
             ON CONFLICT DO NOTHING;
@@ -516,8 +515,6 @@ Contact: {{school_phone}}`
       console.log('[WhatsAppReceipts] Migrations applied successfully');
     } catch (e) {
       console.error('[WhatsAppReceipts] Migration error:', e.message);
-    } finally {
-      c.release();
     }
   })();
 

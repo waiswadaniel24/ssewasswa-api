@@ -9,6 +9,7 @@
 // ============================================================
 
 'use strict';
+const { migrateQuery } = require('./db');
 module.exports = function leaveManager(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -157,11 +158,9 @@ module.exports = function leaveManager(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[LeaveManager] Cannot connect to DB for migrations'); return; }
     try {
       // ---- TABLE 1: leave_types ----
-      await c.query(`CREATE TABLE IF NOT EXISTS leave_types (
+      await migrateQuery(pool, 'LeaveManager', `CREATE TABLE IF NOT EXISTS leave_types (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(100) NOT NULL,
@@ -186,11 +185,11 @@ module.exports = function leaveManager(app, db, pool, renderPage, esc) {
         ['created_at', 'TIMESTAMPTZ DEFAULT NOW()'],
       ];
       for (const [col, def] of ltCols) {
-        try { await c.query(`ALTER TABLE leave_types ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
+        try { await migrateQuery(pool, 'LeaveManager', `ALTER TABLE leave_types ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
       }
 
       // ---- TABLE 2: leave_balances ----
-      await c.query(`CREATE TABLE IF NOT EXISTS leave_balances (
+      await migrateQuery(pool, 'LeaveManager', `CREATE TABLE IF NOT EXISTS leave_balances (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         user_type VARCHAR(20) NOT NULL,
@@ -217,11 +216,11 @@ module.exports = function leaveManager(app, db, pool, renderPage, esc) {
         ['updated_at', 'TIMESTAMPTZ DEFAULT NOW()'],
       ];
       for (const [col, def] of lbCols) {
-        try { await c.query(`ALTER TABLE leave_balances ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
+        try { await migrateQuery(pool, 'LeaveManager', `ALTER TABLE leave_balances ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
       }
 
       // ---- TABLE 3: leave_requests ----
-      await c.query(`CREATE TABLE IF NOT EXISTS leave_requests (
+      await migrateQuery(pool, 'LeaveManager', `CREATE TABLE IF NOT EXISTS leave_requests (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         user_type VARCHAR(20) NOT NULL,
@@ -260,29 +259,28 @@ module.exports = function leaveManager(app, db, pool, renderPage, esc) {
         ['updated_at', 'TIMESTAMPTZ DEFAULT NOW()'],
       ];
       for (const [col, def] of lrCols) {
-        try { await c.query(`ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
+        try { await migrateQuery(pool, 'LeaveManager', `ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
       }
 
       // ---- INDEXES ----
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_lt_tenant ON leave_types(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_lt_category ON leave_types(tenant_id, category)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_lt_active ON leave_types(tenant_id, is_active)`);
+      await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lt_tenant ON leave_types(tenant_id)`);
+      await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lt_category ON leave_types(tenant_id, category)`);
+      await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lt_active ON leave_types(tenant_id, is_active)`);
 
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_lb_tenant ON leave_balances(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_lb_user ON leave_balances(tenant_id, user_type, user_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_lb_type ON leave_balances(tenant_id, leave_type_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_lb_year ON leave_balances(tenant_id, academic_year)`);
+      await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lb_tenant ON leave_balances(tenant_id)`);
+      await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lb_user ON leave_balances(tenant_id, user_type, user_id)`);
+      await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lb_type ON leave_balances(tenant_id, leave_type_id)`);
+      await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lb_year ON leave_balances(tenant_id, academic_year)`);
 
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_lr_tenant ON leave_requests(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_lr_user ON leave_requests(tenant_id, user_type, user_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_lr_status ON leave_requests(tenant_id, status)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_lr_dates ON leave_requests(tenant_id, start_date, end_date)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_lr_type ON leave_requests(tenant_id, leave_type_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_lr_approver ON leave_requests(tenant_id, approved_by)`);
+      await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lr_tenant ON leave_requests(tenant_id)`);
+      await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lr_user ON leave_requests(tenant_id, user_type, user_id)`);
+      await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lr_status ON leave_requests(tenant_id, status)`);
+      await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lr_dates ON leave_requests(tenant_id, start_date, end_date)`);
+      await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lr_type ON leave_requests(tenant_id, leave_type_id)`);
+      await migrateQuery(pool, 'LeaveManager', `CREATE INDEX IF NOT EXISTS idx_lr_approver ON leave_requests(tenant_id, approved_by)`);
 
       console.log('[LeaveManager] Migrations applied successfully');
     } catch (e) { console.error('[LeaveManager] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

@@ -13,6 +13,7 @@
 // ============================================================
 // MODULE ENTRY POINT
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -76,11 +77,9 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Alumni] Cannot connect to DB for migrations'); return; }
     try {
       // -- alumni_profiles --
-      await c.query(`CREATE TABLE IF NOT EXISTS alumni_profiles (
+      await migrateQuery(pool, 'AlumniNetwork', `CREATE TABLE IF NOT EXISTS alumni_profiles (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         full_name VARCHAR(255) NOT NULL, email VARCHAR(255), phone VARCHAR(20),
         graduation_year INTEGER, course VARCHAR(100), department VARCHAR(100),
@@ -101,10 +100,10 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
         ['mentor','BOOLEAN DEFAULT false'],['mentor_areas','TEXT[]'],
         ['created_at','TIMESTAMPTZ DEFAULT NOW()'],['updated_at','TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of apCols) { try { await c.query(`ALTER TABLE alumni_profiles ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
+      for (const [col, def] of apCols) { try { await migrateQuery(pool, 'AlumniNetwork', `ALTER TABLE alumni_profiles ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
 
       // -- alumni_events --
-      await c.query(`CREATE TABLE IF NOT EXISTS alumni_events (
+      await migrateQuery(pool, 'AlumniNetwork', `CREATE TABLE IF NOT EXISTS alumni_events (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         title VARCHAR(255) NOT NULL, description TEXT, event_date TIMESTAMPTZ,
         venue VARCHAR(255), type VARCHAR(50) DEFAULT 'reunion',
@@ -115,10 +114,10 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
         ['venue','VARCHAR(255)'],['type',"VARCHAR(50) DEFAULT 'reunion'"],
         ['max_attendees','INTEGER'],['created_by','INTEGER'],['created_at','TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of aeCols) { try { await c.query(`ALTER TABLE alumni_events ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
+      for (const [col, def] of aeCols) { try { await migrateQuery(pool, 'AlumniNetwork', `ALTER TABLE alumni_events ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
 
       // -- alumni_jobs --
-      await c.query(`CREATE TABLE IF NOT EXISTS alumni_jobs (
+      await migrateQuery(pool, 'AlumniNetwork', `CREATE TABLE IF NOT EXISTS alumni_jobs (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         posted_by INTEGER, company VARCHAR(255) NOT NULL, title VARCHAR(255) NOT NULL,
         description TEXT, location VARCHAR(255), type VARCHAR(20) DEFAULT 'full_time',
@@ -131,10 +130,10 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
         ['salary_range','VARCHAR(100)'],['requirements','TEXT'],
         ['is_active','BOOLEAN DEFAULT true'],['created_at','TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of ajCols) { try { await c.query(`ALTER TABLE alumni_jobs ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
+      for (const [col, def] of ajCols) { try { await migrateQuery(pool, 'AlumniNetwork', `ALTER TABLE alumni_jobs ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
 
       // -- alumni_donations --
-      await c.query(`CREATE TABLE IF NOT EXISTS alumni_donations (
+      await migrateQuery(pool, 'AlumniNetwork', `CREATE TABLE IF NOT EXISTS alumni_donations (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         donor_id INTEGER, donor_name VARCHAR(255), amount NUMERIC(12,2) NOT NULL,
         purpose VARCHAR(255), message TEXT, is_anonymous BOOLEAN DEFAULT false,
@@ -145,19 +144,18 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
         ['purpose','VARCHAR(255)'],['message','TEXT'],['is_anonymous','BOOLEAN DEFAULT false'],
         ['created_at','TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of adCols) { try { await c.query(`ALTER TABLE alumni_donations ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
+      for (const [col, def] of adCols) { try { await migrateQuery(pool, 'AlumniNetwork', `ALTER TABLE alumni_donations ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
 
       // -- indexes --
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_alumprof_tenant ON alumni_profiles(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_alumprof_year ON alumni_profiles(graduation_year)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_alumprof_visible ON alumni_profiles(tenant_id, is_visible)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_alumevt_tenant ON alumni_events(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_alumjobs_tenant ON alumni_jobs(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_alumjobs_active ON alumni_jobs(tenant_id, is_active)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_alumdon_tenant ON alumni_donations(tenant_id)`);
+      await migrateQuery(pool, 'AlumniNetwork', `CREATE INDEX IF NOT EXISTS idx_alumprof_tenant ON alumni_profiles(tenant_id)`);
+      await migrateQuery(pool, 'AlumniNetwork', `CREATE INDEX IF NOT EXISTS idx_alumprof_year ON alumni_profiles(graduation_year)`);
+      await migrateQuery(pool, 'AlumniNetwork', `CREATE INDEX IF NOT EXISTS idx_alumprof_visible ON alumni_profiles(tenant_id, is_visible)`);
+      await migrateQuery(pool, 'AlumniNetwork', `CREATE INDEX IF NOT EXISTS idx_alumevt_tenant ON alumni_events(tenant_id)`);
+      await migrateQuery(pool, 'AlumniNetwork', `CREATE INDEX IF NOT EXISTS idx_alumjobs_tenant ON alumni_jobs(tenant_id)`);
+      await migrateQuery(pool, 'AlumniNetwork', `CREATE INDEX IF NOT EXISTS idx_alumjobs_active ON alumni_jobs(tenant_id, is_active)`);
+      await migrateQuery(pool, 'AlumniNetwork', `CREATE INDEX IF NOT EXISTS idx_alumdon_tenant ON alumni_donations(tenant_id)`);
       console.log('[Alumni] Migrations applied successfully');
     } catch (e) { console.error('[Alumni] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

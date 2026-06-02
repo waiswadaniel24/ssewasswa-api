@@ -5,6 +5,7 @@
  *           Student Safety Tips, Crisis Protocol
  */
 
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const renderPage = opts.renderPage || ((t, c, u) => c);
@@ -365,7 +366,7 @@ module.exports = function (app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_br_urgency ON bullying_reports(urgency);
       CREATE INDEX IF NOT EXISTS idx_br_created ON bullying_reports(tenant_id, created_at);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'AntiBullying', `
       CREATE TABLE IF NOT EXISTS bullying_case_notes (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
@@ -383,7 +384,7 @@ module.exports = function (app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_bcn_tenant_report ON bullying_case_notes(tenant_id, report_id);
       CREATE INDEX IF NOT EXISTS idx_bcn_type ON bullying_case_notes(tenant_id, note_type);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'AntiBullying', `
       CREATE TABLE IF NOT EXISTS bullying_resources (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,

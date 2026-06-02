@@ -7,6 +7,7 @@
  *   captchaModule(app, pool, { esc, renderPage, ah, requireAuth, audit });
  */
 
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const renderPage = opts.renderPage || ((t, c, u) => c);

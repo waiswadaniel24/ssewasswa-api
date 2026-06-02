@@ -5,6 +5,7 @@
 // ============================================================
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function forum(app, db, pool, renderPage, esc) {
   const requireAuth = (req, res, next) => {
     if (!req.session?.user) return res.redirect('/login');
@@ -103,21 +104,19 @@ module.exports = function forum(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Forum] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS forum_categories (
+      await migrateQuery(pool, 'Forum', `CREATE TABLE IF NOT EXISTS forum_categories (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255), description TEXT, icon VARCHAR(50),
         color VARCHAR(20) DEFAULT '#4f46e5', sort_order INTEGER DEFAULT 0,
         is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS forum_likes (
+      await migrateQuery(pool, 'Forum', `CREATE TABLE IF NOT EXISTS forum_likes (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         user_id INTEGER, target_type VARCHAR(20) DEFAULT 'topic',
         target_id INTEGER, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS forum_topics (
+      await migrateQuery(pool, 'Forum', `CREATE TABLE IF NOT EXISTS forum_topics (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         title VARCHAR(255), content TEXT, category_id INTEGER,
         author_id INTEGER, author_name VARCHAR(255),
@@ -126,7 +125,7 @@ module.exports = function forum(app, db, pool, renderPage, esc) {
         status VARCHAR(20) DEFAULT 'open', last_reply_at TIMESTAMPTZ,
         last_reply_by VARCHAR(255), created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS forum_replies (
+      await migrateQuery(pool, 'Forum', `CREATE TABLE IF NOT EXISTS forum_replies (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         topic_id INTEGER NOT NULL, author_id INTEGER, author_name VARCHAR(255),
         content TEXT, like_count INTEGER DEFAULT 0,
@@ -141,26 +140,25 @@ module.exports = function forum(app, db, pool, renderPage, esc) {
         ['status', "VARCHAR(20) DEFAULT 'open'"], ['last_reply_at', 'TIMESTAMPTZ'],
         ['last_reply_by', 'VARCHAR(255)'], ['created_at', 'TIMESTAMPTZ DEFAULT NOW()'], ['updated_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of topicCols) { try { await c.query(`ALTER TABLE forum_topics ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
+      for (const [col, def] of topicCols) { try { await migrateQuery(pool, 'Forum', `ALTER TABLE forum_topics ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
       const replyCols = [
         ['topic_id', 'INTEGER NOT NULL DEFAULT 0'], ['author_id', 'INTEGER'],
         ['author_name', 'VARCHAR(255)'], ['content', 'TEXT'],
         ['like_count', 'INTEGER DEFAULT 0'], ['created_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of replyCols) { try { await c.query(`ALTER TABLE forum_replies ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
+      for (const [col, def] of replyCols) { try { await migrateQuery(pool, 'Forum', `ALTER TABLE forum_replies ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
       // Indexes
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ft_tenant ON forum_topics(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ft_category ON forum_topics(tenant_id, category_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ft_status ON forum_topics(tenant_id, status)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ft_pinned ON forum_topics(tenant_id, is_pinned DESC)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_fr_topic ON forum_replies(topic_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_fr_tenant ON forum_replies(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_fc_tenant ON forum_categories(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_fl_target ON forum_likes(tenant_id, target_type, target_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_fl_user ON forum_likes(user_id, target_type, target_id)`);
+      await migrateQuery(pool, 'Forum', `CREATE INDEX IF NOT EXISTS idx_ft_tenant ON forum_topics(tenant_id)`);
+      await migrateQuery(pool, 'Forum', `CREATE INDEX IF NOT EXISTS idx_ft_category ON forum_topics(tenant_id, category_id)`);
+      await migrateQuery(pool, 'Forum', `CREATE INDEX IF NOT EXISTS idx_ft_status ON forum_topics(tenant_id, status)`);
+      await migrateQuery(pool, 'Forum', `CREATE INDEX IF NOT EXISTS idx_ft_pinned ON forum_topics(tenant_id, is_pinned DESC)`);
+      await migrateQuery(pool, 'Forum', `CREATE INDEX IF NOT EXISTS idx_fr_topic ON forum_replies(topic_id)`);
+      await migrateQuery(pool, 'Forum', `CREATE INDEX IF NOT EXISTS idx_fr_tenant ON forum_replies(tenant_id)`);
+      await migrateQuery(pool, 'Forum', `CREATE INDEX IF NOT EXISTS idx_fc_tenant ON forum_categories(tenant_id)`);
+      await migrateQuery(pool, 'Forum', `CREATE INDEX IF NOT EXISTS idx_fl_target ON forum_likes(tenant_id, target_type, target_id)`);
+      await migrateQuery(pool, 'Forum', `CREATE INDEX IF NOT EXISTS idx_fl_user ON forum_likes(user_id, target_type, target_id)`);
       console.log('[Forum] Migrations applied');
     } catch (e) { console.error('[Forum] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

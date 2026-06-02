@@ -17,6 +17,7 @@
  * 14. Donor Wall Pro
  * 15. Recognition & Awards
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
 
   // =============================================

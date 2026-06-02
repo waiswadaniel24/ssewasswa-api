@@ -10,6 +10,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -41,10 +42,8 @@ module.exports = function(app, pool, opts) {
   // DATABASE TABLES
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[PeerTutoring] Cannot connect to DB'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS tutor_profiles (
+      await migrateQuery(pool, 'PeerTutoring', `CREATE TABLE IF NOT EXISTS tutor_profiles (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 1,
         user_id INTEGER NOT NULL,
@@ -66,7 +65,7 @@ module.exports = function(app, pool, opts) {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS tutoring_sessions (
+      await migrateQuery(pool, 'PeerTutoring', `CREATE TABLE IF NOT EXISTS tutoring_sessions (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 1,
         tutor_id INTEGER NOT NULL REFERENCES tutor_profiles(id),
@@ -93,7 +92,7 @@ module.exports = function(app, pool, opts) {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS tutoring_reviews (
+      await migrateQuery(pool, 'PeerTutoring', `CREATE TABLE IF NOT EXISTS tutoring_reviews (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 1,
         session_id INTEGER NOT NULL REFERENCES tutoring_sessions(id),
@@ -107,7 +106,7 @@ module.exports = function(app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS tutoring_hours (
+      await migrateQuery(pool, 'PeerTutoring', `CREATE TABLE IF NOT EXISTS tutoring_hours (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 1,
         tutor_id INTEGER NOT NULL REFERENCES tutor_profiles(id),
@@ -143,11 +142,10 @@ module.exports = function(app, pool, opts) {
         'idx_th_tutor ON tutoring_hours(tenant_id, tutor_id)',
         'idx_th_cumulative ON tutoring_hours(tenant_id, cumulative_hours DESC)'
       ];
-      for (const i of idxs) { try { await c.query(`CREATE INDEX IF NOT EXISTS ${i}`); } catch(e) {} }
+      for (const i of idxs) { try { await migrateQuery(pool, 'PeerTutoring', `CREATE INDEX IF NOT EXISTS ${i}`); } catch(e) {} }
 
       console.log('[PeerTutoring] Migrations applied');
     } catch (e) { console.error('[PeerTutoring] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

@@ -4,6 +4,7 @@
 // reports, equipment simulation, safety procedures, grading.
 // 12+ routes, PostgreSQL-backed, tenant-aware.
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT } = opts;
   const P = '#4f46e5', GRAY = '#6b7280';
@@ -25,7 +26,7 @@ module.exports = function(app, pool, opts) {
   // ─── Database Migration ──────────────────────────────────
   (async () => {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS virtual_experiments (
+      await migrateQuery(pool, 'VirtualLab', `CREATE TABLE IF NOT EXISTS virtual_experiments (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         title VARCHAR(255) NOT NULL,
@@ -47,7 +48,7 @@ module.exports = function(app, pool, opts) {
     } catch(e) { console.warn('[VirtualLab] Warn:', e.message); }
 
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS virtual_lab_sessions (
+      await migrateQuery(pool, 'VirtualLab', `CREATE TABLE IF NOT EXISTS virtual_lab_sessions (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         experiment_id INT NOT NULL,
@@ -67,7 +68,7 @@ module.exports = function(app, pool, opts) {
     } catch(e) { console.warn('[VirtualLab] Warn:', e.message); }
 
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS lab_reports (
+      await migrateQuery(pool, 'VirtualLab', `CREATE TABLE IF NOT EXISTS lab_reports (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         session_id INT NOT NULL,

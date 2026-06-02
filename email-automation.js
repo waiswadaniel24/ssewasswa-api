@@ -5,6 +5,7 @@
 // weekly digest, milestone notifications, win-back campaigns,
 // referral follow-ups, newsletter automation
 
+const { migrateQuery } = require('./db');
 const EAM_MIGRATIONS = [
   // Email queue
   `CREATE TABLE IF NOT EXISTS email_queue (

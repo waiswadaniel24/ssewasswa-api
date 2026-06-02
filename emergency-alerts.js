@@ -3,6 +3,7 @@
  * Provides lockdown/evacuation/weather/health/closure alerts, drill scheduling,
  * templates, contact management, and full audit trail with tenant isolation.
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);

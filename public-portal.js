@@ -2,6 +2,7 @@
 // PUBLIC PORTAL — Landing page, Registration, Public pages
 // Comfort Platform - Multi-tenant SaaS for African Institutions
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, bcrypt, ah, esc, renderPage, audit, sendEmail, queueEmail, logger) {
 
   // === WHATSAPP CONFIG ===

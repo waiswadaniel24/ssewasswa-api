@@ -4,6 +4,7 @@
  * add template, groups, add group, report, schedule, cancel,
  * API balance, API stats.
  */
+const { migrateQuery } = require('./db');
 module.exports = function smsBlast(app, db, pool, renderPage, esc, opts = {}) {
 
   const requireAuth = (req, res, next) => {
@@ -34,22 +35,22 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc, opts = {}) {
   // ═══════════════════════════════════════════════════════
   (async () => {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS sms_campaigns (
+      await migrateQuery(pool, 'SmsBlast', `CREATE TABLE IF NOT EXISTS sms_campaigns (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL, message TEXT NOT NULL, recipient_group VARCHAR(100) DEFAULT 'all',
         recipient_count INTEGER DEFAULT 0, sent_count INTEGER DEFAULT 0, failed_count INTEGER DEFAULT 0,
         status VARCHAR(20) DEFAULT 'draft', scheduled_at TIMESTAMPTZ, sent_at TIMESTAMPTZ,
         created_by INTEGER, cost NUMERIC(10,4) DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW());`);
-      await pool.query(`CREATE TABLE IF NOT EXISTS sms_recipients (
+      await migrateQuery(pool, 'SmsBlast', `CREATE TABLE IF NOT EXISTS sms_recipients (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         campaign_id INTEGER NOT NULL REFERENCES sms_campaigns(id) ON DELETE CASCADE,
         phone_number VARCHAR(25) NOT NULL, name VARCHAR(255), status VARCHAR(20) DEFAULT 'pending',
         error_message TEXT, sent_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW());`);
-      await pool.query(`CREATE TABLE IF NOT EXISTS sms_templates (
+      await migrateQuery(pool, 'SmsBlast', `CREATE TABLE IF NOT EXISTS sms_templates (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL, content TEXT NOT NULL, category VARCHAR(50), variables TEXT[],
         usage_count INTEGER DEFAULT 0, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW());`);
-      await pool.query(`CREATE TABLE IF NOT EXISTS sms_groups (
+      await migrateQuery(pool, 'SmsBlast', `CREATE TABLE IF NOT EXISTS sms_groups (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL, description TEXT, member_count INTEGER DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT NOW());`);
@@ -81,7 +82,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc, opts = {}) {
           'member_count INTEGER DEFAULT 0', 'created_at TIMESTAMPTZ DEFAULT NOW()'],
       };
       for (const [tbl, cols] of Object.entries(colDefs))
-        for (const c of cols) await pool.query(`ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS ${c};`).catch(() => {});
+        for (const c of cols) await migrateQuery(pool, 'SmsBlast', `ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS ${c};`).catch(() => {});
 
       // Indexes on tenant_id and status
       for (const sql of [
@@ -94,12 +95,12 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc, opts = {}) {
         'CREATE INDEX IF NOT EXISTS idx_sms_tmpl_tid ON sms_templates(tenant_id);',
         'CREATE INDEX IF NOT EXISTS idx_sms_tmpl_ac ON sms_templates(tenant_id,is_active);',
         'CREATE INDEX IF NOT EXISTS idx_sms_grp_tid ON sms_groups(tenant_id);',
-      ]) await pool.query(sql).catch(() => {});
+      ]) await migrateQuery(pool, 'SmsBlast', sql).catch(() => {});
 
       // Seed 5 templates (ON CONFLICT DO NOTHING)
       // Wrapped in try/catch because tenant_id=0 may not exist in tenants table
       try {
-        await pool.query(`INSERT INTO sms_templates (tenant_id,name,content,category,variables) VALUES
+        await migrateQuery(pool, 'SmsBlast', `INSERT INTO sms_templates (tenant_id,name,content,category,variables) VALUES
           (0,'General Notice','Dear {{name}}, {{message}}. Regards, {{organization}}.','general',ARRAY['name','message','organization']),
           (0,'Fee Reminder','Dear {{name}}, fee of {{amount}} for {{term}} due {{due_date}}. Pay promptly.','billing',ARRAY['name','amount','term','due_date']),
           (0,'Event Invitation','Invited to {{event}} on {{date}} at {{time}}. Venue: {{venue}}.','events',ARRAY['event','date','time','venue']),

@@ -5,6 +5,7 @@
 // viral countdown timers, share contests, user stories, waitlists,
 // feedback widgets, notification badges, trending hashtags
 
+const { migrateQuery } = require('./db');
 const VG_MIGRATIONS = [
   // Polls & Voting System
   `CREATE TABLE IF NOT EXISTS polls (

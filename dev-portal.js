@@ -6,6 +6,7 @@
  */
 
 'use strict';
+const { migrateQuery } = require('./db');
 const crypto = require('crypto');
 
 module.exports = (app, pool, renderPage, esc) => {

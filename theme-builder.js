@@ -11,6 +11,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function themeBuilder(app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const renderPage = opts.renderPage || ((title, content, user) => content);
@@ -357,7 +358,7 @@ module.exports = function themeBuilder(app, pool, opts) {
   // ============================================================
   (async () => {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS school_themes (
+      await migrateQuery(pool, 'ThemeBuilder', `CREATE TABLE IF NOT EXISTS school_themes (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         description TEXT,
@@ -383,7 +384,7 @@ module.exports = function themeBuilder(app, pool, opts) {
       console.error('[ThemeBuilder] school_themes migration error:', e.message);
     }
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS theme_components (
+      await migrateQuery(pool, 'ThemeBuilder', `CREATE TABLE IF NOT EXISTS theme_components (
         id SERIAL PRIMARY KEY,
         theme_id INT REFERENCES school_themes(id) ON DELETE CASCADE,
         component_type TEXT,

@@ -11,6 +11,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function localeManager(app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const renderPage = opts.renderPage || ((title, content, user) => content);
@@ -147,7 +148,7 @@ module.exports = function localeManager(app, pool, opts) {
   // ============================================================
   (async () => {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS locales (
+      await migrateQuery(pool, 'LocaleManager', `CREATE TABLE IF NOT EXISTS locales (
         id SERIAL PRIMARY KEY,
         code TEXT UNIQUE NOT NULL,
         name TEXT NOT NULL,
@@ -159,14 +160,14 @@ module.exports = function localeManager(app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         school_id INT DEFAULT 1
       )`);
-      await pool.query(`CREATE TABLE IF NOT EXISTS translation_keys (
+      await migrateQuery(pool, 'LocaleManager', `CREATE TABLE IF NOT EXISTS translation_keys (
         id SERIAL PRIMARY KEY,
         key TEXT UNIQUE NOT NULL,
         category TEXT DEFAULT 'general',
         context TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await pool.query(`CREATE TABLE IF NOT EXISTS translations (
+      await migrateQuery(pool, 'LocaleManager', `CREATE TABLE IF NOT EXISTS translations (
         id SERIAL PRIMARY KEY,
         locale_id INT REFERENCES locales(id) ON DELETE CASCADE,
         key_id INT REFERENCES translation_keys(id) ON DELETE CASCADE,
@@ -178,7 +179,7 @@ module.exports = function localeManager(app, pool, opts) {
       )`);
       // Seed translation keys
       for (const sk of SEED_KEYS) {
-        await pool.query(
+        await migrateQuery(pool, 'LocaleManager', 
           `INSERT INTO translation_keys (key, category, context) VALUES ($1, $2, $3) ON CONFLICT (key) DO NOTHING`,
           [sk.key, sk.category, sk.context]
         );

@@ -6,6 +6,7 @@
  * Relationship Mapping, Next Best Action, Lifetime Value Calculator,
  * Re-engagement Campaigns, Annual Giving Predictor
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
 
   // =============================================

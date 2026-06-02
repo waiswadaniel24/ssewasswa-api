@@ -5,6 +5,7 @@
  * 10 routes: USSD webhook, admin dashboard, menu config (GET/POST), sessions, analytics,
  *            tester (GET/POST), logs, help/integration guide.
  */
+const { migrateQuery } = require('./db');
 module.exports = function ussdPortal(app, db, pool, renderPage, esc) {
 
   const requireAuth = (req, res, next) => { if (!req.session?.user) return res.redirect('/login'); next(); };
@@ -22,10 +23,9 @@ module.exports = function ussdPortal(app, db, pool, renderPage, esc) {
   //  MIGRATIONS (async IIFE at module load)
   // ═══════════════════════════════════════════════════════
   (async () => {
-    const c = await pool.connect().catch(() => null);
     if (!c) return;
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS ussd_sessions (
+      await migrateQuery(pool, 'UssdPortal', `CREATE TABLE IF NOT EXISTS ussd_sessions (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
         phone_number VARCHAR(20) NOT NULL,
@@ -38,7 +38,7 @@ module.exports = function ussdPortal(app, db, pool, renderPage, esc) {
         last_activity TIMESTAMPTZ DEFAULT NOW(),
         expires_at TIMESTAMPTZ
       );`);
-      await c.query(`CREATE TABLE IF NOT EXISTS ussd_menu_config (
+      await migrateQuery(pool, 'UssdPortal', `CREATE TABLE IF NOT EXISTS ussd_menu_config (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
         menu_key VARCHAR(50) NOT NULL,
@@ -71,7 +71,7 @@ module.exports = function ussdPortal(app, db, pool, renderPage, esc) {
         ],
       };
       for (const [tbl, cols] of Object.entries(colDefs))
-        for (const col of cols) await c.query(`ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
+        for (const col of cols) await migrateQuery(pool, 'UssdPortal', `ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
 
       // Indexes
       for (const sql of [
@@ -82,12 +82,12 @@ module.exports = function ussdPortal(app, db, pool, renderPage, esc) {
         'CREATE INDEX IF NOT EXISTS idx_ussd_sess_exp ON ussd_sessions(expires_at);',
         'CREATE INDEX IF NOT EXISTS idx_ussd_menu_tid ON ussd_menu_config(tenant_id);',
         'CREATE INDEX IF NOT EXISTS idx_ussd_menu_key ON ussd_menu_config(tenant_id,menu_key);',
-      ]) await c.query(sql).catch(() => {});
+      ]) await migrateQuery(pool, 'UssdPortal', sql).catch(() => {});
 
       // Seed default menu config for tenant_id=0 (global defaults)
       // Wrapped in try/catch because tenant_id=0 may not exist in tenants table
       try {
-        await c.query(`INSERT INTO ussd_menu_config (tenant_id,menu_key,label,display_order) VALUES
+        await migrateQuery(pool, 'UssdPortal', `INSERT INTO ussd_menu_config (tenant_id,menu_key,label,display_order) VALUES
           (0,'check_fees','Check Fees',1),
           (0,'check_attendance','Check Attendance',2),
           (0,'check_results','Check Results',3),
@@ -99,7 +99,6 @@ module.exports = function ussdPortal(app, db, pool, renderPage, esc) {
 
       console.log('[USSD] Migrations applied');
     } catch (e) { console.error('[USSD] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ═══════════════════════════════════════════════════════

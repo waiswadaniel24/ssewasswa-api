@@ -13,6 +13,7 @@
 // ============================================================
 // MODULE ENTRY POINT
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function feeManagement(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -82,8 +83,6 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[FeeManagement] Cannot connect to DB for migrations'); return; }
     try {
       // Ensure fee_structures columns
       const fsCols = [
@@ -98,7 +97,7 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
         { name: 'created_by', type: 'INTEGER' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of fsCols) { try { await c.query(`ALTER TABLE fee_structures ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of fsCols) { try { await migrateQuery(pool, 'FeeManagement', `ALTER TABLE fee_structures ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure fees_structure columns (alias table)
       const fs2Cols = [
@@ -110,7 +109,7 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
         { name: 'term', type: 'VARCHAR(50)' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of fs2Cols) { try { await c.query(`ALTER TABLE fees_structure ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of fs2Cols) { try { await migrateQuery(pool, 'FeeManagement', `ALTER TABLE fees_structure ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure fee_receipts columns
       const frCols = [
@@ -129,7 +128,7 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
         { name: 'notes', type: 'TEXT' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of frCols) { try { await c.query(`ALTER TABLE fee_receipts ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of frCols) { try { await migrateQuery(pool, 'FeeManagement', `ALTER TABLE fee_receipts ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure fee_reminder_settings columns
       const fRemCols = [
@@ -141,7 +140,7 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
         { name: 'last_sent', type: 'TIMESTAMPTZ' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of fRemCols) { try { await c.query(`ALTER TABLE fee_reminder_settings ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of fRemCols) { try { await migrateQuery(pool, 'FeeManagement', `ALTER TABLE fee_reminder_settings ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure class_payments columns
       const cpCols = [
@@ -155,7 +154,7 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
         { name: 'status', type: 'VARCHAR(20)' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of cpCols) { try { await c.query(`ALTER TABLE class_payments ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of cpCols) { try { await migrateQuery(pool, 'FeeManagement', `ALTER TABLE class_payments ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure payment_methods columns
       const pmCols = [
@@ -166,7 +165,7 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
         { name: 'is_active', type: 'BOOLEAN DEFAULT true' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of pmCols) { try { await c.query(`ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of pmCols) { try { await migrateQuery(pool, 'FeeManagement', `ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure payment_requests columns
       const prCols = [
@@ -178,7 +177,7 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
         { name: 'expires_at', type: 'TIMESTAMPTZ' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of prCols) { try { await c.query(`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of prCols) { try { await migrateQuery(pool, 'FeeManagement', `ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure payment_transactions columns
       const ptCols = [
@@ -192,22 +191,21 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
         { name: 'processed_at', type: 'TIMESTAMPTZ' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of ptCols) { try { await c.query(`ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of ptCols) { try { await migrateQuery(pool, 'FeeManagement', `ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Indexes
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_fee_structures_tenant ON fee_structures(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_fee_structures_class ON fee_structures(class_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_fee_receipts_tenant ON fee_receipts(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_fee_receipts_student ON fee_receipts(student_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_fee_receipts_receipt ON fee_receipts(receipt_number)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_fee_reminder_tenant ON fee_reminder_settings(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_class_payments_tenant ON class_payments(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_payment_methods_tenant ON payment_methods(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_payment_requests_tenant ON payment_requests(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_payment_trans_tenant ON payment_transactions(tenant_id)`);
+      await migrateQuery(pool, 'FeeManagement', `CREATE INDEX IF NOT EXISTS idx_fee_structures_tenant ON fee_structures(tenant_id)`);
+      await migrateQuery(pool, 'FeeManagement', `CREATE INDEX IF NOT EXISTS idx_fee_structures_class ON fee_structures(class_id)`);
+      await migrateQuery(pool, 'FeeManagement', `CREATE INDEX IF NOT EXISTS idx_fee_receipts_tenant ON fee_receipts(tenant_id)`);
+      await migrateQuery(pool, 'FeeManagement', `CREATE INDEX IF NOT EXISTS idx_fee_receipts_student ON fee_receipts(student_id)`);
+      await migrateQuery(pool, 'FeeManagement', `CREATE INDEX IF NOT EXISTS idx_fee_receipts_receipt ON fee_receipts(receipt_number)`);
+      await migrateQuery(pool, 'FeeManagement', `CREATE INDEX IF NOT EXISTS idx_fee_reminder_tenant ON fee_reminder_settings(tenant_id)`);
+      await migrateQuery(pool, 'FeeManagement', `CREATE INDEX IF NOT EXISTS idx_class_payments_tenant ON class_payments(tenant_id)`);
+      await migrateQuery(pool, 'FeeManagement', `CREATE INDEX IF NOT EXISTS idx_payment_methods_tenant ON payment_methods(tenant_id)`);
+      await migrateQuery(pool, 'FeeManagement', `CREATE INDEX IF NOT EXISTS idx_payment_requests_tenant ON payment_requests(tenant_id)`);
+      await migrateQuery(pool, 'FeeManagement', `CREATE INDEX IF NOT EXISTS idx_payment_trans_tenant ON payment_transactions(tenant_id)`);
       console.log('[FeeManagement] Migrations applied successfully');
     } catch (e) { console.error('[FeeManagement] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

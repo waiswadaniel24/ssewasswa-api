@@ -15,6 +15,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis }) => {
 
   const ah = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -140,11 +141,8 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   ];
 
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[E-Commerce] DB connection failed'); return; }
-    try { for (const sql of migrations) await c.query(sql); console.log(`[E-Commerce] ${migrations.length} migrations applied`); }
+    try { for (const sql of migrations) await migrateQuery(pool, 'ECommerce', sql); console.log(`[E-Commerce] ${migrations.length} migrations applied`); }
     catch (e) { console.error('[E-Commerce] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ═══════════════════════════════════════════════════════════

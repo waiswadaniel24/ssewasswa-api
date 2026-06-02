@@ -10,6 +10,7 @@
 'use strict';
 
 // ── Internal helpers ─────────────────────────────────────────
+const { migrateQuery } = require('./db');
 const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const formatDateTime = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 const fmtMoney = (n) => 'UGX ' + Number(n || 0).toLocaleString();
@@ -166,11 +167,8 @@ module.exports = function crm(app, db, pool, renderPage, esc) {
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { console.warn('[CRM] Cannot connect to DB'); return; }
-    try { for (const sql of migrations) await client.query(sql); console.log('[CRM] Migrations applied: ' + migrations.length + ' statements'); }
+    try { for (const sql of migrations) await migrateQuery(pool, 'Crm', sql); console.log('[CRM] Migrations applied: ' + migrations.length + ' statements'); }
     catch (e) { console.error('[CRM] Migration error:', e.message); }
-    finally { client.release(); }
   })();
 
   // ════════════════════════════════════════════════════════════

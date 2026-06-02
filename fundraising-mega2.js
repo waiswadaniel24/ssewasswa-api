@@ -14,6 +14,7 @@
 // 10. Donor Thank-You Videos
 // ============================================================
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
   const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
 

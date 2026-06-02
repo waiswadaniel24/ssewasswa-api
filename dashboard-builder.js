@@ -3,6 +3,7 @@
  * Admins create personalized dashboards with widget cards (KPIs, charts, tables, quick actions).
  * Self-contained Express module with inline CSS and SVG chart rendering.
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -22,7 +23,7 @@ module.exports = function(app, pool, opts) {
         created_by VARCHAR(255), created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'DashboardBuilder', `
       CREATE TABLE IF NOT EXISTS dashboard_widgets (
         id SERIAL PRIMARY KEY, tenant_id INT NOT NULL,
         dashboard_id INT REFERENCES custom_dashboards(id) ON DELETE CASCADE,
@@ -30,8 +31,8 @@ module.exports = function(app, pool, opts) {
         col INT DEFAULT 1, config JSONB DEFAULT '{}',
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_cd_tenant ON custom_dashboards(tenant_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_dw_tenant_did ON dashboard_widgets(tenant_id, dashboard_id)`);
+    await migrateQuery(pool, 'DashboardBuilder', `CREATE INDEX IF NOT EXISTS idx_cd_tenant ON custom_dashboards(tenant_id)`);
+    await migrateQuery(pool, 'DashboardBuilder', `CREATE INDEX IF NOT EXISTS idx_dw_tenant_did ON dashboard_widgets(tenant_id, dashboard_id)`);
   })();
 
   // ──────────────────────────── Inline CSS ────────────────────────────

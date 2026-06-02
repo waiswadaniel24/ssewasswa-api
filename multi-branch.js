@@ -27,6 +27,7 @@
  * module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis }) => { ... }
  */
 
+const { migrateQuery } = require('./db');
 module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis }) => {
   const BASE = '/api/multi-branch';
 
@@ -646,7 +647,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         'CREATE INDEX IF NOT EXISTS idx_bh_tenant ON branch_holidays(tenant_id)',
         'CREATE INDEX IF NOT EXISTS idx_bh_branch ON branch_holidays(branch_id)',
         'CREATE INDEX IF NOT EXISTS idx_bh_date ON branch_holidays(date)',
-      ]) { try { await pool.query(sql); } catch {} }
+      ]) { try { await migrateQuery(pool, 'MultiBranch', sql); } catch {} }
       console.log('[MultiBranch] Tables and indexes ready');
       success = true;
       break;

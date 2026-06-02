@@ -8,6 +8,7 @@
  *
  * 22 routes • PostgreSQL • tenant_id scoped
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
 
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));

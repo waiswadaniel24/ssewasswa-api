@@ -4,6 +4,7 @@
 // Sends digest emails with key metrics: attendance, fees collected,
 // donations, new members, tasks due, etc. Keeps users engaged.
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, ah, esc, renderPage, audit, notify, sendEmail, logger) {
   const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
 

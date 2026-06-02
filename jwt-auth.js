@@ -1,5 +1,6 @@
 'use strict';
 
+const { migrateQuery } = require('./db');
 const crypto = require('crypto');
 
 /**

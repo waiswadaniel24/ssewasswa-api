@@ -13,6 +13,7 @@
 // ============================================================
 // INTERNAL HELPERS (declared outside module for hoisting)
 // ============================================================
+const { migrateQuery } = require('./db');
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }) : '—';
 const fmtDateShort = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const today = () => new Date().toISOString().slice(0, 10);
@@ -379,10 +380,8 @@ module.exports = function studentIdCards(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[IDCards] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS student_id_cards (
+      await migrateQuery(pool, 'StudentIdCards', `CREATE TABLE IF NOT EXISTS student_id_cards (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
@@ -424,20 +423,19 @@ module.exports = function studentIdCards(app, db, pool, renderPage, esc) {
         ['print_count', 'INTEGER DEFAULT 0'],
       ];
       for (const [col, def] of cols) {
-        try { await c.query(`ALTER TABLE student_id_cards ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
+        try { await migrateQuery(pool, 'StudentIdCards', `ALTER TABLE student_id_cards ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
       }
 
       // Indexes
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sic_tenant ON student_id_cards(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sic_student ON student_id_cards(student_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sic_card_number ON student_id_cards(card_number)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sic_status ON student_id_cards(tenant_id, status)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sic_class ON student_id_cards(tenant_id, class)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sic_valid_until ON student_id_cards(valid_until)`);
+      await migrateQuery(pool, 'StudentIdCards', `CREATE INDEX IF NOT EXISTS idx_sic_tenant ON student_id_cards(tenant_id)`);
+      await migrateQuery(pool, 'StudentIdCards', `CREATE INDEX IF NOT EXISTS idx_sic_student ON student_id_cards(student_id)`);
+      await migrateQuery(pool, 'StudentIdCards', `CREATE INDEX IF NOT EXISTS idx_sic_card_number ON student_id_cards(card_number)`);
+      await migrateQuery(pool, 'StudentIdCards', `CREATE INDEX IF NOT EXISTS idx_sic_status ON student_id_cards(tenant_id, status)`);
+      await migrateQuery(pool, 'StudentIdCards', `CREATE INDEX IF NOT EXISTS idx_sic_class ON student_id_cards(tenant_id, class)`);
+      await migrateQuery(pool, 'StudentIdCards', `CREATE INDEX IF NOT EXISTS idx_sic_valid_until ON student_id_cards(valid_until)`);
 
       console.log('[IDCards] Migrations applied successfully');
     } catch (e) { console.error('[IDCards] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

@@ -1,0 +1,149 @@
+# ─── GitHub Actions Workflow: Auto-build Electron Desktop App ────────────────
+#
+# This workflow automatically builds Comfort Zone Desktop for all 3 platforms
+# when a version tag is pushed (e.g., git tag v1.0.0 && git push --tags).
+#
+# COST: 100% FREE — uses GitHub Actions runners (2,000 min/month free on public repos)
+#
+# To trigger a build:
+#   git tag v1.0.0
+#   git push origin v1.0.0
+#
+# The built artifacts (.exe, .dmg, .AppImage) are uploaded to GitHub Releases.
+
+name: Build Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on tags like v1.0.0, v1.2.3, etc.
+
+permissions:
+  contents: write  # Needed to create GitHub Releases
+
+jobs:
+  # ─── Build for Windows ──────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: desktop-app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: desktop-app
+        run: npm ci
+
+      - name: Build Windows installer
+        working-directory: desktop-app
+        run: npm run build-win
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: desktop-app/dist/*.exe
+
+  # ─── Build for macOS ────────────────────────────────────────────────────
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: desktop-app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: desktop-app
+        run: npm ci
+
+      - name: Build macOS DMG
+        working-directory: desktop-app
+        run: npm run build-mac
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer
+          path: desktop-app/dist/*.dmg
+
+  # ─── Build for Linux ────────────────────────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: desktop-app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: desktop-app
+        run: npm ci
+
+      - name: Build Linux AppImage
+        working-directory: desktop-app
+        run: npm run build-linux
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: desktop-app/dist/*.AppImage
+
+  # ─── Create GitHub Release with all artifacts ────────────────────────────
+  release:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Generate SHA256 checksums
+        working-directory: release-artifacts
+        run: |
+          echo "## SHA256 Checksums" > SHA256SUMS.txt
+          echo "" >> SHA256SUMS.txt
+          echo "Verify your download by running:" >> SHA256SUMS.txt
+          echo "  sha256sum -c SHA256SUMS.txt" >> SHA256SUMS.txt
+          echo "" >> SHA256SUMS.txt
+          for dir in */; do
+            for file in "$dir"*; do
+              if [ -f "$file" ]; then
+                sha256sum "$file" >> SHA256SUMS.txt
+              fi
+            done
+          done
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/windows-installer/*
+            release-artifacts/macos-installer/*
+            release-artifacts/linux-appimage/*
+            release-artifacts/SHA256SUMS.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false

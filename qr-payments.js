@@ -10,6 +10,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function qrPayments(app, db, pool, renderPage, esc) {
 
   // ── inline fallbacks ──────────────────────────────────────
@@ -260,15 +261,11 @@ module.exports = function qrPayments(app, db, pool, renderPage, esc) {
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { console.error('[QRPayments] Cannot connect to DB for migrations'); return; }
     try {
-      for (const sql of migrations) await client.query(sql);
+      for (const sql of migrations) await migrateQuery(pool, 'QrPayments', sql);
       console.log('[QRPayments] Migrations applied: ' + migrations.length + ' statements');
     } catch (e) {
       console.error('[QRPayments] Migration error:', e.message);
-    } finally {
-      client.release();
     }
   })();
 

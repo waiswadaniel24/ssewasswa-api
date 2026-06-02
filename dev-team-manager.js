@@ -9,6 +9,7 @@
 //   devTeamManager(app, db, pool, renderPage, esc);
 // ============================================================
 
+const { migrateQuery } = require('./db');
 module.exports = function devTeamManager(app, db, pool, renderPage, esc) {
 
   // ============================================================

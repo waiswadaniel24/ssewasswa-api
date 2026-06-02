@@ -10,6 +10,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const renderPage = opts.renderPage || ((t, c, u) => c);
@@ -223,11 +224,9 @@ module.exports = function (app, pool, opts) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[DigitalSignatures] Cannot connect to DB for migrations'); return; }
     try {
       // -- signature_requests -----------------------------------------------
-      await c.query(`CREATE TABLE IF NOT EXISTS signature_requests (
+      await migrateQuery(pool, 'DigitalSignatures', `CREATE TABLE IF NOT EXISTS signature_requests (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         doc_type VARCHAR(100) NOT NULL DEFAULT 'report_card',
@@ -244,7 +243,7 @@ module.exports = function (app, pool, opts) {
       )`);
 
       // -- signature_records ------------------------------------------------
-      await c.query(`CREATE TABLE IF NOT EXISTS signature_records (
+      await migrateQuery(pool, 'DigitalSignatures', `CREATE TABLE IF NOT EXISTS signature_records (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         request_id INTEGER NOT NULL REFERENCES signature_requests(id) ON DELETE CASCADE,
@@ -259,7 +258,7 @@ module.exports = function (app, pool, opts) {
       )`);
 
       // -- signed_documents -------------------------------------------------
-      await c.query(`CREATE TABLE IF NOT EXISTS signed_documents (
+      await migrateQuery(pool, 'DigitalSignatures', `CREATE TABLE IF NOT EXISTS signed_documents (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         request_id INTEGER NOT NULL REFERENCES signature_requests(id) ON DELETE CASCADE,
@@ -279,7 +278,7 @@ module.exports = function (app, pool, opts) {
         ['completed_at', 'TIMESTAMPTZ'],
       ];
       for (const [col, def] of srCols) {
-        try { await c.query(`ALTER TABLE signature_requests ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
+        try { await migrateQuery(pool, 'DigitalSignatures', `ALTER TABLE signature_requests ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
       }
 
       const sigCols = [
@@ -287,23 +286,22 @@ module.exports = function (app, pool, opts) {
         ['user_agent', 'TEXT'],
       ];
       for (const [col, def] of sigCols) {
-        try { await c.query(`ALTER TABLE signature_records ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
+        try { await migrateQuery(pool, 'DigitalSignatures', `ALTER TABLE signature_records ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
       }
 
       // -- INDEXES ----------------------------------------------------------
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sigrq_tenant ON signature_requests(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sigrq_status ON signature_requests(tenant_id, status)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sigrq_created ON signature_requests(created_at DESC)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sigrec_tenant ON signature_records(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sigrec_request ON signature_records(request_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sigrec_token ON signature_records(token)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sigdoc_tenant ON signed_documents(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sigdoc_request ON signed_documents(request_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sigdoc_fingerprint ON signed_documents(fingerprint)`);
+      await migrateQuery(pool, 'DigitalSignatures', `CREATE INDEX IF NOT EXISTS idx_sigrq_tenant ON signature_requests(tenant_id)`);
+      await migrateQuery(pool, 'DigitalSignatures', `CREATE INDEX IF NOT EXISTS idx_sigrq_status ON signature_requests(tenant_id, status)`);
+      await migrateQuery(pool, 'DigitalSignatures', `CREATE INDEX IF NOT EXISTS idx_sigrq_created ON signature_requests(created_at DESC)`);
+      await migrateQuery(pool, 'DigitalSignatures', `CREATE INDEX IF NOT EXISTS idx_sigrec_tenant ON signature_records(tenant_id)`);
+      await migrateQuery(pool, 'DigitalSignatures', `CREATE INDEX IF NOT EXISTS idx_sigrec_request ON signature_records(request_id)`);
+      await migrateQuery(pool, 'DigitalSignatures', `CREATE INDEX IF NOT EXISTS idx_sigrec_token ON signature_records(token)`);
+      await migrateQuery(pool, 'DigitalSignatures', `CREATE INDEX IF NOT EXISTS idx_sigdoc_tenant ON signed_documents(tenant_id)`);
+      await migrateQuery(pool, 'DigitalSignatures', `CREATE INDEX IF NOT EXISTS idx_sigdoc_request ON signed_documents(request_id)`);
+      await migrateQuery(pool, 'DigitalSignatures', `CREATE INDEX IF NOT EXISTS idx_sigdoc_fingerprint ON signed_documents(fingerprint)`);
 
       console.log('[DigitalSignatures] Migrations applied successfully');
     } catch (e) { console.error('[DigitalSignatures] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

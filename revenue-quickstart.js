@@ -5,6 +5,7 @@
 // marketplace commissions, SMS revenue, affiliate links,
 // sponsored content, premium subscriptions
 
+const { migrateQuery } = require('./db');
 const REV_MIGRATIONS = [
   // Ad placements
   `CREATE TABLE IF NOT EXISTS ad_placements (

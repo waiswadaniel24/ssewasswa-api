@@ -6,6 +6,7 @@
  * Tables: audit_exports
  * Dark theme UI with blue accents.
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc;
 

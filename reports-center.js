@@ -14,6 +14,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 const formatCurrency = (amt) => 'UGX ' + Number(amt || 0).toLocaleString();
 const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
 const formatDateTime = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
@@ -97,11 +98,8 @@ module.exports = function reportsCenter(app, pool, requireAuth, logger, audit, n
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { logger.warn('[ReportsCenter] Cannot connect to DB'); return; }
-    try { for (const sql of migrations) await client.query(sql); logger.info({ msg: '[ReportsCenter] Migrations applied', count: migrations.length }); }
+    try { for (const sql of migrations) await migrateQuery(pool, 'ReportsCenter', sql); logger.info({ msg: '[ReportsCenter] Migrations applied', count: migrations.length }); }
     catch (e) { logger.error({ msg: '[ReportsCenter] Migration error', error: e.message }); }
-    finally { client.release(); }
   })();
 
   // ============================================================

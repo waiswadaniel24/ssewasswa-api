@@ -3,6 +3,7 @@
 //   admin panel, campaign management, CSV export
 // Comfort Platform - Multi-tenant SaaS for African Institutions
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, bcrypt, ah, esc, renderPage, audit, sendEmail, queueEmail, logger) {
 
   const BASE = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
@@ -42,7 +43,7 @@ module.exports = function(app, pool, bcrypt, ah, esc, renderPage, audit, sendEma
       `CREATE INDEX IF NOT EXISTS idx_nl_subs_token ON newsletter_subscribers(confirm_token)`,
       `CREATE INDEX IF NOT EXISTS idx_nl_camp_status ON newsletter_campaigns(status)`
     ];
-    for (const sql of migs) { try { await pool.query(sql); } catch(e) {} }
+    for (const sql of migs) { try { await migrateQuery(pool, 'PublicNewsletter', sql); } catch(e) {} }
   })();
 
   // Rate limiting map (in-memory, per IP)

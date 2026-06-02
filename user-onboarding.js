@@ -7,6 +7,7 @@
  * 14 routes under /school/onboarding
  */
 
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
   const esc =
     opts.esc ||

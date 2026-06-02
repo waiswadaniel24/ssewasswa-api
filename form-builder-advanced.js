@@ -9,6 +9,7 @@
  */
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s == null ? '' : (typeof s === 'object' ? JSON.stringify(s) : s))
     .replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])));
@@ -177,7 +178,7 @@ module.exports = function(app, pool, opts) {
   // ──────────────────────────── Migrations ────────────────────────────
   (async () => {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS custom_forms (
+      await migrateQuery(pool, 'FormBuilderAdvanced', `CREATE TABLE IF NOT EXISTS custom_forms (
         id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT,
         fields JSONB DEFAULT '[]', theme TEXT DEFAULT 'light',
         submit_button_text TEXT DEFAULT 'Submit', success_message TEXT,
@@ -187,7 +188,7 @@ module.exports = function(app, pool, opts) {
         is_active BOOLEAN DEFAULT true, published_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW(), tenant_id INT DEFAULT 1
       )`);
-      await pool.query(`CREATE TABLE IF NOT EXISTS form_submissions (
+      await migrateQuery(pool, 'FormBuilderAdvanced', `CREATE TABLE IF NOT EXISTS form_submissions (
         id SERIAL PRIMARY KEY, form_id INT REFERENCES custom_forms(id) ON DELETE CASCADE,
         submitter_id INT, submitter_name TEXT, submitter_email TEXT,
         responses JSONB, status TEXT DEFAULT 'new',
@@ -195,15 +196,15 @@ module.exports = function(app, pool, opts) {
         ip_address TEXT, user_agent TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(), tenant_id INT DEFAULT 1
       )`);
-      await pool.query(`CREATE TABLE IF NOT EXISTS form_conditions (
+      await migrateQuery(pool, 'FormBuilderAdvanced', `CREATE TABLE IF NOT EXISTS form_conditions (
         id SERIAL PRIMARY KEY, form_id INT REFERENCES custom_forms(id) ON DELETE CASCADE,
         field_id TEXT, operator TEXT, value TEXT, action TEXT,
         target_field_id TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_cfa_form ON custom_forms(tenant_id)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_fs_form_id ON form_submissions(form_id)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_fs_status ON form_submissions(status)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_fc_form_id ON form_conditions(form_id)`);
+      await migrateQuery(pool, 'FormBuilderAdvanced', `CREATE INDEX IF NOT EXISTS idx_cfa_form ON custom_forms(tenant_id)`);
+      await migrateQuery(pool, 'FormBuilderAdvanced', `CREATE INDEX IF NOT EXISTS idx_fs_form_id ON form_submissions(form_id)`);
+      await migrateQuery(pool, 'FormBuilderAdvanced', `CREATE INDEX IF NOT EXISTS idx_fs_status ON form_submissions(status)`);
+      await migrateQuery(pool, 'FormBuilderAdvanced', `CREATE INDEX IF NOT EXISTS idx_fc_form_id ON form_conditions(form_id)`);
       console.log('[FormBuilderAdvanced] Migrations applied');
     } catch (e) { console.error('[FormBuilderAdvanced] Migration error:', e.message); }
   })();

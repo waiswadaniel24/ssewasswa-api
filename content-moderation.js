@@ -5,6 +5,7 @@
  *
  * Usage: const mod = require('./content-moderation'); mod(app, pool, opts);
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -44,7 +45,7 @@ module.exports = function(app, pool, opts) {
         rejection_reason TEXT, auto_flagged BOOLEAN DEFAULT false,
         flag_reason TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'ContentModeration', `
       CREATE TABLE IF NOT EXISTS moderation_reports (
         id SERIAL PRIMARY KEY, tenant_id INT NOT NULL DEFAULT 0,
         reporter_email VARCHAR(255), content_type VARCHAR(50),
@@ -52,14 +53,14 @@ module.exports = function(app, pool, opts) {
         resolved_by VARCHAR(255), resolved_at TIMESTAMPTZ,
         resolution TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'ContentModeration', `
       CREATE TABLE IF NOT EXISTS moderation_rules (
         id SERIAL PRIMARY KEY, tenant_id INT NOT NULL DEFAULT 0,
         rule_type VARCHAR(50), rule_value TEXT,
         action VARCHAR(20) DEFAULT 'flag', is_active BOOLEAN DEFAULT true,
         created_by VARCHAR(255), created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'ContentModeration', `
       CREATE TABLE IF NOT EXISTS blocked_users (
         id SERIAL PRIMARY KEY, tenant_id INT NOT NULL DEFAULT 0,
         user_email VARCHAR(255), blocked_by VARCHAR(255),
@@ -76,7 +77,7 @@ module.exports = function(app, pool, opts) {
       'CREATE INDEX IF NOT EXISTS idx_blocked_tenant ON blocked_users(tenant_id)',
       'CREATE INDEX IF NOT EXISTS idx_blocked_email ON blocked_users(user_email)',
     ];
-    for (const sql of indexes) { try { await pool.query(sql); } catch(_) {} }
+    for (const sql of indexes) { try { await migrateQuery(pool, 'ContentModeration', sql); } catch(_) {} }
     console.log('[ContentModeration] Tables ready');
   })().catch(e => console.error('[ContentModeration] Table init error:', e));
 

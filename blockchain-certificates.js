@@ -13,6 +13,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 const crypto = require('crypto');
 
 // ============================================================
@@ -163,7 +164,7 @@ module.exports = function(app, pool, opts) {
   (async () => {
     try {
       // cert_templates
-      await pool.query(`CREATE TABLE IF NOT EXISTS cert_templates (
+      await migrateQuery(pool, 'BlockchainCertificates', `CREATE TABLE IF NOT EXISTS cert_templates (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         name VARCHAR(255) NOT NULL,
@@ -179,7 +180,7 @@ module.exports = function(app, pool, opts) {
       `);
 
       // blockchain_certificates
-      await pool.query(`CREATE TABLE IF NOT EXISTS blockchain_certificates (
+      await migrateQuery(pool, 'BlockchainCertificates', `CREATE TABLE IF NOT EXISTS blockchain_certificates (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         student_id INT,
@@ -199,7 +200,7 @@ module.exports = function(app, pool, opts) {
       `);
 
       // blockchain_ledger
-      await pool.query(`CREATE TABLE IF NOT EXISTS blockchain_ledger (
+      await migrateQuery(pool, 'BlockchainCertificates', `CREATE TABLE IF NOT EXISTS blockchain_ledger (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         cert_id INT NOT NULL,
@@ -213,7 +214,7 @@ module.exports = function(app, pool, opts) {
       `);
 
       // cert_requests
-      await pool.query(`CREATE TABLE IF NOT EXISTS cert_requests (
+      await migrateQuery(pool, 'BlockchainCertificates', `CREATE TABLE IF NOT EXISTS cert_requests (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         student_id INT,
@@ -227,7 +228,7 @@ module.exports = function(app, pool, opts) {
       `);
 
       // cert_verification_log
-      await pool.query(`CREATE TABLE IF NOT EXISTS cert_verification_log (
+      await migrateQuery(pool, 'BlockchainCertificates', `CREATE TABLE IF NOT EXISTS cert_verification_log (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         cert_id INT,

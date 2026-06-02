@@ -13,6 +13,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 const formatDate = d => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const formatTime = d => d ? new Date(d).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
 const formatDateTime = d => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
@@ -92,8 +93,6 @@ module.exports = function calendarScheduler(app, pool, requireAuth, logger, audi
   // DATABASE MIGRATIONS
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { logger.warn('[CalendarScheduler] DB connect failed'); return; }
     try {
       // calendar_events already exists — extend it
       const extCols = [
@@ -105,9 +104,9 @@ module.exports = function calendarScheduler(app, pool, requireAuth, logger, audi
         `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) DEFAULT 'team'`,
         `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS attendee_emails TEXT[]`
       ];
-      for (const sql of extCols) { try { await c.query(sql); } catch(e) { /* column may already exist */ } }
+      for (const sql of extCols) { try { await migrateQuery(pool, 'CalendarScheduler', sql); } catch(e) { /* column may already exist */ } }
 
-      await c.query(`CREATE TABLE IF NOT EXISTS event_attendees (
+      await migrateQuery(pool, 'CalendarScheduler', `CREATE TABLE IF NOT EXISTS event_attendees (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         event_id INTEGER NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE,
         user_email VARCHAR(255) NOT NULL, response VARCHAR(20) DEFAULT 'pending',
@@ -121,23 +120,22 @@ module.exports = function calendarScheduler(app, pool, requireAuth, logger, audi
         `ALTER TABLE event_attendees ADD COLUMN IF NOT EXISTS responded_at TIMESTAMPTZ`,
         `ALTER TABLE event_attendees ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`
       ];
-      for (const sql of eaCols) { try { await c.query(sql); } catch(e2) { /* ok */ } }
-      await c.query(`CREATE TABLE IF NOT EXISTS event_reminders (
+      for (const sql of eaCols) { try { await migrateQuery(pool, 'CalendarScheduler', sql); } catch(e2) { /* ok */ } }
+      await migrateQuery(pool, 'CalendarScheduler', `CREATE TABLE IF NOT EXISTS event_reminders (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         event_id INTEGER NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE,
         reminder_at TIMESTAMPTZ NOT NULL, method VARCHAR(20) DEFAULT 'both',
         sent BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ea_tenant ON event_attendees(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ea_event ON event_attendees(event_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ea_email ON event_attendees(user_email)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_er_tenant ON event_reminders(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_er_event ON event_reminders(event_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ce_start ON calendar_events(start_time)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ce_tenant ON calendar_events(tenant_id)`);
+      await migrateQuery(pool, 'CalendarScheduler', `CREATE INDEX IF NOT EXISTS idx_ea_tenant ON event_attendees(tenant_id)`);
+      await migrateQuery(pool, 'CalendarScheduler', `CREATE INDEX IF NOT EXISTS idx_ea_event ON event_attendees(event_id)`);
+      await migrateQuery(pool, 'CalendarScheduler', `CREATE INDEX IF NOT EXISTS idx_ea_email ON event_attendees(user_email)`);
+      await migrateQuery(pool, 'CalendarScheduler', `CREATE INDEX IF NOT EXISTS idx_er_tenant ON event_reminders(tenant_id)`);
+      await migrateQuery(pool, 'CalendarScheduler', `CREATE INDEX IF NOT EXISTS idx_er_event ON event_reminders(event_id)`);
+      await migrateQuery(pool, 'CalendarScheduler', `CREATE INDEX IF NOT EXISTS idx_ce_start ON calendar_events(start_time)`);
+      await migrateQuery(pool, 'CalendarScheduler', `CREATE INDEX IF NOT EXISTS idx_ce_tenant ON calendar_events(tenant_id)`);
       logger.info({ msg: '[CalendarScheduler] Migrations applied' });
     } catch (e) { logger.error({ msg: '[CalendarScheduler] Migration error', error: e.message }); }
-    finally { c.release(); }
   })();
 
   // Nav helper

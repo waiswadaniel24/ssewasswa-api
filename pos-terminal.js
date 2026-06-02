@@ -13,6 +13,7 @@
 // ============================================================
 // MODULE ENTRY POINT
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function posTerminal(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -106,8 +107,6 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[POS] Cannot connect to DB for migrations'); return; }
     try {
       // Ensure retail_products columns
       const rpCols = [
@@ -127,7 +126,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
         { name: 'created_by', type: 'INTEGER' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of rpCols) { try { await c.query(`ALTER TABLE retail_products ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of rpCols) { try { await migrateQuery(pool, 'PosTerminal', `ALTER TABLE retail_products ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure retail_sales columns
       const rsCols = [
@@ -144,7 +143,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
         { name: 'notes', type: 'TEXT' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of rsCols) { try { await c.query(`ALTER TABLE retail_sales ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of rsCols) { try { await migrateQuery(pool, 'PosTerminal', `ALTER TABLE retail_sales ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure retail_sale_items columns
       const rsiCols = [
@@ -157,7 +156,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
         { name: 'total_price', type: 'NUMERIC(12,2) DEFAULT 0' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of rsiCols) { try { await c.query(`ALTER TABLE retail_sale_items ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of rsiCols) { try { await migrateQuery(pool, 'PosTerminal', `ALTER TABLE retail_sale_items ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure stock_adjustments columns
       const saCols = [
@@ -170,7 +169,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
         { name: 'performed_by', type: 'INTEGER' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of saCols) { try { await c.query(`ALTER TABLE stock_adjustments ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of saCols) { try { await migrateQuery(pool, 'PosTerminal', `ALTER TABLE stock_adjustments ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure stock_movements columns
       const smCols = [
@@ -183,7 +182,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
         { name: 'performed_by', type: 'INTEGER' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of smCols) { try { await c.query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of smCols) { try { await migrateQuery(pool, 'PosTerminal', `ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure stock_takes columns
       const stCols = [
@@ -194,7 +193,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
         { name: 'notes', type: 'TEXT' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of stCols) { try { await c.query(`ALTER TABLE stock_takes ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of stCols) { try { await migrateQuery(pool, 'PosTerminal', `ALTER TABLE stock_takes ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure stock_take_items columns
       const stiCols = [
@@ -206,7 +205,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
         { name: 'difference', type: 'INTEGER DEFAULT 0' },
         { name: 'notes', type: 'TEXT' }
       ];
-      for (const col of stiCols) { try { await c.query(`ALTER TABLE stock_take_items ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of stiCols) { try { await migrateQuery(pool, 'PosTerminal', `ALTER TABLE stock_take_items ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure stock_transfers columns
       const strCols = [
@@ -220,7 +219,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
         { name: 'notes', type: 'TEXT' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of strCols) { try { await c.query(`ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of strCols) { try { await migrateQuery(pool, 'PosTerminal', `ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure school_shop_sales columns
       const sssCols = [
@@ -231,7 +230,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
         { name: 'status', type: 'VARCHAR(20)' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of sssCols) { try { await c.query(`ALTER TABLE school_shop_sales ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of sssCols) { try { await migrateQuery(pool, 'PosTerminal', `ALTER TABLE school_shop_sales ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure supermarket_products columns
       const spCols = [
@@ -243,7 +242,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
         { name: 'is_active', type: 'BOOLEAN DEFAULT true' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of spCols) { try { await c.query(`ALTER TABLE supermarket_products ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of spCols) { try { await migrateQuery(pool, 'PosTerminal', `ALTER TABLE supermarket_products ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Ensure supermarket_daily_sales columns
       const sdsCols = [
@@ -254,24 +253,23 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
         { name: 'total_transactions', type: 'INTEGER DEFAULT 0' },
         { name: 'created_at', type: 'TIMESTAMPTZ DEFAULT NOW()' }
       ];
-      for (const col of sdsCols) { try { await c.query(`ALTER TABLE supermarket_daily_sales ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      for (const col of sdsCols) { try { await migrateQuery(pool, 'PosTerminal', `ALTER TABLE supermarket_daily_sales ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
 
       // Indexes
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_retail_products_tenant ON retail_products(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_retail_products_sku ON retail_products(sku)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_retail_products_cat ON retail_products(category)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_retail_sales_tenant ON retail_sales(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_retail_sales_receipt ON retail_sales(receipt_number)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_retail_sales_date ON retail_sales(created_at)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_retail_sale_items_tenant ON retail_sale_items(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_retail_sale_items_sale ON retail_sale_items(sale_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_stock_adjustments_tenant ON stock_adjustments(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_tenant ON stock_movements(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_stock_takes_tenant ON stock_takes(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_stock_transfers_tenant ON stock_transfers(tenant_id)`);
+      await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_retail_products_tenant ON retail_products(tenant_id)`);
+      await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_retail_products_sku ON retail_products(sku)`);
+      await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_retail_products_cat ON retail_products(category)`);
+      await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_retail_sales_tenant ON retail_sales(tenant_id)`);
+      await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_retail_sales_receipt ON retail_sales(receipt_number)`);
+      await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_retail_sales_date ON retail_sales(created_at)`);
+      await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_retail_sale_items_tenant ON retail_sale_items(tenant_id)`);
+      await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_retail_sale_items_sale ON retail_sale_items(sale_id)`);
+      await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_stock_adjustments_tenant ON stock_adjustments(tenant_id)`);
+      await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_stock_movements_tenant ON stock_movements(tenant_id)`);
+      await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_stock_takes_tenant ON stock_takes(tenant_id)`);
+      await migrateQuery(pool, 'PosTerminal', `CREATE INDEX IF NOT EXISTS idx_stock_transfers_tenant ON stock_transfers(tenant_id)`);
       console.log('[POS] Migrations applied successfully');
     } catch (e) { console.error('[POS] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

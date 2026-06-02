@@ -7,6 +7,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
 
   // ── inline fallbacks ──────────────────────────────────────
@@ -263,11 +264,8 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { console.error('[Invoicing] Cannot connect to DB for migrations'); return; }
-    try { for (const sql of migrations) await client.query(sql); console.log('[Invoicing] Migrations applied: ' + migrations.length + ' statements'); }
+    try { for (const sql of migrations) await migrateQuery(pool, 'InvoicingBilling', sql); console.log('[Invoicing] Migrations applied: ' + migrations.length + ' statements'); }
     catch (e) { console.error('[Invoicing] Migration error:', e.message); }
-    finally { client.release(); }
   })();
 
   // ── helper: navigation bar ───────────────────────────────
@@ -318,19 +316,17 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
     const prefix = `INV-${tid}-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
-      const result = await client.query(
+      await migrateQuery(pool, 'InvoicingBilling', 'BEGIN');
+      const result = await migrateQuery(pool, 'InvoicingBilling', 
         `SELECT COALESCE(MAX(CAST(SPLIT_PART(invoice_number, '-', 4) AS INTEGER)), 0) + 1 AS seq
          FROM invoices WHERE tenant_id = $1 AND invoice_number LIKE $2`, [tid, prefix + '%']
       );
       const seq = result.rows[0].seq;
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'InvoicingBilling', 'COMMIT');
       return `${prefix}-${String(seq).padStart(4, '0')}`;
     } catch (e) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'InvoicingBilling', 'ROLLBACK');
       throw e;
-    } finally {
-      client.release();
     }
   }
 
@@ -595,8 +591,8 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
 
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
-      const invResult = await client.query(
+      await migrateQuery(pool, 'InvoicingBilling', 'BEGIN');
+      const invResult = await migrateQuery(pool, 'InvoicingBilling', 
         `INSERT INTO invoices (tenant_id, invoice_number, client_name, client_email, client_phone, client_address,
           issue_date, due_date, subtotal, tax_rate, tax_amount, discount, total, status, notes, terms, created_by, currency)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
@@ -609,21 +605,19 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
       const invId = invResult.rows[0].id;
 
       for (const item of items) {
-        await client.query(
+        await migrateQuery(pool, 'InvoicingBilling', 
           `INSERT INTO invoice_items (tenant_id, invoice_id, item_name, description, quantity, unit_price, total)
            VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [tid, invId, item.name, item.description, item.quantity, item.unit_price, item.total]
         );
       }
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'InvoicingBilling', 'COMMIT');
       console.log('[Invoicing] Invoice created:', invoiceNumber, 'status:', status);
       res.redirect('/invoicing/view/' + invId);
     } catch (e) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'InvoicingBilling', 'ROLLBACK');
       console.error('[Invoicing] Create error:', e.message);
       return res.send('<div class="alert alert-danger">Error creating invoice: ' + esc(e.message) + '</div><a href="/invoicing/new" class="btn">Back</a>');
-    } finally {
-      client.release();
     }
   }));
 
@@ -888,8 +882,8 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
 
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
-      await client.query(
+      await migrateQuery(pool, 'InvoicingBilling', 'BEGIN');
+      await migrateQuery(pool, 'InvoicingBilling', 
         `UPDATE invoices SET client_name=$1, client_email=$2, client_phone=$3, client_address=$4,
           issue_date=$5, due_date=$6, currency=$7, tax_rate=$8, tax_amount=$9, discount=$10,
           subtotal=$11, total=$12, notes=$13, terms=$14, updated_at=NOW()
@@ -899,23 +893,21 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
           taxRateVal, taxAmount, discountVal, Math.round(subtotal * 100) / 100, total,
           (notes || '').trim() || null, (terms || '').trim() || null, id, tid]
       );
-      await client.query('DELETE FROM invoice_items WHERE invoice_id=$1 AND tenant_id=$2', [id, tid]);
+      await migrateQuery(pool, 'InvoicingBilling', 'DELETE FROM invoice_items WHERE invoice_id=$1 AND tenant_id=$2', [id, tid]);
       for (const item of items) {
-        await client.query(
+        await migrateQuery(pool, 'InvoicingBilling', 
           `INSERT INTO invoice_items (tenant_id, invoice_id, item_name, description, quantity, unit_price, total)
            VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [tid, id, item.name, item.description, item.quantity, item.unit_price, item.total]
         );
       }
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'InvoicingBilling', 'COMMIT');
       console.log('[Invoicing] Invoice updated:', inv.invoice_number);
       res.redirect('/invoicing/view/' + id);
     } catch (e) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'InvoicingBilling', 'ROLLBACK');
       console.error('[Invoicing] Update error:', e.message);
       return res.send('<div class="alert alert-danger">Error updating invoice: ' + esc(e.message) + '</div><a href="javascript:history.back()" class="btn">Back</a>');
-    } finally {
-      client.release();
     }
   }));
 
@@ -972,9 +964,9 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
 
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await migrateQuery(pool, 'InvoicingBilling', 'BEGIN');
 
-      await client.query(
+      await migrateQuery(pool, 'InvoicingBilling', 
         `INSERT INTO payments (tenant_id, invoice_id, amount, payment_method, reference, status, notes, received_by)
          VALUES ($1,$2,$3,$4,$5,'completed',$6,$7)`,
         [tid, id, payAmount, method, (reference || '').trim() || null, (pay_notes || '').trim() || null, user.id]
@@ -988,20 +980,18 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
         newStatus = 'partially_paid';
       }
 
-      await client.query(
+      await migrateQuery(pool, 'InvoicingBilling', 
         `UPDATE invoices SET paid_amount=$1, status=$2, updated_at=NOW() WHERE id=$3 AND tenant_id=$4`,
         [newPaid, newStatus, id, tid]
       );
 
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'InvoicingBilling', 'COMMIT');
       console.log('[Invoicing] Payment recorded. Invoice status:', newStatus);
       res.redirect('/invoicing/view/' + id);
     } catch (e) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'InvoicingBilling', 'ROLLBACK');
       console.error('[Invoicing] Payment error:', e.message);
       return res.send('<div class="alert alert-danger">Error recording payment: ' + esc(e.message) + '</div><a href="javascript:history.back()" class="btn">Back</a>');
-    } finally {
-      client.release();
     }
   }));
 
@@ -1267,8 +1257,8 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
 
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
-      const recResult = await client.query(
+      await migrateQuery(pool, 'InvoicingBilling', 'BEGIN');
+      const recResult = await migrateQuery(pool, 'InvoicingBilling', 
         `INSERT INTO recurring_invoices (tenant_id, client_name, client_email, client_phone, client_address,
           subtotal, tax_rate, tax_amount, discount, total, notes, terms, currency, frequency, next_date, is_active, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,true,$16) RETURNING id`,
@@ -1281,21 +1271,19 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
       const recId = recResult.rows[0].id;
 
       for (const item of items) {
-        await client.query(
+        await migrateQuery(pool, 'InvoicingBilling', 
           `INSERT INTO recurring_invoice_items (tenant_id, recurring_id, item_name, description, quantity, unit_price, total)
            VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [tid, recId, item.name, item.description, item.quantity, item.unit_price, item.total]
         );
       }
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'InvoicingBilling', 'COMMIT');
       console.log('[Invoicing] Recurring invoice created, id:', recId);
       res.redirect('/invoicing/recurring');
     } catch (e) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'InvoicingBilling', 'ROLLBACK');
       console.error('[Invoicing] Recurring create error:', e.message);
       return res.send('<div class="alert alert-danger">Error: ' + esc(e.message) + '</div><a href="javascript:history.back()" class="btn">Back</a>');
-    } finally {
-      client.release();
     }
   }));
 
@@ -1315,9 +1303,9 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
 
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await migrateQuery(pool, 'InvoicingBilling', 'BEGIN');
       const invoiceNumber = await generateInvoiceNumber(tid);
-      const invResult = await client.query(
+      const invResult = await migrateQuery(pool, 'InvoicingBilling', 
         `INSERT INTO invoices (tenant_id, invoice_number, client_name, client_email, client_phone, client_address,
           issue_date, due_date, subtotal, tax_rate, tax_amount, discount, total, status, notes, terms, created_by, currency)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'sent',$14,$15,$16,$17) RETURNING id`,
@@ -1329,7 +1317,7 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
       const invId = invResult.rows[0].id;
 
       for (const item of recItems) {
-        await client.query(
+        await migrateQuery(pool, 'InvoicingBilling', 
           `INSERT INTO invoice_items (tenant_id, invoice_id, item_name, description, quantity, unit_price, total)
            VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [tid, invId, item.item_name, item.description, item.quantity, item.unit_price, item.total]
@@ -1337,20 +1325,18 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
       }
 
       const newNextDate = addFrequency(rec.next_date || today(), rec.frequency);
-      await client.query(
+      await migrateQuery(pool, 'InvoicingBilling', 
         `UPDATE recurring_invoices SET last_generated=NOW(), next_date=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3`,
         [newNextDate, id, tid]
       );
 
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'InvoicingBilling', 'COMMIT');
       console.log('[Invoicing] Generated invoice:', invoiceNumber, 'from recurring:', id);
       res.redirect('/invoicing/view/' + invId);
     } catch (e) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'InvoicingBilling', 'ROLLBACK');
       console.error('[Invoicing] Generate error:', e.message);
       return res.send('<div class="alert alert-danger">Error: ' + esc(e.message) + '</div><a href="javascript:history.back()" class="btn">Back</a>');
-    } finally {
-      client.release();
     }
   }));
 

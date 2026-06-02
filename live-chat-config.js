@@ -13,6 +13,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
 const formatDateTime = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
 const relativeTime = (dateStr) => {
@@ -214,15 +215,13 @@ module.exports = function(app, pool, opts) {
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { logger.warn('[LiveChatConfig] Cannot connect to DB for migrations'); return; }
     try {
-      for (const sql of migrations) { try { await client.query(sql); } catch(e) { /* skip */ } }
-      for (const sql of seedData) { try { await client.query(sql); } catch(e) { /* skip */ } }
+      for (const sql of migrations) { try { await migrateQuery(pool, 'LiveChatConfig', sql); } catch(e) { /* skip */ } }
+      for (const sql of seedData) { try { await migrateQuery(pool, 'LiveChatConfig', sql); } catch(e) { /* skip */ } }
       logger.info({ msg: '[LiveChatConfig] Migrations and seed data applied', count: migrations.length });
     } catch (e) {
       logger.error({ msg: '[LiveChatConfig] Migration error', error: e.message });
-    } finally { client.release(); }
+    }
   })();
 
   // ============================================================

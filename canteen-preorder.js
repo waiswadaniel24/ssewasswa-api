@@ -6,6 +6,7 @@
  *           Order Dashboard, Dietary Preferences, Nutrition Dashboard, Canteen Wallet
  * Routes: 20+ • PostgreSQL • tenant_id scoped
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -134,7 +135,7 @@ module.exports = function(app, pool, opts) {
       'ALTER TABLE canteen_wallet ADD COLUMN IF NOT EXISTS balance NUMERIC(12,2) NOT NULL DEFAULT 0;',
       'ALTER TABLE canteen_wallet ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();',
     ];
-    for (const sql of alters) { try { await pool.query(sql); } catch (_) {} }
+    for (const sql of alters) { try { await migrateQuery(pool, 'CanteenPreorder', sql); } catch (_) {} }
 
     const indexes = [
       'CREATE INDEX IF NOT EXISTS idx_cmi_tenant ON canteen_menu_items(tenant_id);',
@@ -151,7 +152,7 @@ module.exports = function(app, pool, opts) {
       'CREATE INDEX IF NOT EXISTS idx_cw_tenant ON canteen_wallet(tenant_id);',
       'CREATE INDEX IF NOT EXISTS idx_cw_user ON canteen_wallet(user_id);',
     ];
-    for (const sql of indexes) { try { await pool.query(sql); } catch (_) {} }
+    for (const sql of indexes) { try { await migrateQuery(pool, 'CanteenPreorder', sql); } catch (_) {} }
   })();
 
   // ── Shared Navigation ──────────────────────────────────────────────────────

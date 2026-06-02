@@ -13,6 +13,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function feeInstallments(app, db, pool, renderPage, esc) {
 
   // ── inline fallbacks ──────────────────────────────────────
@@ -266,15 +267,13 @@ module.exports = function feeInstallments(app, db, pool, renderPage, esc) {
   ];
 
   (async () => {
-    const c = await pool.connect().catch(() => null);
     if (!c) return;
     try {
-      for (const sql of migrations) await c.query(sql);
+      for (const sql of migrations) await migrateQuery(pool, 'FeeInstallments', sql);
       console.log('[FeeInstallments] Migrations applied: ' + migrations.length + ' statements');
     } catch (e) {
       console.error('[FeeInstallments] Migration error:', e.message);
     }
-    finally { c.release(); }
   })();
 
   // ════════════════════════════════════════════════════════════

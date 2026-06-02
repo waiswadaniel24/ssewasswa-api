@@ -8,6 +8,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function budgetManager(app, db, pool, renderPage, esc) {
 
   // ── inline fallbacks & helpers ────────────────────────────
@@ -181,11 +182,10 @@ module.exports = function budgetManager(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ════════════════════════════════════════════════════════════
   (async function() {
-    var client = await pool.connect().catch(function() { return null; });
-    if (!client) { console.error('[BudgetManager] Cannot connect to DB for migrations'); return; }
+    // Using migrateQuery for concurrency-limited migrations
     try {
       // --- Table 1: budget_departments ---
-      await client.query('CREATE TABLE IF NOT EXISTS budget_departments (' +
+      await migrateQuery(pool, 'BudgetManager', 'CREATE TABLE IF NOT EXISTS budget_departments (' +
         'id SERIAL PRIMARY KEY,' +
         'tenant_id INTEGER NOT NULL DEFAULT 0,' +
         'name VARCHAR(150) NOT NULL,' +
@@ -216,11 +216,11 @@ module.exports = function budgetManager(app, db, pool, renderPage, esc) {
       ];
       for (var i = 0; i < deptCols.length; i++) {
         var parts = deptCols[i].split(' ');
-        try { await client.query('ALTER TABLE budget_departments ADD COLUMN IF NOT EXISTS ' + parts[0] + ' ' + deptCols[i].substring(parts[0].length)); } catch(e) {}
+        try { await migrateQuery(pool, 'BudgetManager', 'ALTER TABLE budget_departments ADD COLUMN IF NOT EXISTS ' + parts[0] + ' ' + deptCols[i].substring(parts[0].length)); } catch(e) {}
       }
 
       // --- Table 2: budget_expenses ---
-      await client.query('CREATE TABLE IF NOT EXISTS budget_expenses (' +
+      await migrateQuery(pool, 'BudgetManager', 'CREATE TABLE IF NOT EXISTS budget_expenses (' +
         'id SERIAL PRIMARY KEY,' +
         'tenant_id INTEGER NOT NULL DEFAULT 0,' +
         'department_id INTEGER,' +
@@ -267,11 +267,11 @@ module.exports = function budgetManager(app, db, pool, renderPage, esc) {
       ];
       for (var j = 0; j < expCols.length; j++) {
         var expParts = expCols[j].split(' ');
-        try { await client.query('ALTER TABLE budget_expenses ADD COLUMN IF NOT EXISTS ' + expParts[0] + ' ' + expCols[j].substring(expParts[0].length)); } catch(e) {}
+        try { await migrateQuery(pool, 'BudgetManager', 'ALTER TABLE budget_expenses ADD COLUMN IF NOT EXISTS ' + expParts[0] + ' ' + expCols[j].substring(expParts[0].length)); } catch(e) {}
       }
 
       // --- Table 3: budget_purchase_requests ---
-      await client.query('CREATE TABLE IF NOT EXISTS budget_purchase_requests (' +
+      await migrateQuery(pool, 'BudgetManager', 'CREATE TABLE IF NOT EXISTS budget_purchase_requests (' +
         'id SERIAL PRIMARY KEY,' +
         'tenant_id INTEGER NOT NULL DEFAULT 0,' +
         'department_id INTEGER,' +
@@ -318,28 +318,27 @@ module.exports = function budgetManager(app, db, pool, renderPage, esc) {
       ];
       for (var k = 0; k < prCols.length; k++) {
         var prParts = prCols[k].split(' ');
-        try { await client.query('ALTER TABLE budget_purchase_requests ADD COLUMN IF NOT EXISTS ' + prParts[0] + ' ' + prCols[k].substring(prParts[0].length)); } catch(e) {}
+        try { await migrateQuery(pool, 'BudgetManager', 'ALTER TABLE budget_purchase_requests ADD COLUMN IF NOT EXISTS ' + prParts[0] + ' ' + prCols[k].substring(prParts[0].length)); } catch(e) {}
       }
 
       // --- Indexes ---
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_dept_tenant ON budget_departments(tenant_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_dept_status ON budget_departments(tenant_id, status)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_dept_code ON budget_departments(code) WHERE code IS NOT NULL');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_exp_tenant ON budget_expenses(tenant_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_exp_dept ON budget_expenses(department_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_exp_status ON budget_expenses(tenant_id, status)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_exp_date ON budget_expenses(expense_date)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_exp_type ON budget_expenses(expense_type)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_exp_quarter ON budget_expenses(quarter)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_pr_tenant ON budget_purchase_requests(tenant_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_pr_dept ON budget_purchase_requests(department_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_pr_status ON budget_purchase_requests(tenant_id, status)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_pr_priority ON budget_purchase_requests(priority)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_bdg_pr_requested ON budget_purchase_requests(requested_by)');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_dept_tenant ON budget_departments(tenant_id)');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_dept_status ON budget_departments(tenant_id, status)');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_dept_code ON budget_departments(code) WHERE code IS NOT NULL');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_exp_tenant ON budget_expenses(tenant_id)');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_exp_dept ON budget_expenses(department_id)');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_exp_status ON budget_expenses(tenant_id, status)');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_exp_date ON budget_expenses(expense_date)');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_exp_type ON budget_expenses(expense_type)');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_exp_quarter ON budget_expenses(quarter)');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_pr_tenant ON budget_purchase_requests(tenant_id)');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_pr_dept ON budget_purchase_requests(department_id)');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_pr_status ON budget_purchase_requests(tenant_id, status)');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_pr_priority ON budget_purchase_requests(priority)');
+      await migrateQuery(pool, 'BudgetManager', 'CREATE INDEX IF NOT EXISTS idx_bdg_pr_requested ON budget_purchase_requests(requested_by)');
 
       console.log('[BudgetManager] Migrations applied successfully');
     } catch (e) { console.error('[BudgetManager] Migration error:', e.message); }
-    finally { client.release(); }
   })();
 
   // ════════════════════════════════════════════════════════════
@@ -892,10 +891,10 @@ module.exports = function budgetManager(app, db, pool, renderPage, esc) {
     // Use transaction for expense insert + department spent update
     var client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await migrateQuery(pool, 'BudgetManager', 'BEGIN');
 
       // Insert expense
-      var result = await client.query(
+      var result = await migrateQuery(pool, 'BudgetManager', 
         'INSERT INTO budget_expenses (tenant_id, department_id, expense_type, amount, expense_date, vendor,' +
         ' invoice_number, payment_method, payment_ref, status, quarter, academic_year, description, notes, created_by)' +
         ' VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,\'approved\',$10,$11,$12,$13,$14) RETURNING id',
@@ -903,19 +902,17 @@ module.exports = function budgetManager(app, db, pool, renderPage, esc) {
       );
 
       // Update department spent and remaining
-      await client.query(
+      await migrateQuery(pool, 'BudgetManager', 
         'UPDATE budget_departments SET spent = spent + $1, remaining = annual_budget - spent - committed - $1, updated_at = NOW()' +
         ' WHERE id = $2 AND tenant_id = $3',
         [amount, departmentId, tid]
       );
 
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'BudgetManager', 'COMMIT');
       req.session.flash = { type: 'success', msg: 'Expense of ' + fmtMoney(amount) + ' recorded successfully.' };
     } catch (err) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'BudgetManager', 'ROLLBACK');
       req.session.flash = { type: 'error', msg: 'Failed to save expense: ' + err.message };
-    } finally {
-      client.release();
     }
 
     res.redirect('/budget/expenses');
@@ -1299,13 +1296,13 @@ module.exports = function budgetManager(app, db, pool, renderPage, esc) {
 
     var client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await migrateQuery(pool, 'BudgetManager', 'BEGIN');
 
       if (action === 'approve') {
         var approveAmt = approvedAmount > 0 ? approvedAmount : Number(pr.total_amount || 0);
 
         // Update purchase request
-        await client.query(
+        await migrateQuery(pool, 'BudgetManager', 
           'UPDATE budget_purchase_requests SET status=\'approved\', approved_by=$1, approved_at=NOW(),' +
           ' approved_amount=$2, updated_at=NOW() WHERE id=$3 AND tenant_id=$4',
           [user.id, approveAmt, id, tid]
@@ -1313,31 +1310,29 @@ module.exports = function budgetManager(app, db, pool, renderPage, esc) {
 
         // Update department committed budget
         if (pr.department_id) {
-          await client.query(
+          await migrateQuery(pool, 'BudgetManager', 
             'UPDATE budget_departments SET committed = committed + $1, remaining = annual_budget - spent - committed - $1, updated_at = NOW()' +
             ' WHERE id = $2 AND tenant_id = $3',
             [approveAmt, pr.department_id, tid]
           );
         }
 
-        await client.query('COMMIT');
+        await migrateQuery(pool, 'BudgetManager', 'COMMIT');
         req.session.flash = { type: 'success', msg: 'Purchase request approved for ' + fmtMoney(approveAmt) + '. Committed budget updated.' };
       } else {
         // Reject
-        await client.query(
+        await migrateQuery(pool, 'BudgetManager', 
           'UPDATE budget_purchase_requests SET status=\'rejected\', approved_by=$1, approved_at=NOW(),' +
           ' rejection_reason=$2, updated_at=NOW() WHERE id=$3 AND tenant_id=$4',
           [user.id, rejectionReason, id, tid]
         );
 
-        await client.query('COMMIT');
+        await migrateQuery(pool, 'BudgetManager', 'COMMIT');
         req.session.flash = { type: 'success', msg: 'Purchase request rejected.' + (rejectionReason ? ' Reason: ' + rejectionReason : '') };
       }
     } catch (err) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'BudgetManager', 'ROLLBACK');
       req.session.flash = { type: 'error', msg: 'Failed to process request: ' + err.message };
-    } finally {
-      client.release();
     }
 
     res.redirect('/budget/purchase-requests');

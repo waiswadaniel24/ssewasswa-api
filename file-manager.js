@@ -13,6 +13,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 const CATEGORIES = ['Invoices','Receipts','Contracts','Reports','Policies','Letters','Certificates','Photos','Other'];
 
 function fileIcon(ext) {
@@ -176,11 +177,8 @@ module.exports = function fileManager(app, pool, requireAuth, logger, audit, not
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { logger.warn('[FileManager] Cannot connect to DB'); return; }
-    try { for (const sql of migrations) { try { await client.query(sql); } catch(e) { /* skip individual errors */ } } logger.info({ msg:'[FileManager] Migrations applied', count: migrations.length }); }
+    try { for (const sql of migrations) { try { await migrateQuery(pool, 'FileManager', sql); } catch(e) { /* skip individual errors */ } } logger.info({ msg:'[FileManager] Migrations applied', count: migrations.length }); }
     catch (e) { logger.error({ msg:'[FileManager] Migration error', error: e.message }); }
-    finally { client.release(); }
   })();
 
   // ============================================================

@@ -11,29 +11,30 @@
  *                      failed_attempts, tenant_id)
  */
 
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
   const esc = opts.esc;
 
   /* Auto-create tables */
   (async () => {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS login_attempts (
+      await migrateQuery(pool, 'LoginAttemptDashboard', `CREATE TABLE IF NOT EXISTS login_attempts (
         id SERIAL PRIMARY KEY, username TEXT, email TEXT, ip_address TEXT,
         user_agent TEXT, success BOOLEAN DEFAULT false, fail_reason TEXT,
         user_id INT, locked BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW(), tenant_id INT DEFAULT 1
       )`);
-      await pool.query(`CREATE TABLE IF NOT EXISTS account_lockouts (
+      await migrateQuery(pool, 'LoginAttemptDashboard', `CREATE TABLE IF NOT EXISTS account_lockouts (
         id SERIAL PRIMARY KEY, user_id INT, username TEXT, email TEXT,
         ip_address TEXT, lockout_reason TEXT,
         locked_at TIMESTAMPTZ DEFAULT NOW(), unlocked_at TIMESTAMPTZ,
         unlocked_by INT, is_active BOOLEAN DEFAULT true,
         failed_attempts INT DEFAULT 0, tenant_id INT DEFAULT 1
       )`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_la_tenant ON login_attempts(tenant_id)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_la_created ON login_attempts(created_at)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_al_tenant ON account_lockouts(tenant_id)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_al_active ON account_lockouts(is_active)`);
+      await migrateQuery(pool, 'LoginAttemptDashboard', `CREATE INDEX IF NOT EXISTS idx_la_tenant ON login_attempts(tenant_id)`);
+      await migrateQuery(pool, 'LoginAttemptDashboard', `CREATE INDEX IF NOT EXISTS idx_la_created ON login_attempts(created_at)`);
+      await migrateQuery(pool, 'LoginAttemptDashboard', `CREATE INDEX IF NOT EXISTS idx_al_tenant ON account_lockouts(tenant_id)`);
+      await migrateQuery(pool, 'LoginAttemptDashboard', `CREATE INDEX IF NOT EXISTS idx_al_active ON account_lockouts(is_active)`);
       console.log('[LoginSecurity] Tables ready');
     } catch(e) { console.warn('[LoginSecurity] Migration:', e.message); }
   })();

@@ -2,6 +2,7 @@
 // HUB ROUTES — Open Hub: Public marketplace & discovery portal
 // Comfort Zone — Multi-tenant SaaS Platform
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = (opts && opts.esc) || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = (opts && opts.renderPage) || ((t,c,u) => c);
@@ -130,7 +131,7 @@ module.exports = function(app, pool, opts) {
       )`
     ];
     for (const sql of tables) {
-      try { await pool.query(sql); } catch (e) { /* ignore */ }
+      try { await migrateQuery(pool, 'HubRoutes', sql); } catch (e) { /* ignore */ }
     }
 
     // Seed categories
@@ -143,11 +144,11 @@ module.exports = function(app, pool, opts) {
       { slug:'ngo', name:'NGO', icon:'🌍', color:'#2563eb' }
     ];
     for (const c of catSeed) {
-      await pool.query(`INSERT INTO hub_categories (slug,name,description,icon,color,sort_order) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (slug) DO NOTHING`,
+      await migrateQuery(pool, 'HubRoutes', `INSERT INTO hub_categories (slug,name,description,icon,color,sort_order) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (slug) DO NOTHING`,
         [c.slug, c.name, c.name + ' sector on Comfort Zone', c.icon, c.color, catSeed.indexOf(c)]).catch(() => {});
     }
     // Update tenant counts
-    await pool.query(`UPDATE hub_categories SET tenant_count = (SELECT COUNT(*) FROM hub_public_profiles WHERE category = hub_categories.slug)`).catch(() => {});
+    await migrateQuery(pool, 'HubRoutes', `UPDATE hub_categories SET tenant_count = (SELECT COUNT(*) FROM hub_public_profiles WHERE category = hub_categories.slug)`).catch(() => {});
   })().catch(e => console.error('[HubRoutes] Migration error:', e.message));
 
   // ============================================================

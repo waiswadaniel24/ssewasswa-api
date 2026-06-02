@@ -4,6 +4,7 @@
 // Automatically handles expired subscriptions: retry payment,
 // send reminders, downgrade after grace period, track dunning state.
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, ah, esc, renderPage, audit, notify, sendEmail, logger) {
   const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
 

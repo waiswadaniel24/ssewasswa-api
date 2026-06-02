@@ -13,6 +13,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
 const formatDateTime = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
 const fmtDur = (ms) => { if (!ms || ms < 0) return '—'; const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000); return h > 0 ? `${h}h ${m}m` : `${m}m`; };
@@ -125,11 +126,8 @@ module.exports = function workflowAutomation(app, pool, requireAuth, logger, aud
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { logger.warn('[WorkflowAutomation] Cannot connect to DB'); return; }
-    try { for (const sql of migrations) await client.query(sql); logger.info({ msg: '[WorkflowAutomation] Migrations applied', count: migrations.length }); }
+    try { for (const sql of migrations) await migrateQuery(pool, 'WorkflowAutomation', sql); logger.info({ msg: '[WorkflowAutomation] Migrations applied', count: migrations.length }); }
     catch (e) { logger.error({ msg: '[WorkflowAutomation] Migration error', error: e.message }); }
-    finally { client.release(); }
   })();
 
   // Nav helper

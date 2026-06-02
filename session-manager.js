@@ -7,6 +7,7 @@
  * opts: { esc, renderPage, ah, requireAuth, audit }
  */
 
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
   const esc =
     opts.esc ||
@@ -235,7 +236,7 @@ module.exports = function (app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         expires_at TIMESTAMPTZ
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'SessionManager', `
       CREATE TABLE IF NOT EXISTS login_history (
         id SERIAL PRIMARY KEY,
         tenant_id INT,
@@ -251,7 +252,7 @@ module.exports = function (app, pool, opts) {
         failure_reason TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'SessionManager', `
       CREATE TABLE IF NOT EXISTS suspicious_logins (
         id SERIAL PRIMARY KEY,
         tenant_id INT,
@@ -262,7 +263,7 @@ module.exports = function (app, pool, opts) {
         is_whitelisted BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'SessionManager', `
       CREATE TABLE IF NOT EXISTS session_policies (
         id SERIAL PRIMARY KEY,
         tenant_id INT UNIQUE,
@@ -275,17 +276,17 @@ module.exports = function (app, pool, opts) {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
     // Performance indexes (add missing columns first in case table was created by another module)
-    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`).catch(()=>{});
-    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS tenant_id INT`).catch(()=>{});
-    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS device_type VARCHAR(20)`).catch(()=>{});
-    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS browser VARCHAR(50)`).catch(()=>{});
-    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS os VARCHAR(50)`).catch(()=>{});
-    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS location VARCHAR(100)`).catch(()=>{});
-    await pool.query(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS last_activity TIMESTAMPTZ DEFAULT NOW()`).catch(()=>{});
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_us_tenant_active ON user_sessions(tenant_id, expires_at)`).catch(()=>{});
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_us_tenant_email ON user_sessions(tenant_id, user_email)`).catch(()=>{});
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_lh_tenant_created ON login_history(tenant_id, created_at DESC)`).catch(()=>{});
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sl_tenant_wl ON suspicious_logins(tenant_id, is_whitelisted)`).catch(()=>{});
+    await migrateQuery(pool, 'SessionManager', `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`).catch(()=>{});
+    await migrateQuery(pool, 'SessionManager', `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS tenant_id INT`).catch(()=>{});
+    await migrateQuery(pool, 'SessionManager', `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS device_type VARCHAR(20)`).catch(()=>{});
+    await migrateQuery(pool, 'SessionManager', `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS browser VARCHAR(50)`).catch(()=>{});
+    await migrateQuery(pool, 'SessionManager', `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS os VARCHAR(50)`).catch(()=>{});
+    await migrateQuery(pool, 'SessionManager', `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS location VARCHAR(100)`).catch(()=>{});
+    await migrateQuery(pool, 'SessionManager', `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS last_activity TIMESTAMPTZ DEFAULT NOW()`).catch(()=>{});
+    await migrateQuery(pool, 'SessionManager', `CREATE INDEX IF NOT EXISTS idx_us_tenant_active ON user_sessions(tenant_id, expires_at)`).catch(()=>{});
+    await migrateQuery(pool, 'SessionManager', `CREATE INDEX IF NOT EXISTS idx_us_tenant_email ON user_sessions(tenant_id, user_email)`).catch(()=>{});
+    await migrateQuery(pool, 'SessionManager', `CREATE INDEX IF NOT EXISTS idx_lh_tenant_created ON login_history(tenant_id, created_at DESC)`).catch(()=>{});
+    await migrateQuery(pool, 'SessionManager', `CREATE INDEX IF NOT EXISTS idx_sl_tenant_wl ON suspicious_logins(tenant_id, is_whitelisted)`).catch(()=>{});
   })().catch((err) => console.error('[session-manager] Table creation error:', err));
 
   // ===========================================================================

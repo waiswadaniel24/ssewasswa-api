@@ -5,6 +5,7 @@
  */
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
 
   /* ── Helper extraction ─────────────────────────────────────────────── */

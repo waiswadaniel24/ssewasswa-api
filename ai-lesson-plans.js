@@ -4,6 +4,7 @@
  *   Template Gallery, Standards Alignment, Export/Print, Feedback, Reflection
  */
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -383,7 +384,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_lpa_shared ON lesson_plans_ai(shared);
       CREATE INDEX IF NOT EXISTS idx_lpa_token ON lesson_plans_ai(share_token);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'AiLessonPlans', `
       CREATE TABLE IF NOT EXISTS lesson_plan_schedule (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -399,7 +400,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_lps_date ON lesson_plan_schedule(scheduled_date);
       CREATE INDEX IF NOT EXISTS idx_lps_plan ON lesson_plan_schedule(lesson_plan_id);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'AiLessonPlans', `
       CREATE TABLE IF NOT EXISTS lesson_plan_comments (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -413,7 +414,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_lpc_plan ON lesson_plan_comments(lesson_plan_id);
       CREATE INDEX IF NOT EXISTS idx_lpc_user ON lesson_plan_comments(user_id);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'AiLessonPlans', `
       CREATE TABLE IF NOT EXISTS lesson_standards (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -426,7 +427,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_ls_subject ON lesson_standards(subject);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_ls_code_tenant ON lesson_standards(standard_code, tenant_id);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'AiLessonPlans', `
       CREATE TABLE IF NOT EXISTS lesson_standards_map (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -438,7 +439,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_lsm_plan ON lesson_standards_map(lesson_plan_id);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_lsm_unique ON lesson_standards_map(lesson_plan_id, standard_id);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'AiLessonPlans', `
       CREATE TABLE IF NOT EXISTS lesson_reflections (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

@@ -12,6 +12,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc;
   const renderPage = opts.renderPage || ((title, body, user) => body);
@@ -274,11 +275,11 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_recycle_bin_entity ON recycle_bin(entity_type, entity_id);
       CREATE INDEX IF NOT EXISTS idx_rb_settings_school ON recycle_bin_settings(school_id);
     `;
-    await pool.query(ddl);
+    await migrateQuery(pool, 'RecycleBin', ddl);
 
     // Seed default settings for each entity type
     for (const et of ENTITY_TYPES) {
-      await pool.query(`
+      await migrateQuery(pool, 'RecycleBin', `
         INSERT INTO recycle_bin_settings (school_id, entity_type, retention_days, auto_purge, max_items)
         VALUES (1, $1, 30, false, 1000)
         ON CONFLICT (school_id, entity_type) DO NOTHING

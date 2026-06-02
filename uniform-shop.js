@@ -4,6 +4,7 @@
  * Features: Product Catalog, Shopping Cart, Checkout, Order Management,
  *           Stock Management, Sales Reports with SVG charts
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -244,7 +245,7 @@ module.exports = function(app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'UniformShop', `
       CREATE TABLE IF NOT EXISTS shop_orders (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 1,
@@ -258,7 +259,7 @@ module.exports = function(app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'UniformShop', `
       CREATE TABLE IF NOT EXISTS shop_order_items (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 1,
@@ -270,7 +271,7 @@ module.exports = function(app, pool, opts) {
         quantity INT NOT NULL DEFAULT 1,
         subtotal NUMERIC(10,2) NOT NULL DEFAULT 0
       )`);
-    await pool.query(`
+    await migrateQuery(pool, 'UniformShop', `
       CREATE TABLE IF NOT EXISTS shop_stock_history (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 1,
@@ -282,12 +283,12 @@ module.exports = function(app, pool, opts) {
         user_id INT DEFAULT NULL
       )`);
     // Indexes
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sp_tenant ON shop_products(tenant_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_so_tenant ON shop_orders(tenant_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_soi_tenant ON shop_order_items(tenant_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ssh_tenant ON shop_stock_history(tenant_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_so_user ON shop_orders(user_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_so_status ON shop_orders(status)`);
+    await migrateQuery(pool, 'UniformShop', `CREATE INDEX IF NOT EXISTS idx_sp_tenant ON shop_products(tenant_id)`);
+    await migrateQuery(pool, 'UniformShop', `CREATE INDEX IF NOT EXISTS idx_so_tenant ON shop_orders(tenant_id)`);
+    await migrateQuery(pool, 'UniformShop', `CREATE INDEX IF NOT EXISTS idx_soi_tenant ON shop_order_items(tenant_id)`);
+    await migrateQuery(pool, 'UniformShop', `CREATE INDEX IF NOT EXISTS idx_ssh_tenant ON shop_stock_history(tenant_id)`);
+    await migrateQuery(pool, 'UniformShop', `CREATE INDEX IF NOT EXISTS idx_so_user ON shop_orders(user_id)`);
+    await migrateQuery(pool, 'UniformShop', `CREATE INDEX IF NOT EXISTS idx_so_status ON shop_orders(status)`);
   })();
 
   // ═══════════════════════════════════════════════════════

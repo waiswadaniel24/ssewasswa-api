@@ -4,6 +4,7 @@
  *           audit trail export, retention management, global search.
  */
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -113,7 +114,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_rl_tenant ON data_retention_log(tenant_id);
       CREATE INDEX IF NOT EXISTS idx_rb_expires ON data_recycle_bin(expires_at);
     `;
-    await pool.query(ddl);
+    await migrateQuery(pool, 'DataArchive', ddl);
     console.log('[data-archive] Tables ready');
   })().catch(e => console.error('[data-archive] Migration error:', e.message));
 

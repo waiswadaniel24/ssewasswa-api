@@ -4,6 +4,7 @@
 // practice problems, learning style adaptation, progress tracking.
 // 12+ routes, PostgreSQL-backed, tenant-aware.
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT } = opts;
   const P = '#4f46e5', GRAY = '#6b7280';
@@ -26,7 +27,7 @@ module.exports = function(app, pool, opts) {
   // ─── Database Migration ──────────────────────────────────
   (async () => {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS ai_tutor_sessions (
+      await migrateQuery(pool, 'AiTutor', `CREATE TABLE IF NOT EXISTS ai_tutor_sessions (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         student_id INT NOT NULL,
@@ -44,7 +45,7 @@ module.exports = function(app, pool, opts) {
     } catch(e) { console.warn('[AI-Tutor] Warn:', e.message); }
 
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS ai_concepts (
+      await migrateQuery(pool, 'AiTutor', `CREATE TABLE IF NOT EXISTS ai_concepts (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         subject VARCHAR(100),
@@ -59,7 +60,7 @@ module.exports = function(app, pool, opts) {
     } catch(e) { console.warn('[AI-Tutor] Warn:', e.message); }
 
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS ai_tutor_progress (
+      await migrateQuery(pool, 'AiTutor', `CREATE TABLE IF NOT EXISTS ai_tutor_progress (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         student_id INT NOT NULL,

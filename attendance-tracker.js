@@ -13,6 +13,7 @@
 // ============================================================
 // MODULE ENTRY POINT
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function attendanceTracker(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -80,10 +81,8 @@ module.exports = function attendanceTracker(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Attendance] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS attendance_records (
+      await migrateQuery(pool, 'AttendanceTracker', `CREATE TABLE IF NOT EXISTS attendance_records (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         person_id INTEGER NOT NULL, person_type VARCHAR(20) DEFAULT 'student',
         person_name VARCHAR(255), date DATE NOT NULL, check_in TIME, check_out TIME,
@@ -91,13 +90,13 @@ module.exports = function attendanceTracker(app, db, pool, renderPage, esc) {
         location TEXT, notes TEXT, verified_by INTEGER,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS attendance_sessions (
+      await migrateQuery(pool, 'AttendanceTracker', `CREATE TABLE IF NOT EXISTS attendance_sessions (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255), session_date DATE NOT NULL, session_type VARCHAR(50) DEFAULT 'morning',
         created_by INTEGER, qr_token VARCHAR(100) UNIQUE, is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS attendance_exceptions (
+      await migrateQuery(pool, 'AttendanceTracker', `CREATE TABLE IF NOT EXISTS attendance_exceptions (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         person_id INTEGER, person_type VARCHAR(20), start_date DATE, end_date DATE,
         reason TEXT, type VARCHAR(20) DEFAULT 'leave', approved_by INTEGER,
@@ -105,26 +104,25 @@ module.exports = function attendanceTracker(app, db, pool, renderPage, esc) {
       )`);
       // ALTER TABLE IF NOT EXISTS — attendance_records
       const arCols = ['person_id','person_type','person_name','date','check_in','check_out','status','method','location','notes','verified_by'];
-      for (const col of arCols) { try { await c.query(`ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS ${col} ${col==='date'?'DATE':col==='check_in'||col==='check_out'?'TIME':col==='verified_by'||col==='person_id'?'INTEGER':'TEXT'}`); } catch(e){} }
+      for (const col of arCols) { try { await migrateQuery(pool, 'AttendanceTracker', `ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS ${col} ${col==='date'?'DATE':col==='check_in'||col==='check_out'?'TIME':col==='verified_by'||col==='person_id'?'INTEGER':'TEXT'}`); } catch(e){} }
       // ALTER TABLE IF NOT EXISTS — attendance_sessions
       const asCols = ['name','session_date','session_type','created_by','qr_token','is_active'];
-      for (const col of asCols) { try { await c.query(`ALTER TABLE attendance_sessions ADD COLUMN IF NOT EXISTS ${col} ${col==='session_date'?'DATE':col==='created_by'?'INTEGER':col==='is_active'?'BOOLEAN DEFAULT true':'TEXT'}`); } catch(e){} }
+      for (const col of asCols) { try { await migrateQuery(pool, 'AttendanceTracker', `ALTER TABLE attendance_sessions ADD COLUMN IF NOT EXISTS ${col} ${col==='session_date'?'DATE':col==='created_by'?'INTEGER':col==='is_active'?'BOOLEAN DEFAULT true':'TEXT'}`); } catch(e){} }
       // ALTER TABLE IF NOT EXISTS — attendance_exceptions
       const aeCols = ['person_id','person_type','start_date','end_date','reason','type','approved_by','status'];
-      for (const col of aeCols) { try { await c.query(`ALTER TABLE attendance_exceptions ADD COLUMN IF NOT EXISTS ${col} ${col==='start_date'||col==='end_date'?'DATE':col==='person_id'||col==='approved_by'?'INTEGER':'TEXT'}`); } catch(e){} }
+      for (const col of aeCols) { try { await migrateQuery(pool, 'AttendanceTracker', `ALTER TABLE attendance_exceptions ADD COLUMN IF NOT EXISTS ${col} ${col==='start_date'||col==='end_date'?'DATE':col==='person_id'||col==='approved_by'?'INTEGER':'TEXT'}`); } catch(e){} }
       // Indexes
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ar_tenant ON attendance_records(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ar_date ON attendance_records(date)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ar_status ON attendance_records(tenant_id, status)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_as_tenant ON attendance_sessions(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_as_date ON attendance_sessions(session_date)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_as_status ON attendance_sessions(tenant_id, is_active)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ae_tenant ON attendance_exceptions(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ae_date ON attendance_exceptions(start_date)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ae_status ON attendance_exceptions(tenant_id, status)`);
+      await migrateQuery(pool, 'AttendanceTracker', `CREATE INDEX IF NOT EXISTS idx_ar_tenant ON attendance_records(tenant_id)`);
+      await migrateQuery(pool, 'AttendanceTracker', `CREATE INDEX IF NOT EXISTS idx_ar_date ON attendance_records(date)`);
+      await migrateQuery(pool, 'AttendanceTracker', `CREATE INDEX IF NOT EXISTS idx_ar_status ON attendance_records(tenant_id, status)`);
+      await migrateQuery(pool, 'AttendanceTracker', `CREATE INDEX IF NOT EXISTS idx_as_tenant ON attendance_sessions(tenant_id)`);
+      await migrateQuery(pool, 'AttendanceTracker', `CREATE INDEX IF NOT EXISTS idx_as_date ON attendance_sessions(session_date)`);
+      await migrateQuery(pool, 'AttendanceTracker', `CREATE INDEX IF NOT EXISTS idx_as_status ON attendance_sessions(tenant_id, is_active)`);
+      await migrateQuery(pool, 'AttendanceTracker', `CREATE INDEX IF NOT EXISTS idx_ae_tenant ON attendance_exceptions(tenant_id)`);
+      await migrateQuery(pool, 'AttendanceTracker', `CREATE INDEX IF NOT EXISTS idx_ae_date ON attendance_exceptions(start_date)`);
+      await migrateQuery(pool, 'AttendanceTracker', `CREATE INDEX IF NOT EXISTS idx_ae_status ON attendance_exceptions(tenant_id, status)`);
       console.log('[Attendance] Migrations applied successfully');
     } catch (e) { console.error('[Attendance] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

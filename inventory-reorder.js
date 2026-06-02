@@ -10,6 +10,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function inventoryReorder(app, db, pool, renderPage, esc) {
 
   // ── inline fallbacks ──────────────────────────────────────
@@ -174,13 +175,10 @@ module.exports = function inventoryReorder(app, db, pool, renderPage, esc) {
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { console.error('[InventoryReorder] Cannot connect to DB for migrations'); return; }
     try {
-      for (const sql of migrations) await client.query(sql);
+      for (const sql of migrations) await migrateQuery(pool, 'InventoryReorder', sql);
       console.log('[InventoryReorder] Migrations applied: ' + migrations.length + ' statements');
     } catch (e) { console.error('[InventoryReorder] Migration error:', e.message); }
-    finally { client.release(); }
   })();
 
   // ── helper: sync stock from inventory_items ───────────────

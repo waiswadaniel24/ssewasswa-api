@@ -13,6 +13,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 const formatDate = d => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const formatDateTime = d => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 
@@ -152,10 +153,8 @@ module.exports = function templateLibrary(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.warn('[TemplateLibrary] DB connect failed'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS templates (
+      await migrateQuery(pool, 'TemplateLibrary', `CREATE TABLE IF NOT EXISTS templates (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL,
@@ -182,20 +181,18 @@ module.exports = function templateLibrary(app, db, pool, renderPage, esc) {
         'version INTEGER', 'tags TEXT[]', 'created_at TIMESTAMPTZ', 'updated_at TIMESTAMPTZ'
       ];
       for (const col of alterCols) {
-        try { await c.query(`ALTER TABLE templates ADD COLUMN IF NOT EXISTS ${col}`); } catch (e) {}
+        try { await migrateQuery(pool, 'TemplateLibrary', `ALTER TABLE templates ADD COLUMN IF NOT EXISTS ${col}`); } catch (e) {}
       }
       // Indexes
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_tpl_tenant ON templates(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_tpl_category ON templates(category)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_tpl_type ON templates(type)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_tpl_active ON templates(is_active)`);
+      await migrateQuery(pool, 'TemplateLibrary', `CREATE INDEX IF NOT EXISTS idx_tpl_tenant ON templates(tenant_id)`);
+      await migrateQuery(pool, 'TemplateLibrary', `CREATE INDEX IF NOT EXISTS idx_tpl_category ON templates(category)`);
+      await migrateQuery(pool, 'TemplateLibrary', `CREATE INDEX IF NOT EXISTS idx_tpl_type ON templates(type)`);
+      await migrateQuery(pool, 'TemplateLibrary', `CREATE INDEX IF NOT EXISTS idx_tpl_active ON templates(is_active)`);
       // Unique constraint for ON CONFLICT in seed (tenant_id, name)
-      try { await c.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tpl_tenant_name ON templates(tenant_id, name)`); } catch (e) {}
+      try { await migrateQuery(pool, 'TemplateLibrary', `CREATE UNIQUE INDEX IF NOT EXISTS idx_tpl_tenant_name ON templates(tenant_id, name)`); } catch (e) {}
       console.log('[TemplateLibrary] Migrations applied');
     } catch (e) {
       console.error('[TemplateLibrary] Migration error:', e.message);
-    } finally {
-      c.release();
     }
 
     // ============================================================

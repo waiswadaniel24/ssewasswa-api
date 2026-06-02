@@ -4,6 +4,7 @@
 // Provides email verification via 6-digit codes, status checking,
 // and a middleware to require verified emails for certain actions.
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts = {}) {
   const esc = opts.esc || (s => String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])));
   const sendEmail = opts.sendEmail || (() => {});
@@ -25,7 +26,7 @@ module.exports = function(app, pool, opts = {}) {
   // ============================================================
   (async () => {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS email_verifications (
+      await migrateQuery(pool, 'EmailVerification', `CREATE TABLE IF NOT EXISTS email_verifications (
         id SERIAL PRIMARY KEY,
         email TEXT NOT NULL,
         code VARCHAR(6) NOT NULL,
@@ -33,9 +34,9 @@ module.exports = function(app, pool, opts = {}) {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         expires_at TIMESTAMPTZ NOT NULL
       )`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_email_ver_email ON email_verifications(email)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_email_ver_email_code ON email_verifications(email, code)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_email_ver_expires ON email_verifications(expires_at)`);
+      await migrateQuery(pool, 'EmailVerification', `CREATE INDEX IF NOT EXISTS idx_email_ver_email ON email_verifications(email)`);
+      await migrateQuery(pool, 'EmailVerification', `CREATE INDEX IF NOT EXISTS idx_email_ver_email_code ON email_verifications(email, code)`);
+      await migrateQuery(pool, 'EmailVerification', `CREATE INDEX IF NOT EXISTS idx_email_ver_expires ON email_verifications(expires_at)`);
       console.log('[EmailVerification] Migrations applied');
     } catch (e) {
       console.error('[EmailVerification] Migration error:', e.message);

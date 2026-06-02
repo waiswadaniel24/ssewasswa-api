@@ -3,6 +3,7 @@
  * Complete module for managing student elections, candidates, voting, results, and quick polls.
  */
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -28,7 +29,7 @@ module.exports = function(app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'SchoolElections', `
       CREATE TABLE IF NOT EXISTS election_candidates (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
@@ -42,7 +43,7 @@ module.exports = function(app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'SchoolElections', `
       CREATE TABLE IF NOT EXISTS election_votes (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
@@ -55,7 +56,7 @@ module.exports = function(app, pool, opts) {
         UNIQUE(voter_id, election_id, position)
       );
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'SchoolElections', `
       CREATE TABLE IF NOT EXISTS school_polls (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
@@ -70,7 +71,7 @@ module.exports = function(app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'SchoolElections', `
       CREATE TABLE IF NOT EXISTS poll_votes (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
@@ -80,11 +81,11 @@ module.exports = function(app, pool, opts) {
         voted_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_elections_tenant ON elections(tenant_id);`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_candidates_tenant ON election_candidates(tenant_id);`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_election_votes_tenant ON election_votes(tenant_id);`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_polls_tenant ON school_polls(tenant_id);`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_poll_votes_tenant ON poll_votes(tenant_id);`);
+    await migrateQuery(pool, 'SchoolElections', `CREATE INDEX IF NOT EXISTS idx_elections_tenant ON elections(tenant_id);`);
+    await migrateQuery(pool, 'SchoolElections', `CREATE INDEX IF NOT EXISTS idx_candidates_tenant ON election_candidates(tenant_id);`);
+    await migrateQuery(pool, 'SchoolElections', `CREATE INDEX IF NOT EXISTS idx_election_votes_tenant ON election_votes(tenant_id);`);
+    await migrateQuery(pool, 'SchoolElections', `CREATE INDEX IF NOT EXISTS idx_school_polls_tenant ON school_polls(tenant_id);`);
+    await migrateQuery(pool, 'SchoolElections', `CREATE INDEX IF NOT EXISTS idx_poll_votes_tenant ON poll_votes(tenant_id);`);
   })();
 
   // ─── SVG Chart helpers ─────────────────────────────────────────────────────

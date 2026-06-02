@@ -14,6 +14,7 @@
  * Routes: 15 total under /school/reports
  * Tables: visual_reports, report_schedules, report_run_history (auto-created)
  */
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const tenantId = (req) => req.session?.user?.tenant_id || 0;

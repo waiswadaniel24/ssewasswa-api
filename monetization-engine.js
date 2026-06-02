@@ -10,6 +10,7 @@
 // ============================================================
 // === DATABASE MIGRATIONS ===
 // ============================================================
+const { migrateQuery } = require('./db');
 const MONETIZATION_MIGRATIONS = [
   // Ad Banner Management
   `CREATE TABLE IF NOT EXISTS ad_banners (

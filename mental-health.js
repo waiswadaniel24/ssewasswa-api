@@ -4,6 +4,7 @@
  *           Crisis Alert, Sleep Tracker, Gratitude Journal, Counsellor Dashboard, Breathing Exercise
  */
 
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const renderPage = opts.renderPage || ((t, c, u) => c);
@@ -305,7 +306,7 @@ module.exports = function (app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_mood_tenant_user ON mood_checkins(tenant_id, user_id);
       CREATE INDEX IF NOT EXISTS idx_mood_date ON mood_checkins(checkin_date);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'MentalHealth', `
       CREATE TABLE IF NOT EXISTS wellness_resources (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
@@ -322,7 +323,7 @@ module.exports = function (app, pool, opts) {
       );
       CREATE INDEX IF NOT EXISTS idx_wr_tenant_cat ON wellness_resources(tenant_id, category);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'MentalHealth', `
       CREATE TABLE IF NOT EXISTS counsellor_bookings (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
@@ -338,7 +339,7 @@ module.exports = function (app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_cb_tenant_counsellor ON counsellor_bookings(tenant_id, counsellor_id);
       CREATE INDEX IF NOT EXISTS idx_cb_student ON counsellor_bookings(student_id);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'MentalHealth', `
       CREATE TABLE IF NOT EXISTS anonymous_reports (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
@@ -352,7 +353,7 @@ module.exports = function (app, pool, opts) {
       );
       CREATE INDEX IF NOT EXISTS idx_ar_tenant ON anonymous_reports(tenant_id);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'MentalHealth', `
       CREATE TABLE IF NOT EXISTS sleep_logs (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
@@ -366,7 +367,7 @@ module.exports = function (app, pool, opts) {
       );
       CREATE INDEX IF NOT EXISTS idx_sleep_tenant_user ON sleep_logs(tenant_id, user_id);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'MentalHealth', `
       CREATE TABLE IF NOT EXISTS gratitude_entries (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
@@ -380,7 +381,7 @@ module.exports = function (app, pool, opts) {
       );
       CREATE INDEX IF NOT EXISTS idx_grat_tenant_user ON gratitude_entries(tenant_id, user_id);
     `);
-    await pool.query(`
+    await migrateQuery(pool, 'MentalHealth', `
       CREATE TABLE IF NOT EXISTS crisis_alerts (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,

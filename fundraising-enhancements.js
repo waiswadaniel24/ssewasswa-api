@@ -17,6 +17,7 @@
 //        Milestones, Testimonials, Impact Tracking, Category API
 // ============================================================
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireFundraisingSubscription, renderPage, esc, notify, notifyAll, sendEmail, sendSMS, audit) {
   const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
 

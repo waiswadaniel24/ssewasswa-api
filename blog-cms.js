@@ -5,6 +5,7 @@
 // ============================================================
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function blogCms(app, db, pool, renderPage, esc) {
   // -- inline helpers ---------------------------------------------------
   const requireAuth = (req, res, next) => {
@@ -117,10 +118,8 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Blog] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS blog_posts (
+      await migrateQuery(pool, 'BlogCms', `CREATE TABLE IF NOT EXISTS blog_posts (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         title VARCHAR(255) NOT NULL, slug VARCHAR(255) UNIQUE,
         content TEXT, excerpt TEXT, cover_image TEXT,
@@ -131,13 +130,13 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
         published_at TIMESTAMPTZ, scheduled_at TIMESTAMPTZ,
         view_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS blog_categories (
+      await migrateQuery(pool, 'BlogCms', `CREATE TABLE IF NOT EXISTS blog_categories (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(100) NOT NULL, slug VARCHAR(100), description TEXT,
         color VARCHAR(20) DEFAULT '#3b82f6', post_count INTEGER DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS blog_comments (
+      await migrateQuery(pool, 'BlogCms', `CREATE TABLE IF NOT EXISTS blog_comments (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         post_id INTEGER NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE,
         author_name VARCHAR(255), author_email VARCHAR(255),
@@ -156,35 +155,34 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
         ['view_count', 'INTEGER DEFAULT 0'],
         ['created_at', 'TIMESTAMPTZ DEFAULT NOW()'], ['updated_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of postCols) { try { await c.query(`ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
+      for (const [col, def] of postCols) { try { await migrateQuery(pool, 'BlogCms', `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
       // ALTER TABLE — blog_categories
       const catCols = [
         ['name', "VARCHAR(100) NOT NULL DEFAULT ''"], ['slug', 'VARCHAR(100)'],
         ['description', 'TEXT'], ['color', "VARCHAR(20) DEFAULT '#3b82f6'"],
         ['post_count', 'INTEGER DEFAULT 0'], ['created_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of catCols) { try { await c.query(`ALTER TABLE blog_categories ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
+      for (const [col, def] of catCols) { try { await migrateQuery(pool, 'BlogCms', `ALTER TABLE blog_categories ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
       // ALTER TABLE — blog_comments
       const commentCols = [
         ['author_name', 'VARCHAR(255)'], ['author_email', 'VARCHAR(255)'],
         ['content', "TEXT NOT NULL DEFAULT ''"], ['status', "VARCHAR(20) DEFAULT 'pending'"],
         ['created_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
-      for (const [col, def] of commentCols) { try { await c.query(`ALTER TABLE blog_comments ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
+      for (const [col, def] of commentCols) { try { await migrateQuery(pool, 'BlogCms', `ALTER TABLE blog_comments ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
       // Indexes
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_bp_tenant ON blog_posts(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_bp_status ON blog_posts(tenant_id, status)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_bp_slug ON blog_posts(slug)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_bp_category ON blog_posts(tenant_id, category)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_bp_published ON blog_posts(tenant_id, published_at DESC)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_bc_tenant ON blog_categories(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_bc_slug ON blog_categories(slug)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_bcm_tenant ON blog_comments(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_bcm_post ON blog_comments(post_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_bcm_status ON blog_comments(tenant_id, status)`);
+      await migrateQuery(pool, 'BlogCms', `CREATE INDEX IF NOT EXISTS idx_bp_tenant ON blog_posts(tenant_id)`);
+      await migrateQuery(pool, 'BlogCms', `CREATE INDEX IF NOT EXISTS idx_bp_status ON blog_posts(tenant_id, status)`);
+      await migrateQuery(pool, 'BlogCms', `CREATE INDEX IF NOT EXISTS idx_bp_slug ON blog_posts(slug)`);
+      await migrateQuery(pool, 'BlogCms', `CREATE INDEX IF NOT EXISTS idx_bp_category ON blog_posts(tenant_id, category)`);
+      await migrateQuery(pool, 'BlogCms', `CREATE INDEX IF NOT EXISTS idx_bp_published ON blog_posts(tenant_id, published_at DESC)`);
+      await migrateQuery(pool, 'BlogCms', `CREATE INDEX IF NOT EXISTS idx_bc_tenant ON blog_categories(tenant_id)`);
+      await migrateQuery(pool, 'BlogCms', `CREATE INDEX IF NOT EXISTS idx_bc_slug ON blog_categories(slug)`);
+      await migrateQuery(pool, 'BlogCms', `CREATE INDEX IF NOT EXISTS idx_bcm_tenant ON blog_comments(tenant_id)`);
+      await migrateQuery(pool, 'BlogCms', `CREATE INDEX IF NOT EXISTS idx_bcm_post ON blog_comments(post_id)`);
+      await migrateQuery(pool, 'BlogCms', `CREATE INDEX IF NOT EXISTS idx_bcm_status ON blog_comments(tenant_id, status)`);
       console.log('[Blog] Migrations applied successfully');
     } catch (e) { console.error('[Blog] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // -- ROUTE 1: GET /blog — Public blog listing -------------------------

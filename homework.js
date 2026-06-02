@@ -10,6 +10,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis }) => {
 
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -45,10 +46,8 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
 
   // ─── Database Migrations ──────────────────────────────────
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Homework] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS homework_assignments (
+      await migrateQuery(pool, 'Homework', `CREATE TABLE IF NOT EXISTS homework_assignments (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         title VARCHAR(255) NOT NULL, description TEXT,
         subject_id INTEGER, class_id INTEGER, teacher_id INTEGER,
@@ -59,7 +58,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS homework_submissions (
+      await migrateQuery(pool, 'Homework', `CREATE TABLE IF NOT EXISTS homework_submissions (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         assignment_id INTEGER NOT NULL, student_id INTEGER NOT NULL,
         content TEXT, files JSONB DEFAULT '[]',
@@ -69,13 +68,13 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         plagiarism_flag JSONB, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS homework_rubric (
+      await migrateQuery(pool, 'Homework', `CREATE TABLE IF NOT EXISTS homework_rubric (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         assignment_id INTEGER NOT NULL, criteria JSONB DEFAULT '[]',
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS homework_parent_notifications (
+      await migrateQuery(pool, 'Homework', `CREATE TABLE IF NOT EXISTS homework_parent_notifications (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         assignment_id INTEGER, student_id INTEGER NOT NULL, parent_id INTEGER NOT NULL,
         type VARCHAR(50) NOT NULL, message TEXT,
@@ -93,10 +92,9 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         'CREATE INDEX IF NOT EXISTS idx_hw_rubric_tenant ON homework_rubric(tenant_id)',
         'CREATE INDEX IF NOT EXISTS idx_hw_pn_tenant ON homework_parent_notifications(tenant_id)',
         'CREATE INDEX IF NOT EXISTS idx_hw_pn_student ON homework_parent_notifications(student_id)',
-      ]) { try { await c.query(sql); } catch (_) {} }
+      ]) { try { await migrateQuery(pool, 'Homework', sql); } catch (_) {} }
       console.log('[Homework] Migrations applied successfully');
     } catch (e) { console.error('[Homework] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

@@ -13,6 +13,7 @@
 // ============================================================
 // MODULE ENTRY POINT
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function volunteerManager(app, db, pool, renderPage, esc) {
 
   const requireAuth = (req, res, next) => {
@@ -204,10 +205,9 @@ module.exports = function volunteerManager(app, db, pool, renderPage, esc) {
   // ============================================================
   (async () => {
     var c = await pool.connect().catch(function() { return null; });
-    if (!c) { console.error('[Volunteers] Cannot connect to DB'); return; }
     try {
       // -- Table 1: volunteers ----------------------------------
-      await c.query('CREATE TABLE IF NOT EXISTS volunteers (' +
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE TABLE IF NOT EXISTS volunteers (' +
         'id SERIAL PRIMARY KEY,' +
         'tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,' +
         'first_name VARCHAR(100) NOT NULL,' +
@@ -261,11 +261,11 @@ module.exports = function volunteerManager(app, db, pool, renderPage, esc) {
         ['updated_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
       for (var vi = 0; vi < vCols.length; vi++) {
-        try { await c.query('ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS ' + vCols[vi][0] + ' ' + vCols[vi][1]); } catch(e) {}
+        try { await migrateQuery(pool, 'VolunteerManager', 'ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS ' + vCols[vi][0] + ' ' + vCols[vi][1]); } catch(e) {}
       }
 
       // -- Table 2: volunteer_events ----------------------------
-      await c.query('CREATE TABLE IF NOT EXISTS volunteer_events (' +
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE TABLE IF NOT EXISTS volunteer_events (' +
         'id SERIAL PRIMARY KEY,' +
         'tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,' +
         'name VARCHAR(200) NOT NULL,' +
@@ -303,11 +303,11 @@ module.exports = function volunteerManager(app, db, pool, renderPage, esc) {
         ['updated_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
       for (var ei = 0; ei < eCols.length; ei++) {
-        try { await c.query('ALTER TABLE volunteer_events ADD COLUMN IF NOT EXISTS ' + eCols[ei][0] + ' ' + eCols[ei][1]); } catch(e) {}
+        try { await migrateQuery(pool, 'VolunteerManager', 'ALTER TABLE volunteer_events ADD COLUMN IF NOT EXISTS ' + eCols[ei][0] + ' ' + eCols[ei][1]); } catch(e) {}
       }
 
       // -- Table 3: volunteer_assignments -----------------------
-      await c.query('CREATE TABLE IF NOT EXISTS volunteer_assignments (' +
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE TABLE IF NOT EXISTS volunteer_assignments (' +
         'id SERIAL PRIMARY KEY,' +
         'tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,' +
         'volunteer_id INTEGER NOT NULL REFERENCES volunteers(id) ON DELETE CASCADE,' +
@@ -343,35 +343,34 @@ module.exports = function volunteerManager(app, db, pool, renderPage, esc) {
         ['updated_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
       for (var ai = 0; ai < aCols.length; ai++) {
-        try { await c.query('ALTER TABLE volunteer_assignments ADD COLUMN IF NOT EXISTS ' + aCols[ai][0] + ' ' + aCols[ai][1]); } catch(e) {}
+        try { await migrateQuery(pool, 'VolunteerManager', 'ALTER TABLE volunteer_assignments ADD COLUMN IF NOT EXISTS ' + aCols[ai][0] + ' ' + aCols[ai][1]); } catch(e) {}
       }
 
       // -- Indexes ----------------------------------------------
-      await c.query('CREATE INDEX IF NOT EXISTS idx_vol_tenant ON volunteers(tenant_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_vol_status ON volunteers(tenant_id, status)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_vol_name ON volunteers(tenant_id, first_name, last_name)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_vol_email ON volunteers(tenant_id, email)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_vol_phone ON volunteers(tenant_id, phone)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_vol_joined ON volunteers(tenant_id, joined_date)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_vol_skills ON volunteers USING gin(skills)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_ve_tenant ON volunteer_events(tenant_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_ve_status ON volunteer_events(tenant_id, status)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_ve_type ON volunteer_events(tenant_id, event_type)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_ve_dates ON volunteer_events(tenant_id, start_date, end_date)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_ve_coordinator ON volunteer_events(tenant_id, coordinator_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_va_tenant ON volunteer_assignments(tenant_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_va_volunteer ON volunteer_assignments(tenant_id, volunteer_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_va_event ON volunteer_assignments(tenant_id, event_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_va_status ON volunteer_assignments(tenant_id, status)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_va_unique ON volunteer_assignments(tenant_id, volunteer_id, event_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_va_assigned ON volunteer_assignments(tenant_id, assigned_by)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_vol_tenant ON volunteers(tenant_id)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_vol_status ON volunteers(tenant_id, status)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_vol_name ON volunteers(tenant_id, first_name, last_name)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_vol_email ON volunteers(tenant_id, email)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_vol_phone ON volunteers(tenant_id, phone)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_vol_joined ON volunteers(tenant_id, joined_date)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_vol_skills ON volunteers USING gin(skills)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_ve_tenant ON volunteer_events(tenant_id)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_ve_status ON volunteer_events(tenant_id, status)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_ve_type ON volunteer_events(tenant_id, event_type)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_ve_dates ON volunteer_events(tenant_id, start_date, end_date)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_ve_coordinator ON volunteer_events(tenant_id, coordinator_id)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_va_tenant ON volunteer_assignments(tenant_id)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_va_volunteer ON volunteer_assignments(tenant_id, volunteer_id)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_va_event ON volunteer_assignments(tenant_id, event_id)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_va_status ON volunteer_assignments(tenant_id, status)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_va_unique ON volunteer_assignments(tenant_id, volunteer_id, event_id)');
+      await migrateQuery(pool, 'VolunteerManager', 'CREATE INDEX IF NOT EXISTS idx_va_assigned ON volunteer_assignments(tenant_id, assigned_by)');
 
       // Unique constraint to prevent duplicate assignments
-      try { await c.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_va_no_dupes ON volunteer_assignments(tenant_id, volunteer_id, event_id)'); } catch(e) {}
+      try { await migrateQuery(pool, 'VolunteerManager', 'CREATE UNIQUE INDEX IF NOT EXISTS idx_va_no_dupes ON volunteer_assignments(tenant_id, volunteer_id, event_id)'); } catch(e) {}
 
       console.log('[Volunteers] Migrations applied successfully');
     } catch (e) { console.error('[Volunteers] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

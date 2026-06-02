@@ -14,6 +14,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 function relativeTime(dateStr) {
   if (!dateStr) return '';
   const now = new Date(), d = new Date(dateStr);
@@ -267,12 +268,10 @@ module.exports = function parentTeacherChat(app, pool, opts) {
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
     if (!client) return;
     try {
-      for (const sql of migrations) { try { await client.query(sql); } catch (e) { /* skip */ } }
+      for (const sql of migrations) { try { await migrateQuery(pool, 'ParentTeacherChat', sql); } catch (e) { /* skip */ } }
     } catch (e) { /* skip */ }
-    finally { client.release(); }
   })();
 
   // ============================================================

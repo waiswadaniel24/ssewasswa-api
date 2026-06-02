@@ -10,6 +10,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 const crypto = require('crypto');
 
 module.exports = function (app, pool, requireAuth, ah, esc, renderPage, logger, audit) {
@@ -54,10 +55,10 @@ module.exports = function (app, pool, requireAuth, ah, esc, renderPage, logger, 
           csv_data TEXT,
           created_at TIMESTAMPTZ DEFAULT NOW()
         )`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_import_logs_tenant ON import_logs(tenant_id)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_import_logs_type ON import_logs(import_type)`);
+      await migrateQuery(pool, 'BulkImport', `CREATE INDEX IF NOT EXISTS idx_import_logs_tenant ON import_logs(tenant_id)`);
+      await migrateQuery(pool, 'BulkImport', `CREATE INDEX IF NOT EXISTS idx_import_logs_type ON import_logs(import_type)`);
       // Add csv_data column if missing (for re-download)
-      await pool.query(`ALTER TABLE import_logs ADD COLUMN IF NOT EXISTS csv_data TEXT`);
+      await migrateQuery(pool, 'BulkImport', `ALTER TABLE import_logs ADD COLUMN IF NOT EXISTS csv_data TEXT`);
       _logger.info('[BulkImport] Database tables ready');
     } catch (e) {
       _logger.error('[BulkImport] Migration error: ' + e.message);

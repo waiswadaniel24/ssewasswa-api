@@ -4,6 +4,7 @@
 // scheduling, read tracking, templates, and analytics.
 // 12+ routes, PostgreSQL, tenant-aware.
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -45,7 +46,7 @@ module.exports = function(app, pool, opts) {
       `CREATE INDEX IF NOT EXISTS idx_announcement_reads_tenant ON announcement_reads(tenant_id, announcement_id)`,
       `CREATE INDEX IF NOT EXISTS idx_ann_templates_tenant ON announcement_templates(tenant_id)`
     ];
-    for (const sql of tables) { try { await pool.query(sql); } catch(e) { /* exists */ } }
+    for (const sql of tables) { try { await migrateQuery(pool, 'AnnouncementSystem', sql); } catch(e) { /* exists */ } }
 
     // Seed templates
     const t = 0;
@@ -57,7 +58,7 @@ module.exports = function(app, pool, opts) {
       ['General Reminder', 'Reminder: [Subject]', '<h3>📌 Reminder</h3><p>Dear [Role],</p><p>This is a gentle reminder that [Details].</p><p>Please take the necessary action by [Deadline].</p><p>Thank you.</p>', 'general', '💬']
     ];
     for (const [name, subject, body, cat, icon] of seedTpl) {
-      try { await pool.query(`INSERT INTO announcement_templates(tenant_id,name,subject,body_template,category,icon,created_by) VALUES($1,$2,$3,$4,$5,$6,'system') ON CONFLICT DO NOTHING`, [t, name, subject, body, cat, icon]); } catch(e) { /* exists */ }
+      try { await migrateQuery(pool, 'AnnouncementSystem', `INSERT INTO announcement_templates(tenant_id,name,subject,body_template,category,icon,created_by) VALUES($1,$2,$3,$4,$5,$6,'system') ON CONFLICT DO NOTHING`, [t, name, subject, body, cat, icon]); } catch(e) { /* exists */ }
     }
   })();
 

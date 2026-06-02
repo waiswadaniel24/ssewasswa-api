@@ -3,6 +3,7 @@
  * 8 Features: Landing Page Builder, Payment Gateway Hub, Donor Renewal,
  * Gift Clubs, Video Integration, Stock/Securities, Real Estate, IRA Rollovers
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
 
   // ================================================================

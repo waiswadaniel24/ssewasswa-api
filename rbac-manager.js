@@ -9,6 +9,7 @@
 //   rbacManager(app, pool, { renderPage, esc, ah, requireAuth, audit });
 // ============================================================
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   opts = opts || {};
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));

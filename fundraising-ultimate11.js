@@ -3,6 +3,7 @@
  * 8 Features: Vehicle Donations, Family Foundations, Mobile Experience/PWA,
  * Risk Assessment, Compliance Checker, Impact Reports, Collaboration Portal, Communication Hub
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
   const migrations = [
     `CREATE TABLE IF NOT EXISTS vehicle_donations (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, donor_name TEXT NOT NULL, donor_email TEXT, donor_phone TEXT, vehicle_make TEXT NOT NULL, vehicle_model TEXT NOT NULL, vehicle_year INTEGER, vin TEXT, color TEXT, mileage INTEGER, condition TEXT DEFAULT 'good', estimated_value NUMERIC DEFAULT 0, pickup_address TEXT, pickup_scheduled_date DATE, pickup_completed_date DATE, title_transferred BOOLEAN DEFAULT false, acknowledged BOOLEAN DEFAULT false, notes TEXT, status TEXT DEFAULT 'offered', created_at TIMESTAMPTZ DEFAULT NOW())`,

@@ -3,6 +3,7 @@
  * SaaS School Portal Module
  * Routes: /school/student-banking/*
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT } = opts;
   const P = '#4f46e5', GRAY = '#6b7280';
@@ -27,7 +28,7 @@ module.exports = function(app, pool, opts) {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
-      await pool.query(`
+      await migrateQuery(pool, 'StudentBanking', `
         CREATE TABLE IF NOT EXISTS bank_transactions (
           id BIGSERIAL PRIMARY KEY,
           tenant_id VARCHAR(64) NOT NULL,
@@ -43,7 +44,7 @@ module.exports = function(app, pool, opts) {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
-      await pool.query(`
+      await migrateQuery(pool, 'StudentBanking', `
         CREATE TABLE IF NOT EXISTS savings_goals (
           id BIGSERIAL PRIMARY KEY,
           tenant_id VARCHAR(64) NOT NULL,
@@ -59,7 +60,7 @@ module.exports = function(app, pool, opts) {
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
-      await pool.query(`
+      await migrateQuery(pool, 'StudentBanking', `
         CREATE TABLE IF NOT EXISTS bank_budgets (
           id BIGSERIAL PRIMARY KEY,
           tenant_id VARCHAR(64) NOT NULL,
@@ -71,7 +72,7 @@ module.exports = function(app, pool, opts) {
           CONSTRAINT uk_budget UNIQUE (tenant_id, account_id, category, period_month)
         )
       `);
-      await pool.query(`
+      await migrateQuery(pool, 'StudentBanking', `
         CREATE TABLE IF NOT EXISTS financial_lessons (
           id BIGSERIAL PRIMARY KEY,
           tenant_id VARCHAR(64) NOT NULL,
@@ -86,7 +87,7 @@ module.exports = function(app, pool, opts) {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
-      await pool.query(`
+      await migrateQuery(pool, 'StudentBanking', `
         CREATE TABLE IF NOT EXISTS lesson_progress (
           id BIGSERIAL PRIMARY KEY,
           tenant_id VARCHAR(64) NOT NULL,

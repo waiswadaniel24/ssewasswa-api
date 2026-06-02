@@ -4,6 +4,7 @@
  * Refunds, Embed Widget, Matching Donations, Comments, Thank You Messages,
  * Milestone Celebrations, Anonymous Donations, Deadline Reminders, Receipts
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
   const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
 

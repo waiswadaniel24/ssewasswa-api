@@ -14,6 +14,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
   const renderPage = opts.renderPage || ((t,c,u) => c);
@@ -223,10 +224,8 @@ module.exports = function(app, pool, opts) {
   // DATABASE MIGRATIONS
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[StudentPortfolio] Cannot connect to DB'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS student_portfolios (
+      await migrateQuery(pool, 'StudentPortfolio', `CREATE TABLE IF NOT EXISTS student_portfolios (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         student_id INTEGER NOT NULL, user_id INTEGER,
         display_name VARCHAR(255), photo_url TEXT, class_name VARCHAR(100),
@@ -237,7 +236,7 @@ module.exports = function(app, pool, opts) {
         completeness_score INTEGER DEFAULT 0, last_updated TIMESTAMPTZ DEFAULT NOW(),
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS portfolio_projects (
+      await migrateQuery(pool, 'StudentPortfolio', `CREATE TABLE IF NOT EXISTS portfolio_projects (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         portfolio_id INTEGER REFERENCES student_portfolios(id) ON DELETE CASCADE,
         student_id INTEGER NOT NULL,
@@ -247,7 +246,7 @@ module.exports = function(app, pool, opts) {
         featured BOOLEAN DEFAULT false, sort_order INTEGER DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS portfolio_activities (
+      await migrateQuery(pool, 'StudentPortfolio', `CREATE TABLE IF NOT EXISTS portfolio_activities (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         portfolio_id INTEGER REFERENCES student_portfolios(id) ON DELETE CASCADE,
         student_id INTEGER NOT NULL,
@@ -256,7 +255,7 @@ module.exports = function(app, pool, opts) {
         start_date DATE, end_date DATE, hours_per_week INTEGER,
         achievements TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS portfolio_skills (
+      await migrateQuery(pool, 'StudentPortfolio', `CREATE TABLE IF NOT EXISTS portfolio_skills (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         portfolio_id INTEGER REFERENCES student_portfolios(id) ON DELETE CASCADE,
         student_id INTEGER NOT NULL,
@@ -265,7 +264,7 @@ module.exports = function(app, pool, opts) {
         created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(portfolio_id, skill_name)
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS portfolio_achievements (
+      await migrateQuery(pool, 'StudentPortfolio', `CREATE TABLE IF NOT EXISTS portfolio_achievements (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         portfolio_id INTEGER REFERENCES student_portfolios(id) ON DELETE CASCADE,
         student_id INTEGER NOT NULL,
@@ -274,7 +273,7 @@ module.exports = function(app, pool, opts) {
         date_achieved DATE, issuer VARCHAR(255), credential_url TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS portfolio_endorsements (
+      await migrateQuery(pool, 'StudentPortfolio', `CREATE TABLE IF NOT EXISTS portfolio_endorsements (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
         portfolio_id INTEGER REFERENCES student_portfolios(id) ON DELETE CASCADE,
         student_id INTEGER NOT NULL, teacher_id INTEGER NOT NULL,
@@ -303,10 +302,9 @@ module.exports = function(app, pool, opts) {
         'idx_pe_student ON portfolio_endorsements(student_id)',
         'idx_pe_teacher ON portfolio_endorsements(teacher_id)'
       ];
-      for (const i of idxs) await c.query(`CREATE INDEX IF NOT EXISTS ${i}`);
+      for (const i of idxs) await migrateQuery(pool, 'StudentPortfolio', `CREATE INDEX IF NOT EXISTS ${i}`);
       console.log('[StudentPortfolio] Migrations applied');
     } catch (e) { console.error('[StudentPortfolio] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

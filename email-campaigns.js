@@ -10,6 +10,7 @@
  * Color theme: #ea580c (orange)
  */
 'use strict';
+const { migrateQuery } = require('./db');
 module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   const requireAuth = (req, res, next) => { if (!req.session?.user) return res.redirect('/login'); next(); };
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -36,10 +37,9 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   //  MIGRATIONS
   // ═══════════════════════════════════════════════════════
   (async () => {
-    const c = await pool.connect().catch(() => null);
     if (!c) return;
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS email_campaigns_list (
+      await migrateQuery(pool, 'EmailCampaigns', `CREATE TABLE IF NOT EXISTS email_campaigns_list (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL,
@@ -64,7 +64,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS email_subscribers (
+      await migrateQuery(pool, 'EmailCampaigns', `CREATE TABLE IF NOT EXISTS email_subscribers (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
         email VARCHAR(255) NOT NULL,
@@ -76,7 +76,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
         UNIQUE(tenant_id, email)
       );`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS email_tracking (
+      await migrateQuery(pool, 'EmailCampaigns', `CREATE TABLE IF NOT EXISTS email_tracking (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
         campaign_id INTEGER REFERENCES email_campaigns_list(id) ON DELETE CASCADE,
@@ -110,7 +110,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
         'created_by INTEGER REFERENCES users(id)',
         'created_at TIMESTAMPTZ DEFAULT NOW()',
       ];
-      for (const col of campCols) await c.query(`ALTER TABLE email_campaigns_list ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
+      for (const col of campCols) await migrateQuery(pool, 'EmailCampaigns', `ALTER TABLE email_campaigns_list ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
 
       const subCols = [
         'tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE',
@@ -121,7 +121,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
         'source VARCHAR(100)',
         'subscribed_at TIMESTAMPTZ DEFAULT NOW()',
       ];
-      for (const col of subCols) await c.query(`ALTER TABLE email_subscribers ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
+      for (const col of subCols) await migrateQuery(pool, 'EmailCampaigns', `ALTER TABLE email_subscribers ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
 
       const trkCols = [
         'tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE',
@@ -131,7 +131,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
         'tracked_at TIMESTAMPTZ DEFAULT NOW()',
         'metadata JSONB',
       ];
-      for (const col of trkCols) await c.query(`ALTER TABLE email_tracking ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
+      for (const col of trkCols) await migrateQuery(pool, 'EmailCampaigns', `ALTER TABLE email_tracking ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
 
       // Indexes
       const indexes = [
@@ -145,11 +145,10 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
         'CREATE INDEX IF NOT EXISTS idx_ec_trk_cid ON email_tracking(campaign_id);',
         'CREATE INDEX IF NOT EXISTS idx_ec_trk_type ON email_tracking(tenant_id,tracking_type);',
       ];
-      for (const sql of indexes) await c.query(sql).catch(() => {});
+      for (const sql of indexes) await migrateQuery(pool, 'EmailCampaigns', sql).catch(() => {});
 
       console.log('[EmailCampaigns] Migrations applied');
     } catch (e) { console.error('[EmailCampaigns] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ═══════════════════════════════════════════════════════

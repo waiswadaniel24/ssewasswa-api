@@ -4,6 +4,7 @@
 // Tracks referral codes, referral signups, rewards for inviters,
 // and provides a public invite page for viral growth.
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, ah, esc, renderPage, audit, notify, sendEmail, logger) {
   const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
 

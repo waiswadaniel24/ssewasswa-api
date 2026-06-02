@@ -2,6 +2,7 @@
  * Notification Center Module — SSEWASSWA Comfort Platform
  * Comprehensive notification inbox, preferences & announcements for multi-tenant SaaS.
  */
+const { migrateQuery } = require('./db');
 module.exports = function notificationCenter(app, db, pool, renderPage, esc) {
 
   // ── Middleware helpers ──────────────────────────────────────────────
@@ -48,7 +49,7 @@ module.exports = function notificationCenter(app, db, pool, renderPage, esc) {
           created_at TIMESTAMPTZ DEFAULT NOW()
         );
       `);
-      await pool.query(`
+      await migrateQuery(pool, 'NotificationCenter', `
         CREATE TABLE IF NOT EXISTS notification_preferences (
           id SERIAL PRIMARY KEY,
           tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -60,7 +61,7 @@ module.exports = function notificationCenter(app, db, pool, renderPage, esc) {
           UNIQUE(tenant_id, user_id, category)
         );
       `);
-      await pool.query(`
+      await migrateQuery(pool, 'NotificationCenter', `
         CREATE TABLE IF NOT EXISTS announcements (
           id SERIAL PRIMARY KEY,
           tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -96,7 +97,7 @@ module.exports = function notificationCenter(app, db, pool, renderPage, esc) {
       ];
       for (const col of notifCols) {
         const colName = col.split(' ')[0];
-        await pool.query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
+        await migrateQuery(pool, 'NotificationCenter', `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
       }
 
       const prefCols = [
@@ -108,7 +109,7 @@ module.exports = function notificationCenter(app, db, pool, renderPage, esc) {
         'in_app_enabled BOOLEAN DEFAULT true',
       ];
       for (const col of prefCols) {
-        await pool.query(`ALTER TABLE notification_preferences ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
+        await migrateQuery(pool, 'NotificationCenter', `ALTER TABLE notification_preferences ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
       }
 
       const annCols = [
@@ -126,17 +127,17 @@ module.exports = function notificationCenter(app, db, pool, renderPage, esc) {
         'created_at TIMESTAMPTZ DEFAULT NOW()',
       ];
       for (const col of annCols) {
-        await pool.query(`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
+        await migrateQuery(pool, 'NotificationCenter', `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS ${col};`).catch(() => {});
       }
 
       // ── Indexes ────────────────────────────────────────────────────
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_notifications_tenant ON notifications(tenant_id);`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_notifications_tenant_user ON notifications(tenant_id, user_id);`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_notification_prefs_tenant ON notification_preferences(tenant_id);`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_notification_prefs_user ON notification_preferences(user_id);`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_announcements_tenant ON announcements(tenant_id);`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_announcements_active ON announcements(tenant_id, is_active);`);
+      await migrateQuery(pool, 'NotificationCenter', `CREATE INDEX IF NOT EXISTS idx_notifications_tenant ON notifications(tenant_id);`);
+      await migrateQuery(pool, 'NotificationCenter', `CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);`);
+      await migrateQuery(pool, 'NotificationCenter', `CREATE INDEX IF NOT EXISTS idx_notifications_tenant_user ON notifications(tenant_id, user_id);`);
+      await migrateQuery(pool, 'NotificationCenter', `CREATE INDEX IF NOT EXISTS idx_notification_prefs_tenant ON notification_preferences(tenant_id);`);
+      await migrateQuery(pool, 'NotificationCenter', `CREATE INDEX IF NOT EXISTS idx_notification_prefs_user ON notification_preferences(user_id);`);
+      await migrateQuery(pool, 'NotificationCenter', `CREATE INDEX IF NOT EXISTS idx_announcements_tenant ON announcements(tenant_id);`);
+      await migrateQuery(pool, 'NotificationCenter', `CREATE INDEX IF NOT EXISTS idx_announcements_active ON announcements(tenant_id, is_active);`);
 
       console.log('[NotificationCenter] Database migrations complete');
     } catch (err) {

@@ -13,6 +13,7 @@
 // ============================================================
 // INTERNAL HELPERS (declared outside module for hoisting)
 // ============================================================
+const { migrateQuery } = require('./db');
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }) : '—';
 const fmtDateShort = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
@@ -143,11 +144,9 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Certificates] Cannot connect to DB for migrations'); return; }
     try {
       // -- CREATE TABLES --------------------------------------------------
-      await c.query(`CREATE TABLE IF NOT EXISTS certificate_templates (
+      await migrateQuery(pool, 'Certificates', `CREATE TABLE IF NOT EXISTS certificate_templates (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL, description TEXT,
         border_color VARCHAR(20) DEFAULT '#4f46e5', background_color VARCHAR(20) DEFAULT '#ffffff',
@@ -159,7 +158,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
         is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
-      await c.query(`CREATE TABLE IF NOT EXISTS certificates_issued (
+      await migrateQuery(pool, 'Certificates', `CREATE TABLE IF NOT EXISTS certificates_issued (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         template_id INTEGER REFERENCES certificate_templates(id),
         recipient_name VARCHAR(255) NOT NULL, recipient_email VARCHAR(255),
@@ -180,7 +179,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
         ['is_active', "BOOLEAN DEFAULT true"],
       ];
       for (const [col, def] of tplCols) {
-        try { await c.query(`ALTER TABLE certificate_templates ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
+        try { await migrateQuery(pool, 'Certificates', `ALTER TABLE certificate_templates ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
       }
 
       // -- ALTER TABLE IF EXISTS: certificates_issued ----------------------
@@ -193,17 +192,17 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
         ['is_verified', "BOOLEAN DEFAULT true"],
       ];
       for (const [col, def] of issCols) {
-        try { await c.query(`ALTER TABLE certificates_issued ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
+        try { await migrateQuery(pool, 'Certificates', `ALTER TABLE certificates_issued ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {}
       }
 
       // -- INDEXES ---------------------------------------------------------
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ct_tenant ON certificate_templates(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ct_active ON certificate_templates(tenant_id, is_active)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ci_tenant ON certificates_issued(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ci_cert_number ON certificates_issued(certificate_number)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ci_type ON certificates_issued(tenant_id, certificate_type)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ci_date ON certificates_issued(date_issued)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ci_recipient ON certificates_issued(recipient_email)`);
+      await migrateQuery(pool, 'Certificates', `CREATE INDEX IF NOT EXISTS idx_ct_tenant ON certificate_templates(tenant_id)`);
+      await migrateQuery(pool, 'Certificates', `CREATE INDEX IF NOT EXISTS idx_ct_active ON certificate_templates(tenant_id, is_active)`);
+      await migrateQuery(pool, 'Certificates', `CREATE INDEX IF NOT EXISTS idx_ci_tenant ON certificates_issued(tenant_id)`);
+      await migrateQuery(pool, 'Certificates', `CREATE INDEX IF NOT EXISTS idx_ci_cert_number ON certificates_issued(certificate_number)`);
+      await migrateQuery(pool, 'Certificates', `CREATE INDEX IF NOT EXISTS idx_ci_type ON certificates_issued(tenant_id, certificate_type)`);
+      await migrateQuery(pool, 'Certificates', `CREATE INDEX IF NOT EXISTS idx_ci_date ON certificates_issued(date_issued)`);
+      await migrateQuery(pool, 'Certificates', `CREATE INDEX IF NOT EXISTS idx_ci_recipient ON certificates_issued(recipient_email)`);
 
       // -- SEED DEFAULT TEMPLATES ------------------------------------------
       const seedTemplates = [
@@ -213,14 +212,13 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
       ];
 
       for (const seed of seedTemplates) {
-        await c.query(`INSERT INTO certificate_templates (tenant_id, name, description, border_color, header_text, body_template, signature_line, is_active)
+        await migrateQuery(pool, 'Certificates', `INSERT INTO certificate_templates (tenant_id, name, description, border_color, header_text, body_template, signature_line, is_active)
           VALUES (1, $1, $2, $3, $4, $5, 'Director', true)
           ON CONFLICT DO NOTHING`, [seed.name, seed.description, seed.border_color, seed.header_text, seed.body_template]);
       }
 
       console.log('[Certificates] Migrations & seeds applied successfully');
     } catch (e) { console.error('[Certificates] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

@@ -3,6 +3,7 @@
  * Provides chat interface, prompt library, usage analytics, and AI settings.
  * Uses z-ai-web-dev-sdk for LLM completions with fallback simulation.
  */
+const { migrateQuery } = require('./db');
 module.exports = function aiAssistant(app, db, pool, renderPage, esc) {
 
   const requireAuth = (req, res, next) => {

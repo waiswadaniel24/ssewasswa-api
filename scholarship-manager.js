@@ -9,6 +9,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
 
   // ── inline fallbacks ──────────────────────────────────────
@@ -230,10 +231,9 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
   // ============================================================
   (async () => {
     var client = await pool.connect().catch(function() { return null; });
-    if (!client) { console.error('[ScholarshipManager] Cannot connect to DB for migrations'); return; }
     try {
       // ── Table 1: scholarships ──
-      await client.query(`CREATE TABLE IF NOT EXISTS scholarships (
+      await migrateQuery(pool, 'ScholarshipManager', `CREATE TABLE IF NOT EXISTS scholarships (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(200) NOT NULL,
@@ -264,7 +264,7 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
       )`);
 
       // ── Table 2: scholarship_applications ──
-      await client.query(`CREATE TABLE IF NOT EXISTS scholarship_applications (
+      await migrateQuery(pool, 'ScholarshipManager', `CREATE TABLE IF NOT EXISTS scholarship_applications (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         scholarship_id INTEGER REFERENCES scholarships(id) ON DELETE CASCADE,
@@ -290,7 +290,7 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
       )`);
 
       // ── Table 3: scholarship_disbursements ──
-      await client.query(`CREATE TABLE IF NOT EXISTS scholarship_disbursements (
+      await migrateQuery(pool, 'ScholarshipManager', `CREATE TABLE IF NOT EXISTS scholarship_disbursements (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         application_id INTEGER REFERENCES scholarship_applications(id) ON DELETE CASCADE,
@@ -327,7 +327,7 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
       ];
       for (var i = 0; i < schCols.length; i++) {
         var colName = schCols[i].split(' ')[0];
-        try { await client.query('ALTER TABLE IF EXISTS scholarships ADD COLUMN IF NOT EXISTS ' + colName + ' ' + schCols[i].substring(colName.length)); } catch(e) {}
+        try { await migrateQuery(pool, 'ScholarshipManager', 'ALTER TABLE IF EXISTS scholarships ADD COLUMN IF NOT EXISTS ' + colName + ' ' + schCols[i].substring(colName.length)); } catch(e) {}
       }
 
       // ── ALTER TABLE fallbacks: scholarship_applications ──
@@ -345,7 +345,7 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
       ];
       for (var j = 0; j < appCols.length; j++) {
         var appColName = appCols[j].split(' ')[0];
-        try { await client.query('ALTER TABLE IF EXISTS scholarship_applications ADD COLUMN IF NOT EXISTS ' + appColName + ' ' + appCols[j].substring(appColName.length)); } catch(e) {}
+        try { await migrateQuery(pool, 'ScholarshipManager', 'ALTER TABLE IF EXISTS scholarship_applications ADD COLUMN IF NOT EXISTS ' + appColName + ' ' + appCols[j].substring(appColName.length)); } catch(e) {}
       }
 
       // ── ALTER TABLE fallbacks: scholarship_disbursements ──
@@ -359,31 +359,29 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
       ];
       for (var k = 0; k < disCols.length; k++) {
         var disColName = disCols[k].split(' ')[0];
-        try { await client.query('ALTER TABLE IF EXISTS scholarship_disbursements ADD COLUMN IF NOT EXISTS ' + disColName + ' ' + disCols[k].substring(disColName.length)); } catch(e) {}
+        try { await migrateQuery(pool, 'ScholarshipManager', 'ALTER TABLE IF EXISTS scholarship_disbursements ADD COLUMN IF NOT EXISTS ' + disColName + ' ' + disCols[k].substring(disColName.length)); } catch(e) {}
       }
 
       // ── Indexes ──
-      await client.query('CREATE INDEX IF NOT EXISTS idx_scholarships_tenant ON scholarships(tenant_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_scholarships_status ON scholarships(tenant_id, status)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_scholarships_type ON scholarships(tenant_id, scholarship_type)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_scholarships_year ON scholarships(tenant_id, academic_year)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_scholarships_created ON scholarships(created_at DESC)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_sch_applications_tenant ON scholarship_applications(tenant_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_sch_applications_scholarship ON scholarship_applications(scholarship_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_sch_applications_student ON scholarship_applications(student_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_sch_applications_status ON scholarship_applications(tenant_id, status)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_sch_applications_vuln ON scholarship_applications(vulnerability_score DESC)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_sch_disbursements_tenant ON scholarship_disbursements(tenant_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_sch_disbursements_app ON scholarship_disbursements(application_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_sch_disbursements_scholarship ON scholarship_disbursements(scholarship_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_sch_disbursements_status ON scholarship_disbursements(tenant_id, status)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_sch_disbursements_date ON scholarship_disbursements(disbursement_date DESC)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_scholarships_tenant ON scholarships(tenant_id)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_scholarships_status ON scholarships(tenant_id, status)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_scholarships_type ON scholarships(tenant_id, scholarship_type)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_scholarships_year ON scholarships(tenant_id, academic_year)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_scholarships_created ON scholarships(created_at DESC)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_sch_applications_tenant ON scholarship_applications(tenant_id)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_sch_applications_scholarship ON scholarship_applications(scholarship_id)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_sch_applications_student ON scholarship_applications(student_id)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_sch_applications_status ON scholarship_applications(tenant_id, status)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_sch_applications_vuln ON scholarship_applications(vulnerability_score DESC)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_sch_disbursements_tenant ON scholarship_disbursements(tenant_id)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_sch_disbursements_app ON scholarship_disbursements(application_id)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_sch_disbursements_scholarship ON scholarship_disbursements(scholarship_id)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_sch_disbursements_status ON scholarship_disbursements(tenant_id, status)');
+      await migrateQuery(pool, 'ScholarshipManager', 'CREATE INDEX IF NOT EXISTS idx_sch_disbursements_date ON scholarship_disbursements(disbursement_date DESC)');
 
       console.log('[ScholarshipManager] Migrations applied successfully');
     } catch (e) {
       console.error('[ScholarshipManager] Migration error:', e.message);
-    } finally {
-      client.release();
     }
   })();
 
@@ -1071,14 +1069,14 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
 
     var client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await migrateQuery(pool, 'ScholarshipManager', 'BEGIN');
       for (var i = 0; i < ids.length; i++) {
-        var app = (await client.query(
+        var app = (await migrateQuery(pool, 'ScholarshipManager', 
           'SELECT * FROM scholarship_applications WHERE id=$1 AND tenant_id=$2', [ids[i], tid]
         )).rows[0];
         if (!app) continue;
 
-        await client.query(
+        await migrateQuery(pool, 'ScholarshipManager', 
           'UPDATE scholarship_applications SET status=$1, reviewer_id=$2, reviewed_at=NOW() WHERE id=$3 AND tenant_id=$4',
           [newStatus, user.id, ids[i], tid]
         );
@@ -1087,35 +1085,33 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
           var approvedAmount = Number(app.approved_amount) || 0;
           if (approvedAmount <= 0) {
             // Try to get scholarship default
-            var sch = (await client.query(
+            var sch = (await migrateQuery(pool, 'ScholarshipManager', 
               'SELECT total_fund_amount, remaining_amount, current_awards FROM scholarships WHERE id=$1 AND tenant_id=$2',
               [app.scholarship_id, tid]
             )).rows[0];
             if (sch) {
               approvedAmount = Math.floor(Number(sch.remaining_amount) / Math.max(1, Number(sch.current_awards) + 1));
-              await client.query(
+              await migrateQuery(pool, 'ScholarshipManager', 
                 'UPDATE scholarship_applications SET approved_amount=$1 WHERE id=$2 AND tenant_id=$3',
                 [approvedAmount, ids[i], tid]
               );
             }
           }
           // Update scholarship counters
-          await client.query(
+          await migrateQuery(pool, 'ScholarshipManager', 
             'UPDATE scholarships SET awarded_amount = awarded_amount + $1, current_awards = current_awards + 1, ' +
             'remaining_amount = GREATEST(0, remaining_amount - $1), updated_at = NOW() WHERE id = $2 AND tenant_id = $3',
             [approvedAmount, app.scholarship_id, tid]
           );
         }
       }
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'ScholarshipManager', 'COMMIT');
       console.log('[ScholarshipManager] Bulk ' + action + ' for ' + ids.length + ' applications by user=' + user.id);
       res.json({ ok: true, message: ids.length + ' application(s) ' + action + 'd' });
     } catch (e) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'ScholarshipManager', 'ROLLBACK');
       console.error('[ScholarshipManager] Bulk action error:', e.message);
       res.json({ ok: false, error: e.message });
-    } finally {
-      client.release();
     }
   }));
 
@@ -1238,20 +1234,20 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
 
     var client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await migrateQuery(pool, 'ScholarshipManager', 'BEGIN');
 
-      var application = (await client.query(
+      var application = (await migrateQuery(pool, 'ScholarshipManager', 
         'SELECT * FROM scholarship_applications WHERE id=$1 AND tenant_id=$2', [id, tid]
       )).rows[0];
       if (!application) {
-        await client.query('ROLLBACK');
+        await migrateQuery(pool, 'ScholarshipManager', 'ROLLBACK');
         return res.redirect('/scholarships/applications');
       }
 
       var approvedAmount = parseInt(body.approved_amount) || 0;
 
       // Update application
-      await client.query(`
+      await migrateQuery(pool, 'ScholarshipManager', `
         UPDATE scholarship_applications SET status=$1, approved_amount=$2, review_notes=$3,
         reviewer_id=$4, reviewed_at=NOW()
         WHERE id=$5 AND tenant_id=$6
@@ -1259,7 +1255,7 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
 
       // If approved, update scholarship counters
       if (decision === 'approved' && approvedAmount > 0) {
-        await client.query(`
+        await migrateQuery(pool, 'ScholarshipManager', `
           UPDATE scholarships SET awarded_amount = awarded_amount + $1,
           current_awards = current_awards + 1,
           remaining_amount = GREATEST(0, remaining_amount - $1),
@@ -1268,17 +1264,15 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
         `, [approvedAmount, application.scholarship_id, tid]);
       }
 
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'ScholarshipManager', 'COMMIT');
       console.log('[ScholarshipManager] Application ' + id + ' reviewed: ' + decision + ' by user=' + user.id);
       req.session.flash = { type: 'success', msg: 'Application ' + decision + ' successfully.' };
       res.redirect('/scholarships/applications');
     } catch (e) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'ScholarshipManager', 'ROLLBACK');
       console.error('[ScholarshipManager] Review error:', e.message);
       req.session.flash = { type: 'error', msg: 'Review failed: ' + e.message };
       res.redirect('/scholarships/applications/' + id + '/review');
-    } finally {
-      client.release();
     }
   }));
 
@@ -1535,15 +1529,15 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
 
     var client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await migrateQuery(pool, 'ScholarshipManager', 'BEGIN');
 
       // Verify application and check remaining
-      var application = (await client.query(
+      var application = (await migrateQuery(pool, 'ScholarshipManager', 
         'SELECT * FROM scholarship_applications WHERE id=$1 AND tenant_id=$2 AND status=\'approved\'',
         [applicationId, tid]
       )).rows[0];
       if (!application) {
-        await client.query('ROLLBACK');
+        await migrateQuery(pool, 'ScholarshipManager', 'ROLLBACK');
         req.session.flash = { type: 'error', msg: 'Application not found or not approved.' };
         return res.redirect('/scholarships/disburse');
       }
@@ -1553,13 +1547,13 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
       var remaining = approved - disbursed;
 
       if (amount > remaining) {
-        await client.query('ROLLBACK');
+        await migrateQuery(pool, 'ScholarshipManager', 'ROLLBACK');
         req.session.flash = { type: 'error', msg: 'Amount exceeds remaining disbursement of ' + fmtMoney(remaining) + '.' };
         return res.redirect('/scholarships/disburse?application_id=' + applicationId);
       }
 
       // Create disbursement record
-      await client.query(`
+      await migrateQuery(pool, 'ScholarshipManager', `
         INSERT INTO scholarship_disbursements (
           tenant_id, application_id, scholarship_id, student_id, amount,
           disbursement_date, term, academic_year, payment_method, payment_ref,
@@ -1579,7 +1573,7 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
       // Update application disbursement tracking
       var newDisbursed = disbursed + amount;
       var newDisbursementStatus = newDisbursed >= approved ? 'fully_disbursed' : 'partial';
-      await client.query(`
+      await migrateQuery(pool, 'ScholarshipManager', `
         UPDATE scholarship_applications
         SET disbursed_amount=$1, disbursement_status=$2
         WHERE id=$3 AND tenant_id=$4
@@ -1587,22 +1581,20 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
 
       // If fully disbursed, update application status
       if (newDisbursementStatus === 'fully_disbursed') {
-        await client.query(`
+        await migrateQuery(pool, 'ScholarshipManager', `
           UPDATE scholarship_applications SET status='disbursed' WHERE id=$1 AND tenant_id=$2
         `, [applicationId, tid]);
       }
 
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'ScholarshipManager', 'COMMIT');
       console.log('[ScholarshipManager] Disbursement of ' + fmtMoney(amount) + ' processed for application ' + applicationId + ' by user=' + user.id);
       req.session.flash = { type: 'success', msg: 'Disbursement of ' + fmtMoney(amount) + ' processed successfully.' };
       res.redirect('/scholarships/disbursements');
     } catch (e) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'ScholarshipManager', 'ROLLBACK');
       console.error('[ScholarshipManager] Disbursement error:', e.message);
       req.session.flash = { type: 'error', msg: 'Disbursement failed: ' + e.message };
       res.redirect('/scholarships/disburse');
-    } finally {
-      client.release();
     }
   }));
 

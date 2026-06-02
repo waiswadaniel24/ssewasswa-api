@@ -17,6 +17,7 @@
  * 14. Audit Trail Pro
  * 15. Fund Balance Calculator
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
 
   // =============================================

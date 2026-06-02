@@ -5,6 +5,7 @@
 // job board, trending algorithm, SEO boost, ad revenue, email digest,
 // social sharing, content recommendation, affiliate links
 
+const { migrateQuery } = require('./db');
 const FEATURE_MIGRATIONS = [
   // Referral system
   `CREATE TABLE IF NOT EXISTS referrals (

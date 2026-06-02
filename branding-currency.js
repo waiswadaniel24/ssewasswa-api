@@ -10,6 +10,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function brandingCurrency(app, pool, requireAuth, logger) {
 
   // === DEPENDENCIES (already in package.json) ====================

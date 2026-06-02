@@ -4,6 +4,7 @@
 // Tracks usage per tenant, enforces limits, generates overage
 // charges, and provides a usage dashboard.
 
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, requireAuth, ah, esc, renderPage, audit, notify, sendEmail, logger) {
   // ============================================================
   // DATABASE MIGRATIONS

@@ -12,6 +12,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
 const formatTime = (d) => d ? new Date(d).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
 const formatDateTime = (d) => d ? formatDate(d) + ' ' + formatTime(d) : '-';
@@ -178,11 +179,8 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { console.warn('[Visitors] Cannot connect to DB'); return; }
-    try { for (const sql of migrations) await client.query(sql); console.log('[Visitors] Migrations applied'); }
+    try { for (const sql of migrations) await migrateQuery(pool, 'VisitorLog', sql); console.log('[Visitors] Migrations applied'); }
     catch (e) { console.error('[Visitors] Migration error:', e.message); }
-    finally { client.release(); }
   })();
 
   // ============================================================

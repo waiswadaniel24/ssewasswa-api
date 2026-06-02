@@ -9,6 +9,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function staffPerformance(app, pool, opts) {
 
   // ── inline fallbacks ──────────────────────────────────────────
@@ -203,11 +204,9 @@ module.exports = function staffPerformance(app, pool, opts) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[StaffPerformance] Cannot connect to DB for migrations'); return; }
     try {
       // ── staff_kpi_scores ───────────────────────────────────
-      await c.query(`CREATE TABLE IF NOT EXISTS staff_kpi_scores (
+      await migrateQuery(pool, 'StaffPerformance', `CREATE TABLE IF NOT EXISTS staff_kpi_scores (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
         staff_id INTEGER NOT NULL,
@@ -226,7 +225,7 @@ module.exports = function staffPerformance(app, pool, opts) {
       )`);
 
       // ── staff_student_feedback ─────────────────────────────
-      await c.query(`CREATE TABLE IF NOT EXISTS staff_student_feedback (
+      await migrateQuery(pool, 'StaffPerformance', `CREATE TABLE IF NOT EXISTS staff_student_feedback (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
         staff_id INTEGER NOT NULL,
@@ -244,7 +243,7 @@ module.exports = function staffPerformance(app, pool, opts) {
       )`);
 
       // ── staff_classroom_observations ───────────────────────
-      await c.query(`CREATE TABLE IF NOT EXISTS staff_classroom_observations (
+      await migrateQuery(pool, 'StaffPerformance', `CREATE TABLE IF NOT EXISTS staff_classroom_observations (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
         staff_id INTEGER NOT NULL,
@@ -267,7 +266,7 @@ module.exports = function staffPerformance(app, pool, opts) {
       )`);
 
       // ── staff_professional_development ─────────────────────
-      await c.query(`CREATE TABLE IF NOT EXISTS staff_professional_development (
+      await migrateQuery(pool, 'StaffPerformance', `CREATE TABLE IF NOT EXISTS staff_professional_development (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL DEFAULT 0,
         staff_id INTEGER NOT NULL,
@@ -286,20 +285,18 @@ module.exports = function staffPerformance(app, pool, opts) {
       )`);
 
       // ── Indexes ────────────────────────────────────────────
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sp_kpi_tenant ON staff_kpi_scores(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sp_kpi_staff ON staff_kpi_scores(tenant_id, staff_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sp_fb_tenant ON staff_student_feedback(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sp_fb_staff ON staff_student_feedback(tenant_id, staff_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sp_obs_tenant ON staff_classroom_observations(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sp_obs_staff ON staff_classroom_observations(tenant_id, staff_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sp_pd_tenant ON staff_professional_development(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_sp_pd_staff ON staff_professional_development(tenant_id, staff_id)`);
+      await migrateQuery(pool, 'StaffPerformance', `CREATE INDEX IF NOT EXISTS idx_sp_kpi_tenant ON staff_kpi_scores(tenant_id)`);
+      await migrateQuery(pool, 'StaffPerformance', `CREATE INDEX IF NOT EXISTS idx_sp_kpi_staff ON staff_kpi_scores(tenant_id, staff_id)`);
+      await migrateQuery(pool, 'StaffPerformance', `CREATE INDEX IF NOT EXISTS idx_sp_fb_tenant ON staff_student_feedback(tenant_id)`);
+      await migrateQuery(pool, 'StaffPerformance', `CREATE INDEX IF NOT EXISTS idx_sp_fb_staff ON staff_student_feedback(tenant_id, staff_id)`);
+      await migrateQuery(pool, 'StaffPerformance', `CREATE INDEX IF NOT EXISTS idx_sp_obs_tenant ON staff_classroom_observations(tenant_id)`);
+      await migrateQuery(pool, 'StaffPerformance', `CREATE INDEX IF NOT EXISTS idx_sp_obs_staff ON staff_classroom_observations(tenant_id, staff_id)`);
+      await migrateQuery(pool, 'StaffPerformance', `CREATE INDEX IF NOT EXISTS idx_sp_pd_tenant ON staff_professional_development(tenant_id)`);
+      await migrateQuery(pool, 'StaffPerformance', `CREATE INDEX IF NOT EXISTS idx_sp_pd_staff ON staff_professional_development(tenant_id, staff_id)`);
 
       console.log('[StaffPerformance] Migrations applied successfully');
     } catch (e) {
       console.error('[StaffPerformance] Migration error:', e.message);
-    } finally {
-      c.release();
     }
   })();
 

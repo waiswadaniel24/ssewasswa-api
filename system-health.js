@@ -1,5 +1,6 @@
 'use strict';
 
+const { migrateQuery } = require('./db');
 const os = require('os');
 
 module.exports = function (app, pool, opts) {

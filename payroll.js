@@ -7,6 +7,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function payroll(app, db, pool, renderPage, esc) {
 
   // ── inline fallbacks ──────────────────────────────────────
@@ -159,11 +160,8 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { console.error('[Payroll] Cannot connect to DB for migrations'); return; }
-    try { for (const sql of migrations) await client.query(sql); console.log('[Payroll] Migrations applied: ' + migrations.length + ' statements'); }
+    try { for (const sql of migrations) await migrateQuery(pool, 'Payroll', sql); console.log('[Payroll] Migrations applied: ' + migrations.length + ' statements'); }
     catch (e) { console.error('[Payroll] Migration error:', e.message); }
-    finally { client.release(); }
   })();
 
   // ── helper: navigation bar ───────────────────────────────

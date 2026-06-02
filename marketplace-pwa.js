@@ -13,6 +13,7 @@
  * Export: module.exports = async (app, pool, requireAuth, logger, audit) => { ... return { writeServiceWorker }; }
  */
 
+const { migrateQuery } = require('./db');
 const path = require('path');
 const fs = require('fs');
 

@@ -13,6 +13,7 @@
 // ============================================================
 // INTERNAL HELPERS
 // ============================================================
+const { migrateQuery } = require('./db');
 const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
 const formatDateTime = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
 
@@ -135,11 +136,8 @@ module.exports = function taskManager(app, pool, requireAuth, logger, audit, not
   ];
 
   (async () => {
-    const client = await pool.connect().catch(() => null);
-    if (!client) { logger.warn('[TaskManager] Cannot connect to DB'); return; }
-    try { for (const sql of migrations) await client.query(sql); logger.info({ msg: '[TaskManager] Migrations applied', count: migrations.length }); }
+    try { for (const sql of migrations) await migrateQuery(pool, 'TaskManager', sql); logger.info({ msg: '[TaskManager] Migrations applied', count: migrations.length }); }
     catch (e) { logger.error({ msg: '[TaskManager] Migration error', error: e.message }); }
-    finally { client.release(); }
   })();
 
   // Nav helper

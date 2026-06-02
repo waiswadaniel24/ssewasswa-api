@@ -12,6 +12,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function teacherSubstitution(app, pool, opts) {
 
   // -- unpack options -------------------------------------------------------
@@ -449,10 +450,10 @@ module.exports = function teacherSubstitution(app, pool, opts) {
 
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await migrateQuery(pool, 'TeacherSubstitution', 'BEGIN');
 
       // Get teacher details
-      const teacher = (await client.query(
+      const teacher = (await migrateQuery(pool, 'TeacherSubstitution', 
         `SELECT id, name, email, subject_specialization FROM users WHERE id = $1 AND tenant_id = $2`,
         [teacher_id, tid]
       )).rows[0];
@@ -462,7 +463,7 @@ module.exports = function teacherSubstitution(app, pool, opts) {
       }
 
       // Insert absence
-      const absenceResult = await client.query(
+      const absenceResult = await migrateQuery(pool, 'TeacherSubstitution', 
         `INSERT INTO teacher_absences (tenant_id, teacher_id, teacher_name, subject, start_date, end_date, reason, notes, status, reported_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'confirmed',$9) RETURNING id`,
         [tid, teacher_id, teacher.name, subject || teacher.subject_specialization || null, start_date, end_date, reason || 'sick', notes || null, user.id]
@@ -477,19 +478,17 @@ module.exports = function teacherSubstitution(app, pool, opts) {
         subsCreated = await autoAssignSubstitutes(client, tid, absenceId, teacher, subject || teacher.subject_specialization, start_date, end_date, user.id);
       }
 
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'TeacherSubstitution', 'COMMIT');
       const msg = subsCreated > 0
         ? `Absence reported and ${subsCreated} substitution(s) auto-assigned.`
         : 'Absence reported successfully.';
       req.session.flash = { type: 'success', msg };
       res.redirect('/teacher-sub');
     } catch (err) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'TeacherSubstitution', 'ROLLBACK');
       console.error('[TeacherSub] Error reporting absence:', err);
       req.session.flash = { type: 'error', msg: 'Failed to report absence. Please try again.' };
       res.redirect('/teacher-sub/report');
-    } finally {
-      client.release();
     }
   }));
 
@@ -524,7 +523,7 @@ module.exports = function teacherSubstitution(app, pool, opts) {
       const dateStr = current.toISOString().split('T')[0];
 
       // Find candidates: not absent, not already substituting, fewest subs this month
-      const candidates = (await client.query(
+      const candidates = (await migrateQuery(pool, 'TeacherSubstitution', 
         `SELECT u.id, u.name, u.email, u.subject_specialization,
            COALESCE(sub_count.cnt, 0)::int AS monthly_sub_count
          FROM users u
@@ -564,7 +563,7 @@ module.exports = function teacherSubstitution(app, pool, opts) {
         const best = candidates[0];
         const score = calculateSuitability(best, subject, candidates);
 
-        await client.query(
+        await migrateQuery(pool, 'TeacherSubstitution', 
           `INSERT INTO teacher_substitutions
              (tenant_id, absence_id, absent_teacher_id, absent_teacher_name,
               substitute_teacher_id, substitute_teacher_name, subject,
@@ -585,14 +584,14 @@ module.exports = function teacherSubstitution(app, pool, opts) {
             `Dear ${best.name},\n\nYou have been auto-assigned as a substitute teacher for ${absentTeacher.name} (${subject || 'N/A'}) on ${dateStr}.\n\nPlease confirm or decline this assignment.\n\nThank you.`
           );
           // Mark notification sent
-          const subRow = (await client.query(
+          const subRow = (await migrateQuery(pool, 'TeacherSubstitution', 
             `SELECT id FROM teacher_substitutions
              WHERE tenant_id=$1 AND absence_id=$2 AND substitution_date=$3::date
              AND substitute_teacher_id=$4 ORDER BY id DESC LIMIT 1`,
             [tid, absenceId, dateStr, best.id]
           )).rows[0];
           if (subRow) {
-            await client.query(
+            await migrateQuery(pool, 'TeacherSubstitution', 
               `UPDATE teacher_substitutions SET notification_sent=true, notified_at=NOW() WHERE id=$1`,
               [subRow.id]
             );
@@ -829,9 +828,9 @@ module.exports = function teacherSubstitution(app, pool, opts) {
 
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await migrateQuery(pool, 'TeacherSubstitution', 'BEGIN');
 
-      const absence = (await client.query(
+      const absence = (await migrateQuery(pool, 'TeacherSubstitution', 
         `SELECT * FROM teacher_absences WHERE id = $1 AND tenant_id = $2`,
         [absence_id, tid]
       )).rows[0];
@@ -841,7 +840,7 @@ module.exports = function teacherSubstitution(app, pool, opts) {
       }
 
       // Find already-assigned dates
-      const assigned = (await client.query(
+      const assigned = (await migrateQuery(pool, 'TeacherSubstitution', 
         `SELECT DISTINCT substitution_date FROM teacher_substitutions
          WHERE tenant_id = $1 AND absence_id = $2 AND status != 'cancelled'`,
         [tid, absence_id]
@@ -863,7 +862,7 @@ module.exports = function teacherSubstitution(app, pool, opts) {
 
       let created = 0;
       for (const dateStr of unassignedDates) {
-        const candidates = (await client.query(
+        const candidates = (await migrateQuery(pool, 'TeacherSubstitution', 
           `SELECT u.id, u.name, u.email, u.subject_specialization,
              COALESCE(sub_count.cnt, 0)::int AS monthly_sub_count
            FROM users u
@@ -896,7 +895,7 @@ module.exports = function teacherSubstitution(app, pool, opts) {
         if (candidates.length > 0) {
           const best = candidates[0];
           const score = calculateSuitability(best, absence.subject, candidates);
-          await client.query(
+          await migrateQuery(pool, 'TeacherSubstitution', 
             `INSERT INTO teacher_substitutions
                (tenant_id, absence_id, absent_teacher_id, absent_teacher_name,
                 substitute_teacher_id, substitute_teacher_name, subject,
@@ -914,17 +913,15 @@ module.exports = function teacherSubstitution(app, pool, opts) {
         }
       }
 
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'TeacherSubstitution', 'COMMIT');
       audit('auto_assign_substitutes', `Auto-assigned ${created} substitution(s) for absence #${absence_id}`, user.id, tid);
       req.session.flash = { type: 'success', msg: `Auto-assigned ${created} substitution(s) for ${absence.teacher_name}.` };
       res.redirect(`/teacher-sub/assign?absence_id=${absence_id}`);
     } catch (err) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'TeacherSubstitution', 'ROLLBACK');
       console.error('[TeacherSub] Auto-assign error:', err);
       req.session.flash = { type: 'error', msg: 'Auto-assignment failed.' };
       res.redirect('/teacher-sub/assign');
-    } finally {
-      client.release();
     }
   }));
 
@@ -941,9 +938,9 @@ module.exports = function teacherSubstitution(app, pool, opts) {
 
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await migrateQuery(pool, 'TeacherSubstitution', 'BEGIN');
 
-      const absence = (await client.query(
+      const absence = (await migrateQuery(pool, 'TeacherSubstitution', 
         `SELECT * FROM teacher_absences WHERE id = $1 AND tenant_id = $2`, [absence_id, tid]
       )).rows[0];
       const sub = (await pool.query(
@@ -955,7 +952,7 @@ module.exports = function teacherSubstitution(app, pool, opts) {
         return res.redirect('/teacher-sub/assign');
       }
 
-      const result = await client.query(
+      const result = await migrateQuery(pool, 'TeacherSubstitution', 
         `INSERT INTO teacher_substitutions
            (tenant_id, absence_id, absent_teacher_id, absent_teacher_name,
             substitute_teacher_id, substitute_teacher_name, subject,
@@ -972,22 +969,20 @@ module.exports = function teacherSubstitution(app, pool, opts) {
         await queueEmail(sub.email,
           `Substitute Assignment: ${absence.teacher_name} - ${sub_date}`,
           `Dear ${sub.name},\n\nYou have been assigned as a substitute for ${absence.teacher_name} on ${sub_date}.\n\nThank you.`);
-        await client.query(
+        await migrateQuery(pool, 'TeacherSubstitution', 
           `UPDATE teacher_substitutions SET notification_sent=true, notified_at=NOW() WHERE id=$1`, [subId]
         );
       }
 
-      await client.query('COMMIT');
+      await migrateQuery(pool, 'TeacherSubstitution', 'COMMIT');
       audit('manual_assign_substitute', `Manual assign: ${sub.name} for ${absence.teacher_name} on ${sub_date}`, user.id, tid);
       req.session.flash = { type: 'success', msg: `${sub.name} assigned as substitute on ${fmtDate(sub_date)}.` };
       res.redirect(`/teacher-sub/assign?absence_id=${absence_id}`);
     } catch (err) {
-      await client.query('ROLLBACK');
+      await migrateQuery(pool, 'TeacherSubstitution', 'ROLLBACK');
       console.error('[TeacherSub] Manual assign error:', err);
       req.session.flash = { type: 'error', msg: 'Manual assignment failed.' };
       res.redirect('/teacher-sub/assign');
-    } finally {
-      client.release();
     }
   }));
 

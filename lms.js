@@ -20,6 +20,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function lms(app, db, pool, renderPage, esc) {
 
   // -- inline helpers ---------------------------------------------------
@@ -126,17 +127,15 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[LMS] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS lms_enrollments (
+      await migrateQuery(pool, 'Lms', `CREATE TABLE IF NOT EXISTS lms_enrollments (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         course_id INTEGER, student_id INTEGER, enrolled_by INTEGER,
         status VARCHAR(20) DEFAULT 'active', progress DECIMAL(5,2) DEFAULT 0,
         completed_at TIMESTAMPTZ,
         enrolled_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS lms_content (
+      await migrateQuery(pool, 'Lms', `CREATE TABLE IF NOT EXISTS lms_content (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         course_id INTEGER, module_id INTEGER, title VARCHAR(255),
         content_type VARCHAR(50) DEFAULT 'text', content TEXT,
@@ -144,14 +143,14 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
         duration_minutes INTEGER DEFAULT 0, is_published BOOLEAN DEFAULT true,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS lms_assignments (
+      await migrateQuery(pool, 'Lms', `CREATE TABLE IF NOT EXISTS lms_assignments (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         course_id INTEGER, title VARCHAR(255), description TEXT,
         due_date TIMESTAMPTZ, max_score DECIMAL(5,2) DEFAULT 100,
         is_published BOOLEAN DEFAULT true, created_by INTEGER,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS lms_submissions (
+      await migrateQuery(pool, 'Lms', `CREATE TABLE IF NOT EXISTS lms_submissions (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         assignment_id INTEGER, student_id INTEGER, content TEXT,
         file_url TEXT, grade DECIMAL(5,2), feedback TEXT,
@@ -161,33 +160,32 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
       // ALTER TABLE columns
       const leCols = ['course_id INTEGER','student_id INTEGER','enrolled_by INTEGER',
         'status VARCHAR(20) DEFAULT \'active\'','progress DECIMAL(5,2) DEFAULT 0','completed_at TIMESTAMPTZ'];
-      for (const col of leCols) { try { await c.query('ALTER TABLE lms_enrollments ADD COLUMN IF NOT EXISTS ' + col); } catch(e){} }
+      for (const col of leCols) { try { await migrateQuery(pool, 'Lms', 'ALTER TABLE lms_enrollments ADD COLUMN IF NOT EXISTS ' + col); } catch(e){} }
       const lcCols = ['course_id INTEGER','module_id INTEGER','title VARCHAR(255)',
         'content_type VARCHAR(50) DEFAULT \'text\'','content TEXT','file_url TEXT','video_url TEXT',
         'order_seq INTEGER DEFAULT 0','duration_minutes INTEGER DEFAULT 0','is_published BOOLEAN DEFAULT true'];
-      for (const col of lcCols) { try { await c.query('ALTER TABLE lms_content ADD COLUMN IF NOT EXISTS ' + col); } catch(e){} }
+      for (const col of lcCols) { try { await migrateQuery(pool, 'Lms', 'ALTER TABLE lms_content ADD COLUMN IF NOT EXISTS ' + col); } catch(e){} }
       const laCols = ['course_id INTEGER','title VARCHAR(255)','description TEXT',
         'due_date TIMESTAMPTZ','max_score DECIMAL(5,2) DEFAULT 100',
         'is_published BOOLEAN DEFAULT true','created_by INTEGER'];
-      for (const col of laCols) { try { await c.query('ALTER TABLE lms_assignments ADD COLUMN IF NOT EXISTS ' + col); } catch(e){} }
+      for (const col of laCols) { try { await migrateQuery(pool, 'Lms', 'ALTER TABLE lms_assignments ADD COLUMN IF NOT EXISTS ' + col); } catch(e){} }
       const lsCols = ['assignment_id INTEGER','student_id INTEGER','content TEXT',
         'file_url TEXT','grade DECIMAL(5,2)','feedback TEXT',
         'status VARCHAR(20) DEFAULT \'submitted\'','graded_at TIMESTAMPTZ'];
-      for (const col of lsCols) { try { await c.query('ALTER TABLE lms_submissions ADD COLUMN IF NOT EXISTS ' + col); } catch(e){} }
+      for (const col of lsCols) { try { await migrateQuery(pool, 'Lms', 'ALTER TABLE lms_submissions ADD COLUMN IF NOT EXISTS ' + col); } catch(e){} }
       // Indexes
-      await c.query('CREATE INDEX IF NOT EXISTS idx_le_tenant ON lms_enrollments(tenant_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_le_course ON lms_enrollments(tenant_id, course_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_le_student ON lms_enrollments(tenant_id, student_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_lc_tenant ON lms_content(tenant_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_lc_course ON lms_content(tenant_id, course_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_la_tenant ON lms_assignments(tenant_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_la_course ON lms_assignments(tenant_id, course_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_ls_tenant ON lms_submissions(tenant_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_ls_assignment ON lms_submissions(assignment_id)');
-      await c.query('CREATE INDEX IF NOT EXISTS idx_ls_student ON lms_submissions(tenant_id, student_id)');
+      await migrateQuery(pool, 'Lms', 'CREATE INDEX IF NOT EXISTS idx_le_tenant ON lms_enrollments(tenant_id)');
+      await migrateQuery(pool, 'Lms', 'CREATE INDEX IF NOT EXISTS idx_le_course ON lms_enrollments(tenant_id, course_id)');
+      await migrateQuery(pool, 'Lms', 'CREATE INDEX IF NOT EXISTS idx_le_student ON lms_enrollments(tenant_id, student_id)');
+      await migrateQuery(pool, 'Lms', 'CREATE INDEX IF NOT EXISTS idx_lc_tenant ON lms_content(tenant_id)');
+      await migrateQuery(pool, 'Lms', 'CREATE INDEX IF NOT EXISTS idx_lc_course ON lms_content(tenant_id, course_id)');
+      await migrateQuery(pool, 'Lms', 'CREATE INDEX IF NOT EXISTS idx_la_tenant ON lms_assignments(tenant_id)');
+      await migrateQuery(pool, 'Lms', 'CREATE INDEX IF NOT EXISTS idx_la_course ON lms_assignments(tenant_id, course_id)');
+      await migrateQuery(pool, 'Lms', 'CREATE INDEX IF NOT EXISTS idx_ls_tenant ON lms_submissions(tenant_id)');
+      await migrateQuery(pool, 'Lms', 'CREATE INDEX IF NOT EXISTS idx_ls_assignment ON lms_submissions(assignment_id)');
+      await migrateQuery(pool, 'Lms', 'CREATE INDEX IF NOT EXISTS idx_ls_student ON lms_submissions(tenant_id, student_id)');
       console.log('[LMS] Migrations applied successfully');
     } catch (e) { console.error('[LMS] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================

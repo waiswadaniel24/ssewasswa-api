@@ -17,6 +17,7 @@
 
 'use strict';
 
+const { migrateQuery } = require('./db');
 module.exports = function (app, pool, opts) {
 
   // ── Inline Helpers ──────────────────────────────────────────────────
@@ -129,11 +130,9 @@ module.exports = function (app, pool, opts) {
   // DATABASE MIGRATIONS
   // ================================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[School-v18-b] Cannot connect to DB'); return; }
     try {
       // ── Feature 11: school_public_pages ──
-      await c.query(`CREATE TABLE IF NOT EXISTS school_public_pages (
+      await migrateQuery(pool, 'SchoolV18B', `CREATE TABLE IF NOT EXISTS school_public_pages (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         slug VARCHAR(100) UNIQUE NOT NULL, title VARCHAR(255) NOT NULL,
         content TEXT DEFAULT '', meta_title VARCHAR(255), meta_description TEXT,
@@ -142,7 +141,7 @@ module.exports = function (app, pool, opts) {
       )`);
 
       // ── Feature 13: user_accessibility_settings ──
-      await c.query(`CREATE TABLE IF NOT EXISTS user_accessibility_settings (
+      await migrateQuery(pool, 'SchoolV18B', `CREATE TABLE IF NOT EXISTS user_accessibility_settings (
         id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         font_size VARCHAR(10) DEFAULT 'medium', high_contrast BOOLEAN DEFAULT false,
         reduced_motion BOOLEAN DEFAULT false, screen_reader_optimized BOOLEAN DEFAULT false,
@@ -151,7 +150,7 @@ module.exports = function (app, pool, opts) {
       )`);
 
       // ── Feature 14: public_admission_applications ──
-      await c.query(`CREATE TABLE IF NOT EXISTS public_admission_applications (
+      await migrateQuery(pool, 'SchoolV18B', `CREATE TABLE IF NOT EXISTS public_admission_applications (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         reference_number VARCHAR(20) UNIQUE NOT NULL,
         student_name VARCHAR(255) NOT NULL, date_of_birth DATE, gender VARCHAR(20),
@@ -166,7 +165,7 @@ module.exports = function (app, pool, opts) {
       )`);
 
       // ── Feature 15: bus_trips + bus_trip_logs ──
-      await c.query(`CREATE TABLE IF NOT EXISTS bus_trips (
+      await migrateQuery(pool, 'SchoolV18B', `CREATE TABLE IF NOT EXISTS bus_trips (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         route_id INTEGER REFERENCES transport_routes(id),
         vehicle_id INTEGER REFERENCES transport_vehicles(id),
@@ -177,7 +176,7 @@ module.exports = function (app, pool, opts) {
         started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ,
         total_students INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS bus_trip_logs (
+      await migrateQuery(pool, 'SchoolV18B', `CREATE TABLE IF NOT EXISTS bus_trip_logs (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         trip_id INTEGER NOT NULL REFERENCES bus_trips(id) ON DELETE CASCADE,
         latitude NUMERIC(10,7), longitude NUMERIC(10,7),
@@ -187,20 +186,20 @@ module.exports = function (app, pool, opts) {
       )`);
 
       // ── Feature 16: meal_plans, meal_schedules, meal_attendance ──
-      await c.query(`CREATE TABLE IF NOT EXISTS meal_plans_v18 (
+      await migrateQuery(pool, 'SchoolV18B', `CREATE TABLE IF NOT EXISTS meal_plans_v18 (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL, description TEXT, cost_per_term NUMERIC(10,2) DEFAULT 0,
         applicable_to VARCHAR(20) DEFAULT 'all', status VARCHAR(20) DEFAULT 'active',
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS meal_schedules (
+      await migrateQuery(pool, 'SchoolV18B', `CREATE TABLE IF NOT EXISTS meal_schedules (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         plan_id INTEGER REFERENCES meal_plans_v18(id) ON DELETE CASCADE,
         day_of_week VARCHAR(10) NOT NULL, meal_type VARCHAR(20) NOT NULL,
         menu_items TEXT NOT NULL, calories INTEGER DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS meal_attendance_v18 (
+      await migrateQuery(pool, 'SchoolV18B', `CREATE TABLE IF NOT EXISTS meal_attendance_v18 (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         plan_id INTEGER REFERENCES meal_plans_v18(id),
         student_id INTEGER, student_name VARCHAR(255),
@@ -210,7 +209,7 @@ module.exports = function (app, pool, opts) {
       )`);
 
       // ── Feature 17: sickbay_visits, sickbay_medicine_inventory ──
-      await c.query(`CREATE TABLE IF NOT EXISTS sickbay_visits (
+      await migrateQuery(pool, 'SchoolV18B', `CREATE TABLE IF NOT EXISTS sickbay_visits (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         student_id INTEGER, student_name VARCHAR(255) NOT NULL,
         visit_date DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -221,7 +220,7 @@ module.exports = function (app, pool, opts) {
         parent_notified BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS sickbay_medicine_inventory (
+      await migrateQuery(pool, 'SchoolV18B', `CREATE TABLE IF NOT EXISTS sickbay_medicine_inventory (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         medicine_name VARCHAR(255) NOT NULL, category VARCHAR(50),
         quantity INTEGER DEFAULT 0, unit VARCHAR(20) DEFAULT 'tablets',
@@ -231,7 +230,7 @@ module.exports = function (app, pool, opts) {
       )`);
 
       // ── Feature 18: api_keys (ensure exists) ──
-      await c.query(`CREATE TABLE IF NOT EXISTS api_keys (
+      await migrateQuery(pool, 'SchoolV18B', `CREATE TABLE IF NOT EXISTS api_keys (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         user_id INTEGER REFERENCES users(id),
         key_value VARCHAR(64) UNIQUE NOT NULL, key_name VARCHAR(100),
@@ -259,13 +258,11 @@ module.exports = function (app, pool, opts) {
         'CREATE INDEX IF NOT EXISTS idx_ak_tenant ON api_keys(tenant_id)',
         'CREATE INDEX IF NOT EXISTS idx_ak_value ON api_keys(key_value)',
       ];
-      for (const sql of indexes) { try { await c.query(sql); } catch (_) {} }
+      for (const sql of indexes) await migrateQuery(pool, 'SchoolV18B', sql);
 
       console.log('[School-v18-b] Migrations applied successfully');
     } catch (e) {
       console.error('[School-v18-b] Migration error:', e.message);
-    } finally {
-      c.release();
     }
   })();
 

@@ -2,6 +2,7 @@
  * Parent Workshop & Training Module
  * SaaS School Portal – Workshop scheduling, registration, attendance, resources, feedback, certificates
  */
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT } = opts;
   const P = '#4f46e5', GRAY = '#6b7280';
@@ -76,7 +77,7 @@ module.exports = function(app, pool, opts) {
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
-      await pool.query(`
+      await migrateQuery(pool, 'ParentWorkshop', `
         CREATE TABLE IF NOT EXISTS workshop_registrations (
           id BIGSERIAL PRIMARY KEY,
           tenant_id VARCHAR(64) NOT NULL,
@@ -94,7 +95,7 @@ module.exports = function(app, pool, opts) {
           CONSTRAINT uk_workshop_parent UNIQUE (workshop_id, parent_id)
         )
       `);
-      await pool.query(`
+      await migrateQuery(pool, 'ParentWorkshop', `
         CREATE TABLE IF NOT EXISTS workshop_resources (
           id BIGSERIAL PRIMARY KEY,
           tenant_id VARCHAR(64) NOT NULL,

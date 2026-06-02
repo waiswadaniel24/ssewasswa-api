@@ -5,6 +5,7 @@
 // safety protocols, competition preparation.
 // 10+ routes, MySQL-backed, tenant-aware.
 // ============================================================
+const { migrateQuery } = require('./db');
 module.exports = function(app, pool, opts) {
   const { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT } = opts;
   const P = '#4f46e5', GRAY = '#6b7280';
@@ -27,7 +28,7 @@ module.exports = function(app, pool, opts) {
   // ─── Database Migration ──────────────────────────────────
   (async () => {
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS drone_modules (
+      await migrateQuery(pool, 'DroneEducation', `CREATE TABLE IF NOT EXISTS drone_modules (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         title VARCHAR(255) NOT NULL,
@@ -45,7 +46,7 @@ module.exports = function(app, pool, opts) {
     } catch(e) { console.warn('[DroneEducation] Warn:', e.message); }
 
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS drone_fleet (
+      await migrateQuery(pool, 'DroneEducation', `CREATE TABLE IF NOT EXISTS drone_fleet (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         name VARCHAR(200) NOT NULL,
@@ -66,7 +67,7 @@ module.exports = function(app, pool, opts) {
     } catch(e) { console.warn('[DroneEducation] Warn:', e.message); }
 
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS flight_logs (
+      await migrateQuery(pool, 'DroneEducation', `CREATE TABLE IF NOT EXISTS flight_logs (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         drone_id INT,
@@ -87,7 +88,7 @@ module.exports = function(app, pool, opts) {
     } catch(e) { console.warn('[DroneEducation] Warn:', e.message); }
 
     try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS drone_certifications (
+      await migrateQuery(pool, 'DroneEducation', `CREATE TABLE IF NOT EXISTS drone_certifications (
         id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         student_id INT NOT NULL,
