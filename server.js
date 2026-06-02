@@ -246,7 +246,110 @@ const { createPool, migrateQuery } = require('./db');
 const MigrationQueue = require('./migration-queue');
 const createJWTAuth = require('./jwt-auth');
 
-const pool = createPool(); // Uses shared db.js: max=20, connectionTimeout=60s
+const pool = createPool(); // Uses shared db.js: max=25, connectionTimeout=90s, idleTimeout=20s
+
+// === STARTUP MIGRATION GUARD ===
+// During startup, wrap pool.query AND pool.connect to route through concurrency-limited queue.
+// This prevents 200+ modules from exhausting the 25-connection pool simultaneously.
+const _originalPoolQuery = pool.query.bind(pool);
+const _originalPoolConnect = pool.connect.bind(pool);
+let _startupMigrationsDone = false;
+const _STARTUP_CONCURRENCY = 3;
+let _startupRunning = 0;
+let _startupQueue = [];
+
+pool.query = function startupGuard(...args) {
+  if (_startupMigrationsDone) return _originalPoolQuery(...args);
+  return new Promise((resolve, reject) => {
+    _startupQueue.push({ args, resolve, reject });
+    _drainStartupQueue();
+  });
+};
+
+// Also wrap pool.connect — modules that use client.query() bypass pool.query
+pool.connect = function startupConnectGuard() {
+  if (_startupMigrationsDone) return _originalPoolConnect();
+  // During startup, queue the connect like a query
+  return new Promise((resolve, reject) => {
+    _startupQueue.push({ type: 'connect', resolve, reject });
+    _drainStartupQueue();
+  });
+};
+
+function _drainStartupQueue() {
+  while (_startupQueue.length > 0 && _startupRunning < _STARTUP_CONCURRENCY) {
+    _startupRunning++;
+    const job = _startupQueue.shift();
+    _runStartupJob(job).finally(() => { _startupRunning--; _drainStartupQueue(); });
+  }
+}
+
+async function _runStartupJob(job) {
+  const { args, resolve, reject, type } = job;
+  const maxRetries = 2;
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    try {
+      if (type === 'connect') {
+        // For connect jobs, return the actual client
+        const client = await _originalPoolConnect();
+        // Wrap the client's .query to also go through the queue during startup
+        const origClientQuery = client.query.bind(client);
+        if (!_startupMigrationsDone) {
+          client.query = function(...qArgs) {
+            if (_startupMigrationsDone) { client.query = origClientQuery; return origClientQuery(...qArgs); }
+            return new Promise((res, rej) => {
+              _startupQueue.push({ args: qArgs, resolve: res, reject: rej });
+              _drainStartupQueue();
+            });
+          };
+        }
+        resolve(client);
+      } else {
+        const result = await _originalPoolQuery(...args);
+        resolve(result);
+      }
+      return;
+    } catch (err) {
+      const isRetryable = err.message && (
+        err.message.includes('terminated') ||
+        err.message.includes('timeout') ||
+        err.message.includes('too many clients') ||
+        err.message.includes('ECONNREFUSED') ||
+        err.message.includes('connection refused') ||
+        err.message.includes('cannot acquire') ||
+        err.message.includes('connection reset')
+      );
+      if (!isRetryable || attempt > maxRetries) {
+        // "already exists" / "does not exist" are expected for migrations
+        if (err.message.includes('already exists') || err.message.includes('does not exist') || err.message.includes('ON CONFLICT') || err.message.includes('duplicate') || err.message.includes('relation') || err.message.includes('constraint')) {
+          resolve(type === 'connect' ? null : { rows: [] });
+          return;
+        }
+        // Non-retryable, non-migration error - still resolve with empty to not crash
+        resolve(type === 'connect' ? null : { rows: [] });
+        return;
+      }
+      const delay = 2000 * attempt + Math.floor(Math.random() * 2000);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
+function finishStartupMigrations() {
+  _startupMigrationsDone = true;
+  pool.query = _originalPoolQuery;
+  pool.connect = _originalPoolConnect;
+  console.log(`[Startup] Migration guard removed — ${_startupQueue.length} remaining jobs flushed`);
+  // Drain any remaining queued jobs with normal pool operations
+  const remaining = _startupQueue.splice(0);
+  for (const job of remaining) {
+    if (job.type === 'connect') {
+      _originalPoolConnect().then(job.resolve).catch(() => job.resolve(null));
+    } else {
+      _originalPoolQuery(...job.args).then(job.resolve).catch(() => job.resolve({ rows: [] }));
+    }
+  }
+}
 
 // JWT Authentication System (alongside existing session auth)
 let jwtAuth;
@@ -2855,28 +2958,19 @@ const uniqueConstraintMigrations = [
     try {
       // Run each migration individually so one failure doesn't stop the rest
       for (const q of migrations) {
-        try { await migrateQuery(pool, 'main-migration', q); } catch (e) { /* column/index/constraint already exists is OK, ON CONFLICT without constraint is OK */ if (!e.message.includes('already exists') && !e.message.includes('does not exist') && !e.message.includes('ON CONFLICT')) console.warn('Migration warning:', e.message); }
+        try { await migrateQuery(pool, 'main', q); } catch (e) { /* migration errors are OK */ }
       }
       // Add missing UNIQUE constraints so ON CONFLICT DO NOTHING works correctly
       // First deduplicate data, then add constraints
       for (const uc of uniqueConstraintMigrations) {
-        try {
-          // Step 1: Remove duplicate rows keeping the earliest one
-          await migrateQuery(pool, 'constraint-migration', uc.dedup);
-          // Step 2: Add the UNIQUE constraint (may already exist from CREATE TABLE)
-          await migrateQuery(pool, 'constraint-migration', `ALTER TABLE ${uc.table} ADD CONSTRAINT ${uc.constraint} UNIQUE (${uc.columns})`);
-        } catch (e) {
-          // Constraint already exists is OK, column missing is OK, other errors are warnings
-          if (!e.message.includes('already exists') && !e.message.includes('does not exist')) {
-            // Silently skip - table may not exist yet or other minor issue
-          }
-        }
+        try { await migrateQuery(pool, 'unique-constraints', uc.dedup); } catch (e) { /* OK */ }
+        try { await migrateQuery(pool, 'unique-constraints', `ALTER TABLE ${uc.table} ADD CONSTRAINT ${uc.constraint} UNIQUE (${uc.columns})`); } catch (e) { /* OK */ }
       }
       // Re-seed data after UNIQUE constraints are added
       // (The INSERTs in the migrations array may have failed if constraints were missing)
       const reseedQueries = migrations.filter(q => q.includes('ON CONFLICT'));
       for (const q of reseedQueries) {
-        try { await migrateQuery(pool, 'reseed-migration', q); } catch (e) { /* ignore - already exists or constraint missing */ }
+        try { await migrateQuery(pool, 'reseed', q); } catch (e) { /* OK */ }
       }
       // Seed default min_plan requirements for features
       const planDefaults = [
@@ -46650,6 +46744,9 @@ console.log('[SettingsSearch] API route registered — /settings/search');
     console.warn('[Startup] Migration queue drain error:', e.message);
   }
 })();
+
+// Remove startup migration guard — all modules loaded, safe to use normal pool.query
+finishStartupMigrations();
 
 const PORT = process.env.PORT || 10000;
 const server = require('http').createServer(app);

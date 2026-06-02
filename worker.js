@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { createPool } = require('./db');
+const { createPool, migrateQuery } = require('./db');
 const nodemailer = require('nodemailer');
 
 // === DATABASE CONNECTION ===

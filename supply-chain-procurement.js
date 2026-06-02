@@ -22,7 +22,7 @@ module.exports = function(app, pool, opts) {
     ];
     for (const sql of tables) { try { await pool.query(sql); } catch(e) { console.warn('[Procurement] Table:', e.message); } }
   }
-  initTables();
+  initTables().catch(e => console.error('[Procurement] Migration init error:', e.message));
 
   // ─── Dashboard ────────────────────────────────────────────────────
   app.get('/school/procurement', requireAuth, ah(async (req, res) => {
