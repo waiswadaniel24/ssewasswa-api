@@ -41556,6 +41556,9 @@ try { const m = require('./security-auth-dashboard'); m(app, pool, _newModOpts);
 // Monitoring & Analytics Dashboard — real-time KPIs, events, performance, alerts
 try { const m = require('./monitoring-analytics-dashboard'); m(app, pool, _newModOpts); console.log('[MonDash] Monitoring & analytics dashboard loaded — 6 tables, 13 routes'); } catch(e) { console.warn('[MonDash] Error:', e.message); }
 
+// Integrations Hub — MCP server, UptimeRobot, push connectors, Telegram, Slack, webhooks, notification router
+try { const m = require('./integrations-hub'); m(app, pool, _newModOpts); console.log('[Integrations] Hub loaded — MCP, UptimeRobot, Push, Telegram, Slack, Webhooks, Notify Router'); } catch(e) { console.warn('[Integrations] Error:', e.message); }
+
 // Governance Dashboard — policies, compliance, data governance, workflows, user assistance
 try { const m = require('./governance-dashboard'); m(app, pool, _newModOpts); console.log('[GovDash] Governance dashboard loaded — 7 tables, 19 routes'); } catch(e) { console.warn('[GovDash] Error:', e.message); }
 
@@ -43402,11 +43405,11 @@ setTimeout(sendRenewalReminders, 900000); // Check 15 min after startup
 setInterval(runDataCleanup, 86400000);
 setTimeout(runDataCleanup, 600000); // Run 10 min after startup
 
-// Scheduled automation rules: every 5 minutes
-setInterval(runScheduledAutomations, 300000);
+// Scheduled automation rules: every 5 minutes (delayed 30s to avoid DB during startup migrations)
+setTimeout(() => setInterval(runScheduledAutomations, 300000), 30000);
 
-// Scheduled campaigns: every 60 seconds
-setInterval(processScheduledCampaigns, 60000);
+// Scheduled campaigns: every 60 seconds (delayed 30s to avoid DB during startup migrations)
+setTimeout(() => setInterval(processScheduledCampaigns, 60000), 30000);
 
 // Report history cleanup: every 7 days
 setInterval(cleanupReportHistory, 604800000);
