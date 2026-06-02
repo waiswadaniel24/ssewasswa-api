@@ -153,4 +153,76 @@ function staggerMigration(fn, maxDelay = 5000) {
   setTimeout(fn, delay);
 }
 
-module.exports = { createPool, Pool, queryWithRetry, runMigration, staggerMigration };
+/**
+ * Concurrency-limited migration queue — prevents connection pool exhaustion.
+ *
+ * All startup migrations should use this instead of raw pool.query().
+ * It ensures at most `concurrency` migrations run simultaneously, with
+ * automatic retry on "connection terminated" / "too many clients" errors.
+ *
+ * Usage in server.js IIFEs:
+ *   const { migrateQuery } = require('./db');
+ *   for (const sql of migrations) {
+ *     await migrateQuery(pool, 'MyModule', sql);
+ *   }
+ *
+ * @param {Pool} pool - The pg Pool instance
+ * @param {string} moduleName - Name for logging
+ * @param {string} sql - SQL to execute
+ * @param {any[]} params - Optional query parameters
+ * @returns {Promise<QueryResult>}
+ */
+let _migrateQueue = [];
+let _migrateRunning = 0;
+const _MIGRATE_CONCURRENCY = 5; // max 5 concurrent migration queries
+
+async function migrateQuery(pool, moduleName, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    _migrateQueue.push({ pool, moduleName, sql, params, resolve, reject });
+    _drainMigrateQueue();
+  });
+}
+
+function _drainMigrateQueue() {
+  while (_migrateQueue.length > 0 && _migrateRunning < _MIGRATE_CONCURRENCY) {
+    _migrateRunning++;
+    const job = _migrateQueue.shift();
+    _runMigrateJob(job).finally(() => {
+      _migrateRunning--;
+      _drainMigrateQueue();
+    });
+  }
+}
+
+async function _runMigrateJob(job) {
+  const { pool, moduleName, sql, params, resolve, reject } = job;
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    try {
+      const result = await pool.query(sql, params);
+      return resolve(result);
+    } catch (err) {
+      const isRetryable = err.message && (
+        err.message.includes('terminated') ||
+        err.message.includes('timeout') ||
+        err.message.includes('too many clients') ||
+        err.message.includes('ECONNREFUSED') ||
+        err.message.includes('connection refused') ||
+        err.message.includes('cannot acquire')
+      );
+      if (!isRetryable || attempt > maxRetries) {
+        // "already exists" / "does not exist" are expected for migrations
+        if (err.message.includes('already exists') || err.message.includes('does not exist') || err.message.includes('ON CONFLICT') || err.message.includes('duplicate')) {
+          return resolve({ rows: [] });
+        }
+        console.warn(`[Migration] ${moduleName}: ${err.message}`);
+        return resolve({ rows: [] }); // Don't crash on migration errors
+      }
+      const delay = 2000 * attempt + Math.floor(Math.random() * 1000);
+      console.warn(`[Migration] ${moduleName} attempt ${attempt}/${maxRetries} failed, retrying in ${delay}ms`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
+module.exports = { createPool, Pool, queryWithRetry, runMigration, staggerMigration, migrateQuery };

@@ -242,7 +242,7 @@ if (process.env.SENTRY_DSN) {
 }
 
 const app = express();
-const { createPool } = require('./db');
+const { createPool, migrateQuery } = require('./db');
 const MigrationQueue = require('./migration-queue');
 const createJWTAuth = require('./jwt-auth');
 
@@ -2841,16 +2841,16 @@ const uniqueConstraintMigrations = [
     try {
       // Run each migration individually so one failure doesn't stop the rest
       for (const q of migrations) {
-        try { await pool.query(q); } catch (e) { /* column/index/constraint already exists is OK, ON CONFLICT without constraint is OK */ if (!e.message.includes('already exists') && !e.message.includes('does not exist') && !e.message.includes('ON CONFLICT')) console.warn('Migration warning:', e.message); }
+        try { await migrateQuery(pool, 'main-migration', q); } catch (e) { /* column/index/constraint already exists is OK, ON CONFLICT without constraint is OK */ if (!e.message.includes('already exists') && !e.message.includes('does not exist') && !e.message.includes('ON CONFLICT')) console.warn('Migration warning:', e.message); }
       }
       // Add missing UNIQUE constraints so ON CONFLICT DO NOTHING works correctly
       // First deduplicate data, then add constraints
       for (const uc of uniqueConstraintMigrations) {
         try {
           // Step 1: Remove duplicate rows keeping the earliest one
-          await pool.query(uc.dedup);
+          await migrateQuery(pool, 'constraint-migration', uc.dedup);
           // Step 2: Add the UNIQUE constraint (may already exist from CREATE TABLE)
-          await pool.query(`ALTER TABLE ${uc.table} ADD CONSTRAINT ${uc.constraint} UNIQUE (${uc.columns})`);
+          await migrateQuery(pool, 'constraint-migration', `ALTER TABLE ${uc.table} ADD CONSTRAINT ${uc.constraint} UNIQUE (${uc.columns})`);
         } catch (e) {
           // Constraint already exists is OK, column missing is OK, other errors are warnings
           if (!e.message.includes('already exists') && !e.message.includes('does not exist')) {
@@ -2862,7 +2862,7 @@ const uniqueConstraintMigrations = [
       // (The INSERTs in the migrations array may have failed if constraints were missing)
       const reseedQueries = migrations.filter(q => q.includes('ON CONFLICT'));
       for (const q of reseedQueries) {
-        try { await pool.query(q); } catch (e) { /* ignore - already exists or constraint missing */ }
+        try { await migrateQuery(pool, 'reseed-migration', q); } catch (e) { /* ignore - already exists or constraint missing */ }
       }
       // Seed default min_plan requirements for features
       const planDefaults = [
@@ -24541,7 +24541,7 @@ app.get('/shortcuts', requireAuth, requireFeature('keyboard_shortcuts'), (req, r
     )`
   ];
   for (const q of additionalMigrations) {
-    try { await pool.query(q); } catch(e) { /* already exists OK */ }
+    try { await migrateQuery(pool, 'v11-migration', q); } catch(e) { /* already exists OK */ }
   }
   const additionalFlags = [
     ['student_portal','Student Portal','Students view their own grades, attendance, homework','3.0','core','None'],
@@ -32169,7 +32169,7 @@ const phase2Tables = [
 (async () => {
 try {
 for (const sql of phase2Tables) {
-  try { await pool.query(sql); } catch (e) { /* table already exists is OK */ }
+  try { await migrateQuery(pool, 'phase2-migration', sql); } catch (e) { /* table already exists is OK */ }
 }
 
 // Create indexes for Phase 2
@@ -41717,7 +41717,7 @@ try {
     // Telehealth / Video Consultation Booking
     `CREATE TABLE IF NOT EXISTS telehealth_consultations (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_name VARCHAR(255) NOT NULL, patient_id INTEGER, patient_phone VARCHAR(20), doctor_id INTEGER REFERENCES clinic_staff(id), doctor_name VARCHAR(255), scheduled_date DATE, scheduled_time TIME, duration_minutes INTEGER DEFAULT 30, meeting_link TEXT, meeting_id VARCHAR(255) UNIQUE, status VARCHAR(20) DEFAULT 'scheduled', subjective TEXT, objective TEXT, assessment TEXT, plan TEXT, started_at TIMESTAMPTZ, ended_at TIMESTAMPTZ, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`
   ];
-  for (const sql of tables) { try { await pool.query(sql); } catch(e) { /* table may already exist */ } }
+  for (const sql of tables) { try { await migrateQuery(pool, 'clinic-migration', sql); } catch(e) { /* table may already exist */ } }
 
   // Add missing columns to insurance_claims (table may already exist)
   const claimAlters = [
@@ -41732,7 +41732,7 @@ try {
     `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)`,
     `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`
   ];
-  for (const sql of claimAlters) { try { await pool.query(sql); } catch(e) { /* column may already exist */ } }
+  for (const sql of claimAlters) { try { await migrateQuery(pool, 'clinic-alters', sql); } catch(e) { /* column may already exist */ } }
 
   console.log('[Migrations] All new tables ready');
 
@@ -46003,28 +46003,28 @@ console.log('[Invitations] Email-based user invitation routes registered — /te
 // --- Auto-migrate: add status, message, rejected_at columns if missing ---
 (async () => {
   try {
-    const cols = (await pool.query(`
+    const cols = (await migrateQuery(pool, 'invitations-migration', `
       SELECT column_name FROM information_schema.columns WHERE table_name='user_invitations'
     `)).rows.map(r => r.column_name);
     if (!cols.includes('status')) {
-      await pool.query(`ALTER TABLE user_invitations ADD COLUMN status VARCHAR(20) DEFAULT 'pending'`);
+      await migrateQuery(pool, 'invitations-migration', `ALTER TABLE user_invitations ADD COLUMN status VARCHAR(20) DEFAULT 'pending'`);
       // Backfill existing rows based on accepted_at / declined_at
-      await pool.query(`UPDATE user_invitations SET status='accepted' WHERE accepted_at IS NOT NULL`);
-      await pool.query(`UPDATE user_invitations SET status='rejected' WHERE declined_at IS NOT NULL`);
-      await pool.query(`UPDATE user_invitations SET status='expired' WHERE accepted_at IS NULL AND declined_at IS NULL AND expires_at < NOW()`);
+      await migrateQuery(pool, 'invitations-migration', `UPDATE user_invitations SET status='accepted' WHERE accepted_at IS NOT NULL`);
+      await migrateQuery(pool, 'invitations-migration', `UPDATE user_invitations SET status='rejected' WHERE declined_at IS NOT NULL`);
+      await migrateQuery(pool, 'invitations-migration', `UPDATE user_invitations SET status='expired' WHERE accepted_at IS NULL AND declined_at IS NULL AND expires_at < NOW()`);
       console.log('[Invitations] Added status column to user_invitations');
     }
     if (!cols.includes('message')) {
-      await pool.query(`ALTER TABLE user_invitations ADD COLUMN message TEXT`);
+      await migrateQuery(pool, 'invitations-migration', `ALTER TABLE user_invitations ADD COLUMN message TEXT`);
       console.log('[Invitations] Added message column to user_invitations');
     }
     if (!cols.includes('rejected_at')) {
-      await pool.query(`ALTER TABLE user_invitations ADD COLUMN rejected_at TIMESTAMPTZ`);
+      await migrateQuery(pool, 'invitations-migration', `ALTER TABLE user_invitations ADD COLUMN rejected_at TIMESTAMPTZ`);
       console.log('[Invitations] Added rejected_at column to user_invitations');
     }
     // Add unique constraint if missing (one active invite per email per tenant)
     try {
-      await pool.query(`
+      await migrateQuery(pool, 'invitations-migration', `
         ALTER TABLE user_invitations DROP CONSTRAINT IF EXISTS user_invitations_tenant_email_status_key;
         ALTER TABLE user_invitations ADD CONSTRAINT user_invitations_tenant_email_status_key UNIQUE (tenant_id, email, status)
       `);
@@ -46033,7 +46033,7 @@ console.log('[Invitations] Email-based user invitation routes registered — /te
       console.warn('[Invitations] Unique constraint on (tenant_id, email, status):', e.message);
     }
     // Add index on email if missing
-    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_invitations_email ON user_invitations(email)`); } catch(e) {}
+    try { await migrateQuery(pool, 'invitations-migration', `CREATE INDEX IF NOT EXISTS idx_invitations_email ON user_invitations(email)`); } catch(e) {}
   } catch (e) {
     console.warn('[Invitations] Migration warning:', e.message);
   }
