@@ -158,41 +158,28 @@ const SCRAPE_SOURCES = {
   news: [
     { url: 'https://www.newvision.co.ug/rss.xml', source: 'New Vision', max: 15 },
     { url: 'https://www.monitor.co.ug/uganda/rss.xml', source: 'Daily Monitor', max: 15 },
-    { url: 'https://www.independent.co.ug/feed/', source: 'The Independent', max: 10 },
     { url: 'https://chimpreports.com/feed/', source: 'Chimp Reports', max: 10 },
     { url: 'https://eagle.co.ug/feed/', source: 'The Eagle Online', max: 8 },
-    { url: 'https://pmlive.co.ug/feed/', source: 'PMLive', max: 8 },
     { url: 'https://www.bbc.com/news/world/africa/rss.xml', source: 'BBC Africa', max: 10 },
     { url: 'https://www.aljazeera.com/xml/rss/all.xml', source: 'Al Jazeera', max: 8 },
-    { url: 'https://www.theguardian.com/world/africa/rss', source: 'The Guardian Africa', max: 8 },
-    { url: 'https://www.reuters.com/world/africa/rss', source: 'Reuters Africa', max: 8 },
   ],
   sports: [
     { url: 'https://www.newvision.co.ug/sports/rss.xml', source: 'New Vision Sports', max: 10 },
-    { url: 'https://www.monitor.co.ug/sports/rss.xml', source: 'Monitor Sports', max: 10 },
     { url: 'https://www.bbc.com/sport/africa/rss.xml', source: 'BBC Sport Africa', max: 8 },
   ],
   technology: [
     { url: 'https://techcrunch.com/feed/', source: 'TechCrunch', max: 8 },
     { url: 'https://www.theverge.com/rss/index.xml', source: 'The Verge', max: 8 },
-    { url: 'https://www.wired.com/feed/rss', source: 'Wired', max: 5 },
   ],
   business: [
-    { url: 'https://www.monitor.co.ug/uganda/business/rss.xml', source: 'Monitor Business', max: 10 },
-    { url: 'https://www.newvision.co.ug/business/rss.xml', source: 'New Vision Business', max: 10 },
     { url: 'https://www.bbc.com/news/business/rss.xml', source: 'BBC Business', max: 5 },
   ],
-  education: [
-    { url: 'https://www.newvision.co.ug/education/rss.xml', source: 'New Vision Education', max: 10 },
-    { url: 'https://www.monitor.co.ug/uganda/education/rss.xml', source: 'Monitor Education', max: 10 },
-  ],
+  education: [],
   health: [
     { url: 'https://www.bbc.com/news/health/rss.xml', source: 'BBC Health', max: 5 },
-    { url: 'https://www.who.int/rss-feeds/news-articles/rss.xml', source: 'WHO News', max: 5 },
   ],
   entertainment: [
     { url: 'https://www.boredpanda.com/feed/', source: 'Bored Panda', max: 8 },
-    { url: 'https://www.bbc.com/news/entertainment_and_arts/rss.xml', source: 'BBC Entertainment', max: 5 },
   ],
 };
 
@@ -894,7 +881,7 @@ setTimeout(async () => {
   } catch(e) {
     console.error('[ViralEngine] Initial setup error:', e.message);
   }
-}, 60000); // Run 60 seconds after startup
+}, 120000); // Run 120 seconds after startup (let DB migrations finish first)
 
 // Scrape every 6 hours
 setInterval(async () => {

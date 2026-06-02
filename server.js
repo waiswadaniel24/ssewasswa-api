@@ -16896,8 +16896,8 @@ const runAutoBackup = async () => {
 };
 // Run daily at 2am UTC (every 24 hours)
 setInterval(runAutoBackup, 24 * 60 * 60 * 1000);
-// First backup after 60 seconds
-setTimeout(runAutoBackup, 60000);
+// First backup after 120 seconds (let DB migrations finish first)
+setTimeout(runAutoBackup, 120000);
 
 // 3.5: RELATIONSHIPS
 app.get('/relationships/:type/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -43397,7 +43397,7 @@ setTimeout(processEmailQueue, 5000); // Run once shortly after startup
 
 // Fee reminders: every hour
 setInterval(processFeeReminders, 3600000);
-setTimeout(processFeeReminders, 60000);
+setTimeout(processFeeReminders, 120000); // 120s — let migrations finish
 
 // Recurring donations: every 2 hours
 setInterval(processRecurringDonations, 7200000);
@@ -43422,8 +43422,8 @@ setTimeout(runDataCleanup, 600000); // Run 10 min after startup
 // Scheduled automation rules: every 5 minutes (delayed 30s to avoid DB during startup migrations)
 setTimeout(() => setInterval(runScheduledAutomations, 300000), 30000);
 
-// Scheduled campaigns: every 60 seconds (delayed 30s to avoid DB during startup migrations)
-setTimeout(() => setInterval(processScheduledCampaigns, 60000), 30000);
+// Scheduled campaigns: every 60 seconds (delayed 120s to avoid DB during startup migrations)
+setTimeout(() => setInterval(processScheduledCampaigns, 60000), 120000);
 
 // Report history cleanup: every 7 days
 setInterval(cleanupReportHistory, 604800000);

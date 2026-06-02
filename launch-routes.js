@@ -524,8 +524,8 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
 
   // Run scraper every 6 hours
   setInterval(runFullScrape, SCRAPE_INTERVAL);
-  // Initial scrape after 30 seconds
-  setTimeout(runFullScrape, 30000);
+  // Initial scrape after 120 seconds (let DB migrations finish first)
+  setTimeout(runFullScrape, 120000);
 
   // =========================================================================
   // SECTION 4: HELPER - GET SCRAPED CONTENT

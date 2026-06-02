@@ -174,7 +174,9 @@ function staggerMigration(fn, maxDelay = 5000) {
  */
 let _migrateQueue = [];
 let _migrateRunning = 0;
-const _MIGRATE_CONCURRENCY = 5; // max 5 concurrent migration queries
+const _MIGRATE_CONCURRENCY = 3; // max 3 concurrent migration queries (reduced from 5 for 25-conn pool)
+let _migrateCompleted = 0;
+let _migrateFailed = 0;
 
 async function migrateQuery(pool, moduleName, sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -196,10 +198,12 @@ function _drainMigrateQueue() {
 
 async function _runMigrateJob(job) {
   const { pool, moduleName, sql, params, resolve, reject } = job;
-  const maxRetries = 3;
+  const maxRetries = 2; // reduced from 3 to fail faster and free queue slots
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     try {
       const result = await pool.query(sql, params);
+      _migrateCompleted++;
+      if (_migrateCompleted % 50 === 0) console.log(`[Migration] Progress: ${_migrateCompleted} queries done, ${_migrateQueue.length} queued`);
       return resolve(result);
     } catch (err) {
       const isRetryable = err.message && (
@@ -212,13 +216,16 @@ async function _runMigrateJob(job) {
       );
       if (!isRetryable || attempt > maxRetries) {
         // "already exists" / "does not exist" are expected for migrations
-        if (err.message.includes('already exists') || err.message.includes('does not exist') || err.message.includes('ON CONFLICT') || err.message.includes('duplicate')) {
+        if (err.message.includes('already exists') || err.message.includes('does not exist') || err.message.includes('ON CONFLICT') || err.message.includes('duplicate') || err.message.includes('relation')) {
+          _migrateCompleted++;
           return resolve({ rows: [] });
         }
+        _migrateFailed++;
         console.warn(`[Migration] ${moduleName}: ${err.message}`);
         return resolve({ rows: [] }); // Don't crash on migration errors
       }
-      const delay = 2000 * attempt + Math.floor(Math.random() * 1000);
+      // Longer delay with jitter to spread retry storms
+      const delay = 3000 * attempt + Math.floor(Math.random() * 2000);
       console.warn(`[Migration] ${moduleName} attempt ${attempt}/${maxRetries} failed, retrying in ${delay}ms`);
       await new Promise(r => setTimeout(r, delay));
     }
