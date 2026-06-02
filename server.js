@@ -46846,7 +46846,7 @@ console.log('[SettingsSearch] API route registered — /settings/search');
 
 // === TWO-PHASE STARTUP ===
 // Phase 1: Bind port IMMEDIATELY (Render requires binding within ~60s)
-// Phase 2: Wait for all migrations to drain, then open the gate for real traffic
+// Phase 2: Wait for migrations to settle (with timeout), then open gate
 // _serverReady flag is declared near top of file (line ~264) and checked by gate middleware
 
 const PORT = process.env.PORT || 10000;
@@ -46871,20 +46871,18 @@ server.listen(PORT, () => {
     /* migration OK */
   }
 
-  // Wait for startup guard queue to fully drain
+  // Wait for startup guard queue to drain (with 90s safety timeout)
   console.log('[Startup] Waiting for guard queue to drain...');
-  await waitForStartupDrain();
-  console.log('[Startup] Guard queue fully drained');
+  await waitForStartupDrain(90000);
+  console.log('[Startup] Guard queue drained or timed out');
 
-  // Remove startup migration guard
+  // Remove startup guard — remaining migrations continue at full pool speed in background
   finishStartupMigrations();
 
-  // Wait for migrateQuery queue to fully drain
-  console.log('[Startup] Waiting for migrateQuery queue to drain...');
-  await waitForMigrateDrain();
-  console.log('[Startup] All migrations complete — opening gate');
+  // Brief settle time for in-flight migrateQuery jobs
+  await new Promise(r => setTimeout(r, 3000));
 
-  // OPEN THE GATE — server is now ready for real traffic
+  // OPEN THE GATE
   _serverReady = true;
   console.log('Comfort Platform LIVE — accepting all requests');
 })();
