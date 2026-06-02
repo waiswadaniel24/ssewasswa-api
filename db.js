@@ -6,11 +6,10 @@
  * to prevent configuration drift and connection pool exhaustion.
  *
  * Key design decisions:
- * - max: 25 connections (Render free PostgreSQL allows ~97 total;
- *   25 leaves headroom for worker.js, migrate.js, and ad-hoc queries)
- * - connectionTimeoutMillis: 90000 (90s — startup migrations can be slow
- *   when 50+ modules compete for connections; retry logic helps)
- * - idleTimeoutMillis: 20000 (release idle connections after 20s to free pool)
+ * - max: 15 connections (Render free PostgreSQL has ~20 max_connections;
+ *   15 leaves headroom for superuser, replication, and connection overhead)
+ * - connectionTimeoutMillis: 30000 (30s — fail fast, retry in queue)
+ * - idleTimeoutMillis: 10000 (release idle connections after 10s to free pool)
  * - SSL: always rejectUnauthorized:false (Render/Neon use self-signed certs)
  * - Retry logic: auto-retry on connection timeout with exponential backoff
  */
@@ -27,9 +26,9 @@ function createPool(connectionString = process.env.DATABASE_URL, overrides = {})
   const config = {
     connectionString,
     ssl: { rejectUnauthorized: false },
-    max: 25,
-    idleTimeoutMillis: 20000,
-    connectionTimeoutMillis: 90000,
+    max: 15,
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 30000,
     allowExitOnIdle: false,
   };
 

@@ -257,7 +257,7 @@ const _originalPoolConnect = pool.connect.bind(pool);
 const _originalConsoleWarn = console.warn.bind(console);
 const _originalConsoleError = console.error.bind(console);
 let _startupMigrationsDone = false;
-const _STARTUP_CONCURRENCY = 10; // 10 concurrent during startup — Render free DB can handle it
+let _STARTUP_CONCURRENCY = 8; // Starts at 8 during startup — within pool limit of 15
 let _startupRunning = 0;
 let _startupQueue = [];
 let _migrationWarnCount = 0;
@@ -355,40 +355,19 @@ async function _runStartupJob(job) {
   }
 }
 
+/**
+ * Transition from startup mode to production mode.
+ * IMPORTANT: Does NOT remove the guard — it stays as a permanent concurrency limiter.
+ * This prevents connection pool exhaustion even after startup.
+ * Instead, it increases concurrency and unmutes console warnings.
+ */
 function finishStartupMigrations() {
-  _startupMigrationsDone = true;
-  pool.query = _originalPoolQuery;
-  pool.connect = _originalPoolConnect;
+  _startupMigrationsDone = true; // Flag for client.query wrappers to stop re-queuing
+  _STARTUP_CONCURRENCY = 12; // Increase to 12 — leaves 3 pool slots for session store etc.
   console.warn = _originalConsoleWarn;
   console.error = _originalConsoleError;
-  const remaining = _startupQueue.splice(0);
-  console.log(`[Startup] Migration guard removed — ${_migrationWarnCount} warnings suppressed, ${remaining.length} remaining jobs`);
-  if (remaining.length === 0) return;
-  // Drain remaining jobs GRADUALLY (max 3 concurrent) to avoid connection pool burst
-  const MAX_DRAIN = 3;
-  let drainIdx = 0;
-  let drainRunning = 0;
-  function drainNext() {
-    while (drainRunning < MAX_DRAIN && drainIdx < remaining.length) {
-      drainRunning++;
-      const job = remaining[drainIdx++];
-      const p = job.type === 'connect'
-        ? _originalPoolConnect().then(c => c).catch(() => null)
-        : _originalPoolQuery(...job.args).catch(() => ({ rows: [] }));
-      p.then(result => {
-        if (job.type === 'connect') job.resolve(result);
-        else job.resolve(result);
-        drainRunning--;
-        drainNext();
-      }).catch(() => {
-        if (job.type === 'connect') job.resolve(null);
-        else job.resolve({ rows: [] });
-        drainRunning--;
-        drainNext();
-      });
-    }
-  }
-  drainNext();
+  const remaining = _startupQueue.length;
+  console.log(`[Startup] Guard concurrency increased to 12 — ${_migrationWarnCount} warnings suppressed, ${remaining} queued jobs remain`);
 }
 
 /**
@@ -46876,7 +46855,7 @@ server.listen(PORT, () => {
   await waitForStartupDrain(90000);
   console.log('[Startup] Guard queue drained or timed out');
 
-  // Remove startup guard — remaining migrations continue at full pool speed in background
+  // Transition guard to production mode (increase concurrency, keep as limiter)
   finishStartupMigrations();
 
   // Brief settle time for in-flight migrateQuery jobs
