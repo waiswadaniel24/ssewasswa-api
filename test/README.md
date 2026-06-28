@@ -34,6 +34,8 @@ TEST_DATABASE_URL=postgres://localhost/ssewasswa_test node --test test/
 | `multi-tenant-isolation.test.js` | Two tenants cannot see each other's `students` rows (README claim, never tested before — audit F-06) | Yes — skips if `TEST_DATABASE_URL` unset |
 | `auth-flow.test.js` | `/api/auth/register` → `/api/auth/login` → `/api/auth/me` → `/api/auth/logout` flow (audit F-06) | Yes — skips if `TEST_DATABASE_URL` unset |
 | `_pg-mock.js` | Test helper (NOT a test file). Preloaded via `node --require` to mock the `pg` module so `health.test.js` can boot server.js without a real DB. | n/a |
+| `hipaa-encryption.test.js` | AES-256-GCM encrypt/decrypt round-trip, AAD mismatch throws, null/empty/legacy pass-through, IV randomness, key resolution (Track A) | No |
+| `kms.test.js` | KMS envelope-encryption adapter (Gap 8): local provider getDEK/encryptDEK/decryptDEK round-trip, DEK cache TTL, env-var precedence (KMS_PROVIDER vs PHI_KMS_PROVIDER), AWS KMS Encrypt/Decrypt via mocked client, error propagation | No — AWS client is mocked, no real AWS calls |
 | `server.test.js` | Legacy unit tests for input validation, copied from the original repo. Kept for backwards compatibility. | No |
 
 ## Test database setup

@@ -379,15 +379,25 @@ should review annually as part of vendor risk management).
 Tracked as code comments and worklog entries; repeated here for
 visibility:
 
-1. **KMS adapter is a stub.** `src/lib/kms.js` returns the local
-   env-var key. The AWS KMS path (`getAwsDEK`, `encryptDEK`,
-   `decryptDEK`, `warmDEKCache`) is documented as TODO with a full
-   implementation plan but not yet wired up. **Required before
-   multi-tenant production.**
+1. **KMS adapter is fully implemented (Gap 8).** `src/lib/kms.js` now
+   supports both a `local` provider (env-var key, dev/staging) and an `aws`
+   provider (real AWS KMS via `@aws-sdk/client-kms`). The master key never
+   leaves KMS in production. Public API: `getDEK(tenantId, storedEncryptedDek)`
+   returns `{ dek, encryptedDek, isNew }`, plus `encryptDEK`, `decryptDEK`,
+   `warmDEKCache`, `generateNewDEK`, `invalidateDEK`, `clearDEKCache`.
+   Provider is selected by `KMS_PROVIDER` env var (or legacy
+   `PHI_KMS_PROVIDER`). See [`docs/KMS_SETUP.md`](./KMS_SETUP.md) for
+   AWS Console setup, IAM policy, env vars, and migration runbook. The
+   `scripts/migrate-kms-provider.js` automation script is still TODO —
+   the manual migration runbook in `KMS_SETUP.md` §4 is the interim
+   process. Unit tests: `test/kms.test.js` (43 tests, all passing, AWS
+   client mocked — no real AWS calls in CI).
 
 2. **Key rotation is a stub.** `rotatePHIKey()` throws. The manual
    runbook in §4.2 above is the interim process. The full
    batched/transactional/resumable implementation is a follow-up task.
+   (Note: `kms.js#generateNewDEK()` IS implemented and can be used to
+   drive per-tenant DEK rotation once `rotatePHIKey` is wired up.)
 
 3. **Backfill script not yet written.** Existing plaintext rows in
    `patient_portal_users` / `consultations` / `prescriptions` need to be
@@ -427,14 +437,16 @@ visibility:
 | KMS envelope-encryption adapter | `src/lib/kms.js`                                  |
 | DB migration                    | `migrations/000003_hipaa_phi_encryption.js`       |
 | Express route handlers          | `src/routes/clinic-hipaa.js`                      |
-| Unit tests                      | `test/hipaa-encryption.test.js`                   |
+| Unit tests (hipaa-encryption)   | `test/hipaa-encryption.test.js`                   |
+| Unit tests (kms adapter)        | `test/kms.test.js`                                |
+| KMS operational setup guide     | `docs/KMS_SETUP.md`                               |
 | This document                   | `docs/HIPAA_COMPLIANCE.md`                        |
 
 To run the tests:
 
 ```bash
 cd /home/z/my-project/repo
-node --test test/hipaa-encryption.test.js
+node --test test/hipaa-encryption.test.js test/kms.test.js
 ```
 
 To smoke-test the encryption module:

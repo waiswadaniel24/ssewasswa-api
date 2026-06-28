@@ -61,6 +61,13 @@ services:
         sync: false
       - key: STRIPE_PUBLISHABLE_KEY
         sync: false
+      # STRIPE_CONNECT_WEBHOOK_SECRET — separate signing secret for the
+      # Stripe Connect webhook endpoint (account.updated, account.application.
+      # deauthorized). MUST be a different endpoint in the Stripe dashboard
+      # from the payment webhook — Stripe signs each endpoint with a unique
+      # secret. See src/routes/stripe-connect.js /webhook. (Gap 7)
+      - key: STRIPE_CONNECT_WEBHOOK_SECRET
+        sync: false
       # === PayPal (Track B) — alternative for overseas donors ===
       - key: PAYPAL_CLIENT_ID
         sync: false
@@ -78,6 +85,24 @@ services:
       # === HIPAA PHI encryption (Track A) — separate key for patient data ===
       - key: PHI_ENCRYPTION_KEY
         sync: false
+      # === KMS (Gap 8) — for HIPAA PHI encryption in production ===
+      # Provider: 'local' (dev/staging — uses PHI_ENCRYPTION_KEY above) or
+      # 'aws' (production — uses AWS KMS, master key never leaves KMS).
+      # See docs/KMS_SETUP.md for full setup instructions.
+      - key: KMS_PROVIDER
+        value: local  # change to 'aws' for production
+      - key: AWS_KMS_KEY_ID
+        sync: false  # set to the KMS key ARN when KMS_PROVIDER=aws
+      - key: AWS_REGION
+        value: us-east-1
+      # === Automated daily DB backups (Gap 4) ===
+      # Backup retention in days. Daily backups older than this are pruned
+      # by worker.js's cron job (2 AM UTC). The 1st-of-month daily backup
+      # is flagged as a monthly snapshot and is NOT pruned by this setting
+      # (kept indefinitely for long-term point-in-time recovery).
+      # See src/lib/backup.js + migrations/000005_backups.js.
+      - key: BACKUP_RETENTION_DAYS
+        value: "30"
 
 databases:
   - name: ssewasswa-comfort-zone

@@ -13731,6 +13731,75 @@ try {
   console.log('[Clinic] HIPAA-compliant clinic routes loaded at /api/clinic');
 } catch (e) { console.warn('[Clinic] HIPAA clinic routes failed to load:', e.message); }
 
+// === Auto locale + currency detection for donors (Gap 3) ===
+// Multi-currency wallet (fundraising-ultimate4.js) + locale manager exist, but
+// donors had to manually pick their language/currency. This middleware
+// auto-detects from Cloudflare CF-IPCountry (fast path) → IP geolocation
+// (ipapi.co fallback) → Accept-Language → default en-US/USD. Result is cached
+// in visitor_locale / visitor_currency cookies (1-year expiry) so subsequent
+// page loads don't re-detect. Detection runs ONLY on public-facing paths —
+// authenticated API calls skip the overhead. Never blocks a request: any
+// failure falls back to en-US/USD.
+//
+// Priority chain: ?locale= query → CF-IPCountry header → IP lookup →
+//                 Accept-Language → DEFAULT_LOCALE (en-US/USD).
+// See src/lib/geo-locale.js for the full implementation + country mapping.
+try {
+  app.use('/api/locale', require('./src/routes/locale')(_routeSharedCtx));
+  // Apply the detection middleware to public pages only (don't slow down authed API calls)
+  app.use(['/public', '/api/public', '/donate', '/campaigns', '/p/fundraising'], async (req, res, next) => {
+    try {
+      const cachedLocale = req.cookies && req.cookies.visitor_locale;
+      const cachedCurrency = req.cookies && req.cookies.visitor_currency;
+      if (cachedLocale && cachedCurrency) {
+        req.detectedLocale = { locale: cachedLocale, currency: cachedCurrency, source: 'cookie' };
+      } else {
+        const { detectLocale } = require('./src/lib/geo-locale');
+        const detected = await detectLocale(req);
+        req.detectedLocale = detected;
+        res.cookie('visitor_locale', detected.locale, { maxAge: 365 * 24 * 60 * 60 * 1000, httpOnly: false });
+        res.cookie('visitor_currency', detected.currency, { maxAge: 365 * 24 * 60 * 60 * 1000, httpOnly: false });
+      }
+      next();
+    } catch (_e) {
+      req.detectedLocale = { locale: 'en-US', currency: 'USD', source: 'error' };
+      next();
+    }
+  });
+  console.log('[Locale] Auto-detection middleware loaded for public routes');
+} catch (e) { console.warn('[Locale] Failed to load:', e.message); }
+
+// === Shift scheduling module (Gap 5) ===
+// Employee shift scheduling for businesses: shifts, recurring templates, and
+// time-off requests. All routes gated by requireAuth + requireSubscription('basic').
+// Migration: migrations/000006_shifts.js (shifts, shift_templates, time_off_requests).
+try {
+  app.use('/api/shifts', require('./src/routes/shifts')(_routeSharedCtx));
+  console.log('[Shifts] Shift scheduling routes loaded at /api/shifts');
+} catch (e) { console.warn('[Shifts] Failed to load:', e.message); }
+
+// === Page builder (Gap 6) — drag-and-drop page editor ===
+// Each page is a JSON array of blocks stored in the `pages` table.
+// Block types: heading, paragraph, image, donation_button, spacer, divider.
+// Published pages render at /p/:slug (public, no auth).
+try {
+  app.use('/api/pages', require('./src/routes/pages')(_routeSharedCtx));
+  app.use('/', require('./src/routes/public-pages')(_routeSharedCtx));
+  console.log('[Page Builder] Routes loaded at /api/pages and /p/:slug');
+} catch (e) { console.warn('[Page Builder] Failed to load:', e.message); }
+
+// === Tax receipt generator (Gap 2) ===
+// Generates 501(c)(3)-compliant PDF tax receipts for ANY US donor (the
+// generic US receipt that was previously missing — fundraising-mega.js
+// handles UK Gift Aid, fundraising-ultimate10.js handles US IRA/QCD).
+// Also provides alias routes for the IRA and Gift Aid receipts, an email
+// endpoint (uses nodemailer), and a year-end tenant summary. See
+// src/routes/tax-receipts.js for the IRS compliance checklist.
+try {
+  app.use('/api', require('./src/routes/tax-receipts')(_routeSharedCtx));
+  console.log('[Tax Receipts] 501(c)(3) + IRA + Gift Aid receipt routes loaded');
+} catch (e) { console.warn('[Tax Receipts] Failed to load:', e.message); }
+
 // === Extracted v1 REST API routes (Conservative refactor — Track 1) ===
 // The /api/v1/openapi.json route below remains inline because it's a single
 // ~285-line JSON spec route.
@@ -46056,6 +46125,49 @@ try {
   console.log('[Payments] PayPal routes loaded — /api/payments/paypal/*');
 } catch (e) {
   console.warn('[Payments] PayPal routes failed to load:', e.message);
+}
+
+// === Stripe Connect onboarding (Gap 7) ===
+// Mounts the tenant self-service Stripe Connect onboarding flow:
+//   POST /api/stripe-connect/start          — create Express Account + onboarding URL
+//   GET  /api/stripe-connect/status         — cached/live Connect status
+//   GET  /api/stripe-connect/dashboard-link — Stripe-hosted Express dashboard URL
+//   POST /api/stripe-connect/webhook        — Stripe Connect webhook (raw body,
+//                                             signed with STRIPE_CONNECT_WEBHOOK_SECRET)
+//
+// This route module reads/writes the tenants.stripe_* columns added by
+// migration 000008_stripe_connect.js. The existing payments-stripe.js
+// (Track B) already reads tenants.stripe_account_id to attach
+// transfer_data.destination + application_fee_amount to PaymentIntents —
+// so as soon as a tenant completes onboarding, their donations start
+// routing directly to their bank account (minus the platform fee).
+//
+// The /webhook path is CSRF-exempt via the existing webhook-paths check
+// earlier in this file (matches '/webhook'). No change to CSRF middleware.
+try {
+  app.use('/api/stripe-connect', require('./src/routes/stripe-connect')(_routeSharedCtx));
+  console.log('[Stripe Connect] Onboarding routes loaded at /api/stripe-connect');
+} catch (e) {
+  console.warn('[Stripe Connect] Failed to load:', e.message);
+}
+
+// === Automated backup admin routes (Gap 4) ===
+// Mounts super-admin-only routes for managing automated database backups:
+//   GET    /api/admin/backups               — list recent backups
+//   POST   /api/admin/backups/run           — manually trigger a backup
+//   POST   /api/admin/backups/prune         — manually prune old backups
+//   POST   /api/admin/backups/:id/restore   — restore from a backup
+//   GET    /api/admin/backups/:id/download  — download a backup file
+//
+// The daily backup itself runs in worker.js (cron.schedule('0 2 * * *'))
+// — these routes are for ad-hoc operator actions and for the admin UI to
+// list/restore backups. The route module reads/writes the `backups` table
+// (migration 000005) and shells out to pg_dump/pg_restore via src/lib/backup.js.
+try {
+  app.use('/api/admin/backups', require('./src/routes/admin-backups')(_routeSharedCtx));
+  console.log('[Backups] Admin backup routes loaded at /api/admin/backups');
+} catch (e) {
+  console.warn('[Backups] Failed to load admin backup routes:', e.message);
 }
 
 // ============================================================
