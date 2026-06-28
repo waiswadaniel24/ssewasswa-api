@@ -1,6 +1,15 @@
 require('dotenv').config();
 const { createPool, migrateQuery } = require('./db');
 const nodemailer = require('nodemailer');
+// === Automated daily DB backups (Gap 4) ===
+// node-cron drives the 2 AM UTC daily backup schedule. The backup module
+// shells out to `pg_dump`/`pg_restore` (PostgreSQL client binaries) —
+// see src/lib/backup.js for the constraint that Render web services do
+// NOT ship these by default; either run worker.js on a host with
+// postgresql-client installed, or deploy a Render Background Worker with
+// a custom Docker image that includes the client tools.
+const cron = require('node-cron');
+const backup = require('./src/lib/backup');
 
 // === DATABASE CONNECTION ===
 const pool = createPool(undefined, { max: 5 }); // Worker uses smaller pool (5 connections)
@@ -229,6 +238,56 @@ async function cleanupOldEmails() {
   }
 }
 
+// === DAILY DATABASE BACKUP (Gap 4) ===
+// Runs at 2 AM UTC every day. The flow is:
+//   1. runBackup()     — pg_dump → gzip → tmp file → INSERT row in backups table
+//   2. uploadBackup()  — upload tmp file to Cloudinary (or local-only fallback)
+//   3. UPDATE row      — set url, provider, status='uploaded'
+//   4. (on 1st of month) — flag the row as is_monthly_snapshot=true so the
+//      prune step below doesn't delete it (long-term point-in-time recovery)
+//   5. pruneOldBackups() — delete backups older than BACKUP_RETENTION_DAYS,
+//      skipping monthly snapshots
+//
+// All errors are caught and logged — a backup failure must NOT crash the
+// worker (the email queue + fee reminders still need to run). An alert
+// should be wired in here later (e.g. Sentry captureException, or an email
+// to the platform admin) so silent backup failures don't go unnoticed.
+async function runDailyBackup() {
+  console.log('[Cron] Daily backup starting at', new Date().toISOString());
+  try {
+    const { backupId, localPath, sizeBytes } = await backup.runBackup(pool);
+    const { url, provider } = await backup.uploadBackup(localPath, backupId);
+    await pool.query(
+      'UPDATE backups SET url = $1, provider = $2, status = $3 WHERE backup_id = $4',
+      [url, provider, provider === 'local' ? 'local' : 'uploaded', backupId]
+    );
+
+    // On the 1st of each month, flag this backup as a monthly snapshot.
+    // Monthly snapshots are exempt from the retention-prune below — we keep
+    // ~12 of them at any time (one per month) for long-term recovery.
+    if (new Date().getDate() === 1) {
+      await pool.query(
+        'UPDATE backups SET is_monthly_snapshot = true WHERE backup_id = $1',
+        [backupId]
+      );
+      console.log(`[Cron] Backup ${backupId} flagged as monthly snapshot`);
+    }
+
+    console.log(`[Cron] Daily backup complete: ${backupId} (${sizeBytes} bytes, ${provider})`);
+
+    // Prune old backups AFTER the new one is safely uploaded. If the prune
+    // fails we still have today's backup; if it succeeds we've cleaned up
+    // the dailies that are older than BACKUP_RETENTION_DAYS.
+    await backup.pruneOldBackups(pool);
+  } catch (e) {
+    console.error('[Cron] Daily backup failed:', e.message);
+    // TODO: wire an alert (Sentry / email) here so silent backup failures
+    // are surfaced. Without an alert, a missing pg_dump binary or a
+    // Cloudinary outage would manifest only as missing rows in the
+    // backups table — easy to miss until a restore is needed.
+  }
+}
+
 // === GRACEFUL SHUTDOWN ===
 process.on('SIGINT', async () => {
   console.log('\n[Worker] Shutting down...');
@@ -246,6 +305,17 @@ process.on('SIGTERM', async () => {
   await ensureTable();
   await ensureFeeReminderSettingsTable();
 
+  // Ensure the backups table exists before the first cron tick fires —
+  // runBackup() has its own fallback (ensureBackupsTable) but doing it here
+  // means the table is ready by the time the cron callback runs.
+  try {
+    await backup.ensureBackupsTable(pool);
+    console.log('[Worker] backups table ready');
+  } catch (e) {
+    console.error('[Worker] Failed to ensure backups table:', e.message);
+    // Non-fatal: runBackup will retry table creation on first invocation.
+  }
+
   // Process immediately on start
   await processEmails();
   await processFeeReminders();
@@ -258,6 +328,22 @@ process.on('SIGTERM', async () => {
 
   // Cleanup old emails every hour
   setInterval(cleanupOldEmails, 3600000);
+
+  // === Daily backup schedule (Gap 4) ===
+  // 0 2 * * * = 02:00 UTC every day. 2 AM is a low-traffic window for the
+  // platform's target market (East African schools — local time 5 AM EAT).
+  // The cron expression is validated by node-cron at schedule time and will
+  // throw if malformed (caught by the surrounding try at module load — but
+  // a malformed literal like this one will throw synchronously at require
+  // time, so we wrap it defensively).
+  try {
+    cron.schedule('0 2 * * *', runDailyBackup, {
+      timezone: 'UTC',
+    });
+    console.log('[Worker] Daily backup cron scheduled for 02:00 UTC');
+  } catch (e) {
+    console.error('[Worker] Failed to schedule daily backup cron:', e.message);
+  }
 
   console.log('[Worker] Email worker started (polling every 30s, fee reminders every hour)');
 })();

@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://ssewasswa.github.io/ssewasswa-api/sitemap.xml
+Sitemap: https://ssewasswa.onrender.com/sitemap.xml

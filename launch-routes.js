@@ -2577,10 +2577,60 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     }
   }));
 
+  // === Gap 3: auto currency detection for donors ==========================
+  // Campaign `target` / `raised` are stored in UGX (the platform base currency
+  // per branding-currency.js SEED_CURRENCIES). When an overseas donor visits,
+  // the locale middleware (server.js) sets req.detectedLocale.currency to their
+  // detected currency. We attach a converted amount alongside the original so
+  // the frontend can show "UGX 1,000,000 (~$27 USD)" without round-tripping to
+  // the DB. Rates are static mirrors of branding-currency.js SEED_CURRENCIES;
+  // for live rates, see /api/v1/currency/convert (branding-currency.js:853).
+  const UGX_TO_FOREIGN = {
+    UGX: 1, USD: 1 / 3750, KES: 1 / 30.5, TZS: 1 / 1.62, EUR: 1 / 4100,
+    GBP: 1 / 4750, RWF: 1 / 3.1, BWP: 1 / 280, ZMW: 1 / 200, MWK: 1 / 2.15,
+    CAD: 1 / 2750, AUD: 1 / 2500, NZD: 1 / 2300, NGN: 1 / 4.5, GHS: 1 / 320,
+    AED: 1 / 1020, ZAR: 1 / 205, ETB: 1 / 95,
+  };
+  const roundCurrencyAmount = (amount, code) => {
+    // UGX/TZS/RWF/MWK/BWP are conventionally displayed with 0 decimals.
+    const zeroDecimal = ['UGX', 'TZS', 'RWF', 'MWK', 'BWP', 'NGN'].includes(code);
+    const factor = zeroDecimal ? 1 : 100;
+    return Math.round(Number(amount || 0) * factor) / factor;
+  };
+  const convertFromUGX = (ugxAmount, toCode) => {
+    if (!toCode || !UGX_TO_FOREIGN[toCode]) return { amount: Number(ugxAmount || 0), currency: 'UGX', rate: 1 };
+    const rate = UGX_TO_FOREIGN[toCode];
+    return { amount: roundCurrencyAmount(Number(ugxAmount || 0) * rate, toCode), currency: toCode, rate };
+  };
+
   app.get('/api/public/campaigns', ah(async (req, res) => {
     try {
       const campaigns = await getActiveCampaigns();
-      res.json({ ok: true, campaigns });
+      // Attach a converted target/raised alongside the originals for the
+      // visitor's detected currency. Originals stay in UGX; the *_converted
+      // fields are in req.detectedLocale.currency (default UGX, no-op).
+      const visitorCurrency = (req.detectedLocale && req.detectedLocale.currency) || 'UGX';
+      const detectedLocale = req.detectedLocale || { locale: 'en-UG', currency: 'UGX', source: 'default' };
+      const enriched = campaigns.map(c => {
+        const targetConverted = convertFromUGX(c.target, visitorCurrency);
+        const raisedConverted = convertFromUGX(c.raised, visitorCurrency);
+        return {
+          ...c,
+          target_original: Number(c.target || 0),
+          raised_original: Number(c.raised || 0),
+          base_currency: 'UGX',
+          target_converted: targetConverted.amount,
+          raised_converted: raisedConverted.amount,
+          visitor_currency: visitorCurrency,
+          exchange_rate: targetConverted.rate,
+        };
+      });
+      res.json({
+        ok: true,
+        campaigns: enriched,
+        detected_locale: detectedLocale,
+        visitor_currency: visitorCurrency,
+      });
     } catch (e) {
       res.json({ ok: true, campaigns: [] });
     }

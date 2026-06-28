@@ -1,0 +1,25 @@
+# CODEOWNERS for ssewasswa-api
+# See https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner — fallback for anything not matched below
+*                           @waiswadaniel24
+
+# Security-sensitive files require owner review
+/render.yaml                 @waiswadaniel24
+/package.json                @waiswadaniel24
+/db.js                       @waiswadaniel24
+/server.js                   @waiswadaniel24
+/migrations/                 @waiswadaniel24
+/SECURITY.md                 @waiswadaniel24
+
+# Frontend (PWA / docs)
+/public/                     @waiswadaniel24
+/docs/                       @waiswadaniel24
+/index.html                  @waiswadaniel24
+
+# Tests
+/test/                       @waiswadaniel24
+
+# CI / deployment
+/.github/                    @waiswadaniel24
+/render.yaml                 @waiswadaniel24
