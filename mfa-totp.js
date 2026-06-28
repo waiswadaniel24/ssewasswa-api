@@ -128,68 +128,64 @@ module.exports = function (app, pool, opts) {
 
   /* ─────────────────────── DB migrations ─────────────────────── */
   (async function migrate() {
-    const client = await pool.connect();
-    try {
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS mfa_secrets (
-          id SERIAL PRIMARY KEY,
-          tenant_id INT NOT NULL DEFAULT 0,
-          user_email VARCHAR(255) NOT NULL,
-          secret_key TEXT NOT NULL,
-          enabled BOOLEAN NOT NULL DEFAULT false,
-          verified_at TIMESTAMPTZ,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_mfa_secrets_tenant_email ON mfa_secrets(tenant_id, user_email);
+    const sql = `
+      CREATE TABLE IF NOT EXISTS mfa_secrets (
+        id SERIAL PRIMARY KEY,
+        tenant_id INT NOT NULL DEFAULT 0,
+        user_email VARCHAR(255) NOT NULL,
+        secret_key TEXT NOT NULL,
+        enabled BOOLEAN NOT NULL DEFAULT false,
+        verified_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_mfa_secrets_tenant_email ON mfa_secrets(tenant_id, user_email);
 
-        CREATE TABLE IF NOT EXISTS mfa_backup_codes (
-          id SERIAL PRIMARY KEY,
-          tenant_id INT NOT NULL DEFAULT 0,
-          user_email VARCHAR(255) NOT NULL,
-          code_hash VARCHAR(255) NOT NULL,
-          used BOOLEAN NOT NULL DEFAULT false,
-          used_at TIMESTAMPTZ,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_backup_codes_tenant_email ON mfa_backup_codes(tenant_id, user_email);
+      CREATE TABLE IF NOT EXISTS mfa_backup_codes (
+        id SERIAL PRIMARY KEY,
+        tenant_id INT NOT NULL DEFAULT 0,
+        user_email VARCHAR(255) NOT NULL,
+        code_hash VARCHAR(255) NOT NULL,
+        used BOOLEAN NOT NULL DEFAULT false,
+        used_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_backup_codes_tenant_email ON mfa_backup_codes(tenant_id, user_email);
 
-        CREATE TABLE IF NOT EXISTS mfa_verification_log (
-          id SERIAL PRIMARY KEY,
-          tenant_id INT NOT NULL DEFAULT 0,
-          user_email VARCHAR(255) NOT NULL,
-          method VARCHAR(50) NOT NULL DEFAULT 'totp',
-          success BOOLEAN NOT NULL DEFAULT false,
-          ip_address VARCHAR(45),
-          user_agent TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_vlog_tenant_email ON mfa_verification_log(tenant_id, user_email, created_at DESC);
+      CREATE TABLE IF NOT EXISTS mfa_verification_log (
+        id SERIAL PRIMARY KEY,
+        tenant_id INT NOT NULL DEFAULT 0,
+        user_email VARCHAR(255) NOT NULL,
+        method VARCHAR(50) NOT NULL DEFAULT 'totp',
+        success BOOLEAN NOT NULL DEFAULT false,
+        ip_address VARCHAR(45),
+        user_agent TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_vlog_tenant_email ON mfa_verification_log(tenant_id, user_email, created_at DESC);
 
-        CREATE TABLE IF NOT EXISTS mfa_trusted_devices (
-          id SERIAL PRIMARY KEY,
-          tenant_id INT NOT NULL DEFAULT 0,
-          user_email VARCHAR(255) NOT NULL,
-          device_name VARCHAR(255),
-          device_fingerprint VARCHAR(64) NOT NULL,
-          trusted_until TIMESTAMPTZ NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_td_tenant_email ON mfa_trusted_devices(tenant_id, user_email, device_fingerprint);
+      CREATE TABLE IF NOT EXISTS mfa_trusted_devices (
+        id SERIAL PRIMARY KEY,
+        tenant_id INT NOT NULL DEFAULT 0,
+        user_email VARCHAR(255) NOT NULL,
+        device_name VARCHAR(255),
+        device_fingerprint VARCHAR(64) NOT NULL,
+        trusted_until TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_td_tenant_email ON mfa_trusted_devices(tenant_id, user_email, device_fingerprint);
 
-        CREATE TABLE IF NOT EXISTS mfa_settings (
-          id SERIAL PRIMARY KEY,
-          tenant_id INT NOT NULL DEFAULT 0,
-          enforce_mfa BOOLEAN NOT NULL DEFAULT false,
-          require_for_roles TEXT[] NOT NULL DEFAULT '{}',
-          allow_backup_codes BOOLEAN NOT NULL DEFAULT true,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          UNIQUE(tenant_id)
-        );
-      `);
-      console.log('[mfa-totp] Migrations complete.');
-    } finally {
-      client.release();
-    }
+      CREATE TABLE IF NOT EXISTS mfa_settings (
+        id SERIAL PRIMARY KEY,
+        tenant_id INT NOT NULL DEFAULT 0,
+        enforce_mfa BOOLEAN NOT NULL DEFAULT false,
+        require_for_roles TEXT[] NOT NULL DEFAULT '{}',
+        allow_backup_codes BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(tenant_id)
+      );
+    `;
+    await migrateQuery(pool, 'MFATotp', sql);
+    console.log('[mfa-totp] Migrations complete.');
   })().catch(() => {});
 
   /* ─────────────────────── Shared UI snippets ─────────────────────── */

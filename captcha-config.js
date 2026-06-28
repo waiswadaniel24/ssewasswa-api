@@ -31,47 +31,43 @@ module.exports = function (app, pool, opts) {
 
   /* ─────────────────────── DB migrations ─────────────────────── */
   (async function migrate() {
-    const client = await pool.connect();
-    try {
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS captcha_settings (
-          id SERIAL PRIMARY KEY,
-          provider TEXT DEFAULT 'recaptcha_v2',
-          site_key TEXT,
-          secret_key TEXT,
-          min_score FLOAT DEFAULT 0.5,
-          enabled_pages JSONB DEFAULT '["login","register","contact"]',
-          theme TEXT DEFAULT 'dark',
-          size TEXT DEFAULT 'normal',
-          is_active BOOLEAN DEFAULT true,
-          fail_action TEXT DEFAULT 'block',
-          custom_html TEXT,
-          created_at TIMESTAMPTZ DEFAULT NOW(),
-          updated_at TIMESTAMPTZ,
-          school_id INT DEFAULT 1
-        );
+    const sql = `
+      CREATE TABLE IF NOT EXISTS captcha_settings (
+        id SERIAL PRIMARY KEY,
+        provider TEXT DEFAULT 'recaptcha_v2',
+        site_key TEXT,
+        secret_key TEXT,
+        min_score FLOAT DEFAULT 0.5,
+        enabled_pages JSONB DEFAULT '["login","register","contact"]',
+        theme TEXT DEFAULT 'dark',
+        size TEXT DEFAULT 'normal',
+        is_active BOOLEAN DEFAULT true,
+        fail_action TEXT DEFAULT 'block',
+        custom_html TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ,
+        school_id INT DEFAULT 1
+      );
 
-        CREATE TABLE IF NOT EXISTS captcha_verification_log (
-          id SERIAL PRIMARY KEY,
-          provider TEXT,
-          action TEXT DEFAULT 'verify',
-          ip_address TEXT,
-          score FLOAT,
-          success BOOLEAN,
-          error_message TEXT,
-          response_time_ms INT,
-          created_at TIMESTAMPTZ DEFAULT NOW(),
-          school_id INT DEFAULT 1
-        );
+      CREATE TABLE IF NOT EXISTS captcha_verification_log (
+        id SERIAL PRIMARY KEY,
+        provider TEXT,
+        action TEXT DEFAULT 'verify',
+        ip_address TEXT,
+        score FLOAT,
+        success BOOLEAN,
+        error_message TEXT,
+        response_time_ms INT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        school_id INT DEFAULT 1
+      );
 
-        CREATE INDEX IF NOT EXISTS idx_captcha_vlog_school ON captcha_verification_log(school_id, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_captcha_vlog_success ON captcha_verification_log(school_id, success);
-        CREATE INDEX IF NOT EXISTS idx_captcha_settings_school ON captcha_settings(school_id);
-      `);
-      console.log('[captcha-config] Migrations complete.');
-    } finally {
-      client.release();
-    }
+      CREATE INDEX IF NOT EXISTS idx_captcha_vlog_school ON captcha_verification_log(school_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_captcha_vlog_success ON captcha_verification_log(school_id, success);
+      CREATE INDEX IF NOT EXISTS idx_captcha_settings_school ON captcha_settings(school_id);
+    `;
+    await migrateQuery(pool, 'CaptchaConfig', sql);
+    console.log('[captcha-config] Migrations complete.');
   })().catch(() => {});
 
   /* ─────────────────────── Shared UI styles (dark theme) ─────────────────────── */

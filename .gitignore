@@ -7,3 +7,12 @@ convert-whiteboard.js
 coverage/
 .nyc_output/
 uploads/
+
+# Non-app files that should not be in the production repo
+skills/
+download/
+agent-ctx/
+worklog.md
+backup-db.js
+*.pyc/
+__pycache__/

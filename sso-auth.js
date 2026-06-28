@@ -70,73 +70,69 @@ module.exports = function (app, pool, opts) {
 
   /* ─────────────────────── DB Migrations ─────────────────────── */
   (async function migrate() {
-    const client = await pool.connect();
-    try {
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS sso_sessions (
-          id SERIAL PRIMARY KEY,
-          user_id INT NOT NULL DEFAULT 0,
-          tenant_id INT NOT NULL DEFAULT 0,
-          token_hash VARCHAR(255) NOT NULL,
-          ip_address VARCHAR(45),
-          user_agent TEXT,
-          expires_at TIMESTAMPTZ NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          revoked_at TIMESTAMPTZ
-        );
-        CREATE INDEX IF NOT EXISTS idx_sso_sessions_tenant_user ON sso_sessions(tenant_id, user_id);
-        CREATE INDEX IF NOT EXISTS idx_sso_sessions_token ON sso_sessions(token_hash);
-        CREATE INDEX IF NOT EXISTS idx_sso_sessions_expires ON sso_sessions(expires_at) WHERE revoked_at IS NULL;
+    const sql = `
+      CREATE TABLE IF NOT EXISTS sso_sessions (
+        id SERIAL PRIMARY KEY,
+        user_id INT NOT NULL DEFAULT 0,
+        tenant_id INT NOT NULL DEFAULT 0,
+        token_hash VARCHAR(255) NOT NULL,
+        ip_address VARCHAR(45),
+        user_agent TEXT,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        revoked_at TIMESTAMPTZ
+      );
+      CREATE INDEX IF NOT EXISTS idx_sso_sessions_tenant_user ON sso_sessions(tenant_id, user_id);
+      CREATE INDEX IF NOT EXISTS idx_sso_sessions_token ON sso_sessions(token_hash);
+      CREATE INDEX IF NOT EXISTS idx_sso_sessions_expires ON sso_sessions(expires_at) WHERE revoked_at IS NULL;
 
-        CREATE TABLE IF NOT EXISTS sso_login_log (
-          id SERIAL PRIMARY KEY,
-          user_id INT NOT NULL DEFAULT 0,
-          tenant_id INT NOT NULL DEFAULT 0,
-          method VARCHAR(50) NOT NULL DEFAULT 'password',
-          ip_address VARCHAR(45),
-          user_agent TEXT,
-          success BOOLEAN NOT NULL DEFAULT true,
-          failure_reason TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_sso_login_log_tenant ON sso_login_log(tenant_id, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_sso_login_log_user ON sso_login_log(tenant_id, user_id);
+      CREATE TABLE IF NOT EXISTS sso_login_log (
+        id SERIAL PRIMARY KEY,
+        user_id INT NOT NULL DEFAULT 0,
+        tenant_id INT NOT NULL DEFAULT 0,
+        method VARCHAR(50) NOT NULL DEFAULT 'password',
+        ip_address VARCHAR(45),
+        user_agent TEXT,
+        success BOOLEAN NOT NULL DEFAULT true,
+        failure_reason TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_sso_login_log_tenant ON sso_login_log(tenant_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_sso_login_log_user ON sso_login_log(tenant_id, user_id);
 
-        CREATE TABLE IF NOT EXISTS sso_password_resets (
-          id SERIAL PRIMARY KEY,
-          tenant_id INT NOT NULL DEFAULT 0,
-          email VARCHAR(255) NOT NULL,
-          token_hash VARCHAR(255) NOT NULL,
-          used BOOLEAN NOT NULL DEFAULT false,
-          expires_at TIMESTAMPTZ NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_sso_pw_resets_email ON sso_password_resets(tenant_id, email);
-        CREATE INDEX IF NOT EXISTS idx_sso_pw_resets_token ON sso_password_resets(token_hash);
+      CREATE TABLE IF NOT EXISTS sso_password_resets (
+        id SERIAL PRIMARY KEY,
+        tenant_id INT NOT NULL DEFAULT 0,
+        email VARCHAR(255) NOT NULL,
+        token_hash VARCHAR(255) NOT NULL,
+        used BOOLEAN NOT NULL DEFAULT false,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_sso_pw_resets_email ON sso_password_resets(tenant_id, email);
+      CREATE INDEX IF NOT EXISTS idx_sso_pw_resets_token ON sso_password_resets(token_hash);
 
-        CREATE TABLE IF NOT EXISTS sso_email_verifications (
-          id SERIAL PRIMARY KEY,
-          tenant_id INT NOT NULL DEFAULT 0,
-          email VARCHAR(255) NOT NULL,
-          token_hash VARCHAR(255) NOT NULL,
-          verified BOOLEAN NOT NULL DEFAULT false,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_sso_email_verif_email ON sso_email_verifications(tenant_id, email);
+      CREATE TABLE IF NOT EXISTS sso_email_verifications (
+        id SERIAL PRIMARY KEY,
+        tenant_id INT NOT NULL DEFAULT 0,
+        email VARCHAR(255) NOT NULL,
+        token_hash VARCHAR(255) NOT NULL,
+        verified BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_sso_email_verif_email ON sso_email_verifications(tenant_id, email);
 
-        CREATE TABLE IF NOT EXISTS sso_portal_access (
-          id SERIAL PRIMARY KEY,
-          user_id INT NOT NULL DEFAULT 0,
-          tenant_id INT NOT NULL DEFAULT 0,
-          portal_type VARCHAR(50) NOT NULL DEFAULT 'main',
-          granted_by INT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_sso_portal_user ON sso_portal_access(tenant_id, user_id, portal_type);
-      `);
-    } finally {
-      client.release();
-    }
+      CREATE TABLE IF NOT EXISTS sso_portal_access (
+        id SERIAL PRIMARY KEY,
+        user_id INT NOT NULL DEFAULT 0,
+        tenant_id INT NOT NULL DEFAULT 0,
+        portal_type VARCHAR(50) NOT NULL DEFAULT 'main',
+        granted_by INT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_sso_portal_user ON sso_portal_access(tenant_id, user_id, portal_type);
+    `;
+    await migrateQuery(pool, 'SSOAuth', sql);
   })().catch(() => {});
 
   /* ═══════════════════════ ROUTES ═══════════════════════ */

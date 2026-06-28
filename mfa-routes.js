@@ -106,61 +106,57 @@ module.exports = function (app, pool, opts) {
 
   /* ─────────────────────── DB Migrations ─────────────────────── */
   (async function migrate() {
-    const client = await pool.connect();
-    try {
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS mfa_sms_codes (
-          id SERIAL PRIMARY KEY,
-          tenant_id INT NOT NULL DEFAULT 0,
-          user_email VARCHAR(255) NOT NULL,
-          code_hash VARCHAR(255) NOT NULL,
-          phone VARCHAR(30) NOT NULL,
-          verified BOOLEAN NOT NULL DEFAULT false,
-          expires_at TIMESTAMPTZ NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_mfa_sms_email ON mfa_sms_codes(tenant_id, user_email);
-        CREATE INDEX IF NOT EXISTS idx_mfa_sms_expires ON mfa_sms_codes(expires_at) WHERE verified=false;
+    const sql = `
+      CREATE TABLE IF NOT EXISTS mfa_sms_codes (
+        id SERIAL PRIMARY KEY,
+        tenant_id INT NOT NULL DEFAULT 0,
+        user_email VARCHAR(255) NOT NULL,
+        code_hash VARCHAR(255) NOT NULL,
+        phone VARCHAR(30) NOT NULL,
+        verified BOOLEAN NOT NULL DEFAULT false,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_mfa_sms_email ON mfa_sms_codes(tenant_id, user_email);
+      CREATE INDEX IF NOT EXISTS idx_mfa_sms_expires ON mfa_sms_codes(expires_at) WHERE verified=false;
 
-        CREATE TABLE IF NOT EXISTS mfa_email_codes (
-          id SERIAL PRIMARY KEY,
-          tenant_id INT NOT NULL DEFAULT 0,
-          user_email VARCHAR(255) NOT NULL,
-          code_hash VARCHAR(255) NOT NULL,
-          verified BOOLEAN NOT NULL DEFAULT false,
-          expires_at TIMESTAMPTZ NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_mfa_email_codes_email ON mfa_email_codes(tenant_id, user_email);
-        CREATE INDEX IF NOT EXISTS idx_mfa_email_codes_expires ON mfa_email_codes(expires_at) WHERE verified=false;
+      CREATE TABLE IF NOT EXISTS mfa_email_codes (
+        id SERIAL PRIMARY KEY,
+        tenant_id INT NOT NULL DEFAULT 0,
+        user_email VARCHAR(255) NOT NULL,
+        code_hash VARCHAR(255) NOT NULL,
+        verified BOOLEAN NOT NULL DEFAULT false,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_mfa_email_codes_email ON mfa_email_codes(tenant_id, user_email);
+      CREATE INDEX IF NOT EXISTS idx_mfa_email_codes_expires ON mfa_email_codes(expires_at) WHERE verified=false;
 
-        CREATE TABLE IF NOT EXISTS mfa_recovery_requests (
-          id SERIAL PRIMARY KEY,
-          tenant_id INT NOT NULL DEFAULT 0,
-          user_email VARCHAR(255) NOT NULL,
-          request_token VARCHAR(255) NOT NULL,
-          status VARCHAR(20) NOT NULL DEFAULT 'pending',
-          verified_at TIMESTAMPTZ,
-          expires_at TIMESTAMPTZ NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_mfa_recovery_email ON mfa_recovery_requests(tenant_id, user_email);
-        CREATE INDEX IF NOT EXISTS idx_mfa_recovery_status ON mfa_recovery_requests(status, expires_at);
+      CREATE TABLE IF NOT EXISTS mfa_recovery_requests (
+        id SERIAL PRIMARY KEY,
+        tenant_id INT NOT NULL DEFAULT 0,
+        user_email VARCHAR(255) NOT NULL,
+        request_token VARCHAR(255) NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        verified_at TIMESTAMPTZ,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_mfa_recovery_email ON mfa_recovery_requests(tenant_id, user_email);
+      CREATE INDEX IF NOT EXISTS idx_mfa_recovery_status ON mfa_recovery_requests(status, expires_at);
 
-        CREATE TABLE IF NOT EXISTS mfa_user_preferences (
-          id SERIAL PRIMARY KEY,
-          tenant_id INT NOT NULL DEFAULT 0,
-          user_email VARCHAR(255) NOT NULL,
-          preferred_method VARCHAR(50) NOT NULL DEFAULT 'totp',
-          backup_methods TEXT[] NOT NULL DEFAULT '{}',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          UNIQUE(tenant_id, user_email)
-        );
-        CREATE INDEX IF NOT EXISTS idx_mfa_prefs_email ON mfa_user_preferences(tenant_id, user_email);
-      `);
-    } finally {
-      client.release();
-    }
+      CREATE TABLE IF NOT EXISTS mfa_user_preferences (
+        id SERIAL PRIMARY KEY,
+        tenant_id INT NOT NULL DEFAULT 0,
+        user_email VARCHAR(255) NOT NULL,
+        preferred_method VARCHAR(50) NOT NULL DEFAULT 'totp',
+        backup_methods TEXT[] NOT NULL DEFAULT '{}',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(tenant_id, user_email)
+      );
+      CREATE INDEX IF NOT EXISTS idx_mfa_prefs_email ON mfa_user_preferences(tenant_id, user_email);
+    `;
+    await migrateQuery(pool, 'MFARoutes', sql);
   })().catch(() => {});
 
   /* ═══════════════════════ ROUTES ═══════════════════════ */
