@@ -1,3 +1,4 @@
+# --- Original entries (preserved) ---
 node_modules/
 *.db
 .env
@@ -7,3 +8,32 @@ convert-whiteboard.js
 coverage/
 .nyc_output/
 uploads/
+
+# --- Appended: Secrets — NEVER commit these ---
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets.json
+credentials.json
+
+# --- Appended: Lockfiles — pick one package manager (we use bun) ---
+package-lock.json
+yarn.lock
+
+# --- Appended: OS files ---
+Thumbs.db
+
+# --- Appended: Editor files ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Appended: Logs ---
+npm-debug.log*
+
+# --- Appended: Build output ---
+dist/
+build/
+.next/

@@ -636,14 +636,65 @@ app.head('/ping', (req, res) => {
   res.status(200).end();
 });
 
+// === /api/health — NEW FEATURE (F-08 in audit report) ===
+// Unauthenticated JSON health endpoint that actually probes the database.
+// Used by Render's healthCheckPath (see render.yaml) so the deploy is marked
+// unhealthy when the DB is unreachable. The old /ping endpoint always returned
+// 200 and masked the underlying DB outage (audit finding F-02).
+//
+// Response shape (200 OK):
+//   { "status": "ok"|"degraded"|"down", "timestamp": "...", "uptime_seconds": 123,
+//     "db": { "connected": true, "table_count": 374, "latency_ms": 12 },
+//     "redis": { "connected": false }, "version": "9.0.0", "node": "v18.x" }
+//
+// Response shape (503 Service Unavailable) when DB is down:
+//   { "status": "down", "timestamp": "...", "uptime_seconds": 123,
+//     "db": { "connected": false, "error": "..." }, "redis": {...}, "version": "9.0.0" }
+let _healthStartTime = Date.now();
+let _healthPkgVersion = 'unknown';
+try { _healthPkgVersion = require('./package.json').version || 'unknown'; } catch (e) {}
+app.get('/api/health', async (req, res) => {
+  const result = {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime_seconds: Math.floor((Date.now() - _healthStartTime) / 1000),
+    db: { connected: false, table_count: null, latency_ms: null },
+    redis: { connected: !!redisCache },
+    version: _healthPkgVersion,
+    node: process.version,
+    env: process.env.NODE_ENV || 'development',
+  };
+  try {
+    const t0 = Date.now();
+    // Lightweight probe: count tables in public schema. This will fail fast if DB is unreachable
+    // or if the schema was never created (audit finding F-02).
+    const r = await pool.query("SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'");
+    result.db.connected = true;
+    result.db.table_count = r.rows[0]?.n ?? 0;
+    result.db.latency_ms = Date.now() - t0;
+    if (result.db.table_count === 0) {
+      // DB is connected but empty — schema was never created. Mark degraded so Render can alert.
+      result.status = 'degraded';
+      result.db.warning = 'database connected but 0 tables — startup migrations likely failed (see audit finding F-02)';
+    }
+  } catch (err) {
+    result.status = 'down';
+    result.db.connected = false;
+    result.db.error = err.message;
+  }
+  const httpStatus = result.status === 'down' ? 503 : 200;
+  res.status(httpStatus).json(result);
+});
+app.head('/api/health', (req, res) => res.status(200).end());
+
 // === STARTUP GATE MIDDLEWARE ===
 // Blocks all requests until _serverReady is set to true (after all migrations drain).
-// Only allows /ping, /health, /favicon.ico, and sw.js through during startup.
+// Only allows /ping, /health, /api/health, /favicon.ico, and sw.js through during startup.
 // This prevents 500 errors from DB connection exhaustion during migration phase.
 app.use((req, res, next) => {
   if (_serverReady) return next();
   // Allow these paths during startup
-  const allowed = ['/ping', '/health', '/favicon.ico', '/sw.js', '/manifest.json'];
+  const allowed = ['/ping', '/health', '/api/health', '/favicon.ico', '/sw.js', '/manifest.json'];
   if (allowed.some(p => req.path === p || req.path.startsWith('/_next'))) return next();
   // Block everything else with a friendly 503 + auto-retry
   res.status(503).set('Content-Type', 'text/html').send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -3038,21 +3089,31 @@ const uniqueConstraintMigrations = [
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      // Run each migration individually so one failure doesn't stop the rest
-      for (const q of migrations) {
-        try { await migrateQuery(pool, 'main', q); } catch (e) { /* migration errors are OK */ }
-      }
-      // Add missing UNIQUE constraints so ON CONFLICT DO NOTHING works correctly
-      // First deduplicate data, then add constraints
-      for (const uc of uniqueConstraintMigrations) {
-        try { await migrateQuery(pool, 'unique-constraints', uc.dedup); } catch (e) { /* OK */ }
-        try { await migrateQuery(pool, 'unique-constraints', `ALTER TABLE ${uc.table} ADD CONSTRAINT ${uc.constraint} UNIQUE (${uc.columns})`); } catch (e) { /* OK */ }
-      }
-      // Re-seed data after UNIQUE constraints are added
-      // (The INSERTs in the migrations array may have failed if constraints were missing)
-      const reseedQueries = migrations.filter(q => q.includes('ON CONFLICT'));
-      for (const q of reseedQueries) {
-        try { await migrateQuery(pool, 'reseed', q); } catch (e) { /* OK */ }
+      // REFACTORED (audit finding F-02): boot-time migrations are now disabled.
+      // Schema is managed by node-pg-migrate — run `npm run migrate` at deploy
+      // time (see migrations/ directory and render.yaml preDeployCommand).
+      // To re-enable boot-time migrations for emergency use, set
+      //   RUN_MIGRATIONS_AT_BOOT=true
+      // in the environment. This is NOT recommended for production.
+      if (process.env.RUN_MIGRATIONS_AT_BOOT === 'true') {
+        // Run each migration individually so one failure doesn't stop the rest
+        for (const q of migrations) {
+          try { await migrateQuery(pool, 'main', q); } catch (e) { /* migration errors are OK */ }
+        }
+        // Add missing UNIQUE constraints so ON CONFLICT DO NOTHING works correctly
+        // First deduplicate data, then add constraints
+        for (const uc of uniqueConstraintMigrations) {
+          try { await migrateQuery(pool, 'unique-constraints', uc.dedup); } catch (e) { /* OK */ }
+          try { await migrateQuery(pool, 'unique-constraints', `ALTER TABLE ${uc.table} ADD CONSTRAINT ${uc.constraint} UNIQUE (${uc.columns})`); } catch (e) { /* OK */ }
+        }
+        // Re-seed data after UNIQUE constraints are added
+        // (The INSERTs in the migrations array may have failed if constraints were missing)
+        const reseedQueries = migrations.filter(q => q.includes('ON CONFLICT'));
+        for (const q of reseedQueries) {
+          try { await migrateQuery(pool, 'reseed', q); } catch (e) { /* OK */ }
+        }
+      } else {
+        console.log('[Migrations] Boot-time migrations SKIPPED — schema is managed by `npm run migrate` (node-pg-migrate). See migrations/ directory.');
       }
       // Seed default min_plan requirements for features
       const planDefaults = [
@@ -10762,33 +10823,7 @@ app.post('/dev/trial/extend', requireAuth, requireSuperAdmin, ah(async (req, res
 }));
 
 // API: Get subscription/trial status (skipped by trial middleware)
-app.get('/api/subscription/status', requireAuth, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  try {
-    const result = await pool.query(
-      `SELECT s.plan, s.status, s.trial_start, s.trial_end, s.trial_expired
-       FROM subscriptions s
-       WHERE s.tenant_id = $1
-       ORDER BY COALESCE(s.created_at, s.started_at) DESC LIMIT 1`,
-      [t]
-    );
-    if (!result.rows.length) return res.json({ plan: 'free', status: 'none', trial_expired: false });
-    const sub = result.rows[0];
-    const trialDaysLeft = sub.trial_end && !sub.trial_expired
-      ? Math.max(0, Math.ceil((new Date(sub.trial_end) - new Date()) / (1000 * 60 * 60 * 24)))
-      : 0;
-    res.json({
-      plan: sub.plan,
-      status: sub.status,
-      trial_start: sub.trial_start,
-      trial_end: sub.trial_end,
-      trial_expired: sub.trial_expired || false,
-      trial_days_remaining: trialDaysLeft
-    });
-  } catch (e) {
-    res.json({ plan: 'free', status: 'error', trial_expired: false, error: e.message });
-  }
-}));
+// → Extracted to src/routes/misc-api.js (mounted at /api)
 
 // === TEAM MANAGEMENT — ADMIN/STAFF ACCESS ===
 app.get('/team', requireAuth, ah(async (req, res) => {
@@ -13664,116 +13699,18 @@ const apiRateLimiter = async (req, res, next) => {
   next();
 };
 
-app.get('/api/v1/students', apiAuth, ah(async (req, res) => {
-  const students = (await pool.query('SELECT id,admission_no,name,class,stream,gender FROM students WHERE tenant_id=$1 ORDER BY name LIMIT 100', [req.apiKey.tenant_id])).rows;
-  res.json({ data: students });
-}));
+// === Extracted routes (Conservative refactor — Track 1) ===
+// Shared context passed into each extracted route module so the handlers
+// close over the same `pool`, `ah`, `requireAuth`, etc. as the rest of
+// server.js — zero behavior changes. Declared here (after `apiAuth` and
+// all other shared helpers are defined) so every later `app.use()`
+// mount can reference it.
+const _routeSharedCtx = { pool, ah, requireAuth, requireNotBanned, requireSuperAdmin, requireRole, validate, audit, renderPage, renderPageLite, bcrypt, crypto, PLATFORM_CONFIG, upload, apiAuth, rateLimit, wsBroadcast, esc, sanitizeInput, validateEmail, validatePhone, validateUUID, validateAmount, validateName, validatePagination, errorResponse, logger, tenantQuery };
 
-app.post('/api/v1/students', apiAuth, ah(async (req, res) => {
-  const { name, admission_no, class: cls, stream, gender } = req.body;
-  const result = await pool.query('INSERT INTO students(tenant_id,name,admission_no,class,stream,gender) VALUES($1,$2,$3,$4,$5,$6) RETURNING *', [req.apiKey.tenant_id, name, admission_no, cls, stream, gender]);
-  res.json({ data: result.rows[0] });
-}));
-
-app.get('/api/v1/fees', apiAuth, ah(async (req, res) => {
-  const fees = (await pool.query('SELECT f.*,s.name as student_name FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1 ORDER BY f.created_at DESC LIMIT 100', [req.apiKey.tenant_id])).rows;
-  res.json({ data: fees });
-}));
-
-app.post('/api/v1/fees/pay', apiAuth, ah(async (req, res) => {
-  const { fee_id, amount } = req.body;
-  await pool.query('UPDATE fees SET paid=paid+$1 WHERE id=$2 AND tenant_id=$3', [amount, fee_id, req.apiKey.tenant_id]);
-  res.json({ success: true });
-}));
-
-app.get('/api/v1/inventory', apiAuth, ah(async (req, res) => {
-  const items = (await pool.query('SELECT * FROM inventory WHERE tenant_id=$1 ORDER BY name', [req.apiKey.tenant_id])).rows;
-  res.json({ data: items });
-}));
-
-app.post('/api/v1/sales', apiAuth, ah(async (req, res) => {
-  const { customer_name, total, paid, items } = req.body;
-  const sale = await pool.query('INSERT INTO sales(tenant_id,customer_name,total,paid,status) VALUES($1,$2,$3,$4,$5) RETURNING *', [req.apiKey.tenant_id, customer_name, total, paid||0, paid>=total?'paid':'partial']);
-  if (items && Array.isArray(items)) {
-    for (const item of items) {
-      await pool.query('INSERT INTO sale_items(sale_id,inventory_id,quantity,price) VALUES($1,$2,$3,$4)', [sale.rows[0].id, item.inventory_id, item.quantity, item.price]);
-      await pool.query('UPDATE inventory SET quantity=quantity-$1 WHERE id=$2', [item.quantity, item.inventory_id]);
-    }
-  }
-  res.json({ data: sale.rows[0] });
-}));
-
-app.get('/api/v1/members', apiAuth, ah(async (req, res) => {
-  const members = (await pool.query('SELECT * FROM church_members WHERE tenant_id=$1 ORDER BY name', [req.apiKey.tenant_id])).rows;
-  res.json({ data: members });
-}));
-
-app.post('/api/v1/donations', apiAuth, ah(async (req, res) => {
-  const { donor_name, amount, type, method } = req.body;
-  const result = await pool.query('INSERT INTO donations(tenant_id,donor_name,amount,type,method,is_tithe) VALUES($1,$2,$3,$4,$5,$6) RETURNING *', [req.apiKey.tenant_id, donor_name, amount, type, method, type==='tithe']);
-  res.json({ data: result.rows[0] });
-}));
-
-app.get('/api/v1/invoices', apiAuth, ah(async (req, res) => {
-  const invoices = (await pool.query('SELECT * FROM invoices WHERE tenant_id=$1 ORDER BY created_at DESC', [req.apiKey.tenant_id])).rows;
-  res.json({ data: invoices });
-}));
-
-app.post('/api/v1/campaigns', apiAuth, ah(async (req, res) => {
-  const { title, description, target, start_date, end_date } = req.body;
-  const result = await pool.query('INSERT INTO campaigns(tenant_id,title,description,target,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6) RETURNING *', [req.apiKey.tenant_id, title, description, target, start_date, end_date]);
-  res.json({ data: result.rows[0] });
-}));
-
-// === STATUS PAGE ===
-
-// === API: CSV EXPORT STUDENTS ===
-app.get('/api/v1/students/export', apiAuth, ah(async (req, res) => {
-  const students = (await pool.query('SELECT admission_no,name,class,stream,gender,guardian_name,guardian_phone FROM students WHERE tenant_id=$1 ORDER BY name', [req.apiKey.tenant_id])).rows;
-  const headers = ['admission_no', 'name', 'class', 'stream', 'gender', 'guardian_name', 'guardian_phone'];
-  const csv = [headers.join(','), ...students.map(s => headers.map(h => `"${(s[h] || '').toString().replace(/"/g, '""')}"`).join(','))].join('\n');
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename=students_export.csv');
-  res.send(csv);
-}));
-
-// === API: CSV IMPORT STUDENTS ===
-app.post('/api/v1/students/import', apiAuth, upload.single('csv_file'), ah(async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'CSV file required (field: csv_file)' });
-  const lines = req.file.buffer.toString('utf-8').trim().split('\n');
-  let imported = 0, errors = 0;
-  for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
-    if (cols.length >= 2) {
-      try {
-        await pool.query('INSERT INTO students(tenant_id,admission_no,name,class,stream,gender,guardian_name,guardian_phone) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING',
-          [req.apiKey.tenant_id, cols[0], cols[1], cols[2] || '', cols[3] || '', cols[4] || '', cols[5] || '', cols[6] || '']);
-        imported++;
-      } catch { errors++; }
-    }
-  }
-  res.json({ imported, errors, total: lines.length - 1 });
-}));
-
-// === API: CSV EXPORT INVENTORY ===
-app.get('/api/v1/inventory/export', apiAuth, ah(async (req, res) => {
-  const items = (await pool.query('SELECT name,sku,quantity,unit_price,category FROM inventory WHERE tenant_id=$1 ORDER BY name', [req.apiKey.tenant_id])).rows;
-  const headers = ['name', 'sku', 'quantity', 'unit_price', 'category'];
-  const csv = [headers.join(','), ...items.map(i => headers.map(h => `"${(i[h] || '').toString().replace(/"/g, '""')}"`).join(','))].join('\n');
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename=inventory_export.csv');
-  res.send(csv);
-}));
-
-// === API: CSV EXPORT MEMBERS ===
-app.get('/api/v1/members/export', apiAuth, ah(async (req, res) => {
-  const members = (await pool.query('SELECT name,phone,email,membership_type,status FROM church_members WHERE tenant_id=$1 ORDER BY name', [req.apiKey.tenant_id])).rows;
-  const headers = ['name', 'phone', 'email', 'membership_type', 'status'];
-  const csv = [headers.join(','), ...members.map(m => headers.map(h => `"${(m[h] || '').toString().replace(/"/g, '""')}"`).join(','))].join('\n');
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename=members_export.csv');
-  res.send(csv);
-}));
+// === Extracted v1 REST API routes (Conservative refactor — Track 1) ===
+// The /api/v1/openapi.json route below remains inline because it's a single
+// ~285-line JSON spec route.
+app.use('/api/v1', require('./src/routes/apiv1')(_routeSharedCtx));
 
 // === OPENAPI 3.0 SPEC ===
 app.get('/api/v1/openapi.json', (req, res) => {
@@ -16590,18 +16527,7 @@ app.post('/api/v2/graphql', ah(async (req, res) => {
   res.json(result);
 }));
 
-// === v6.0: OAUTH2 PLACEHOLDER ===
-app.get('/auth/oauth/google', (req, res) => {
-  if (!process.env.GOOGLE_CLIENT_ID) return res.send(renderPage('OAuth', '<div class="card"><div class="alert alert-info"><h2>Google OAuth</h2><p>Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET env vars to enable Google login.</p></div><a href="/login" class="btn">Back to Login</a></div>', null));
-  const redirectUri = encodeURIComponent(`${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/auth/oauth/google/callback`);
-  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?client_id=${process.env.GOOGLE_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=openid+email+profile`);
-});
-
-app.get('/auth/oauth/microsoft', (req, res) => {
-  if (!process.env.MS_CLIENT_ID) return res.send(renderPage('OAuth', '<div class="card"><div class="alert alert-info"><h2>Microsoft OAuth</h2><p>Set MS_CLIENT_ID and MS_CLIENT_SECRET env vars to enable Microsoft login.</p></div><a href="/login" class="btn">Back to Login</a></div>', null));
-  const state = crypto.randomBytes(16).toString('hex');
-  res.redirect(`https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${process.env.MS_CLIENT_ID}&response_type=code&scope=openid+email+profile&state=${state}`);
-});
+// === v6.0: OAUTH2 PLACEHOLDER → Extracted to src/routes/auth-oauth.js ===
 
 // === v7.0: AI REPORT COMMENTS ===
 app.get('/school/ai-comments', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -19115,248 +19041,12 @@ app.post('/push/send', requireAuth, requireNotBanned, ah(async (req, res) => {
 }));
 
 // =============================================
-// v8.0: OFFLINE SYNC API
+// v8.0: OFFLINE SYNC API (extracted — Conservative refactor, Track 1)
 // =============================================
-app.post('/api/sync/push', requireAuth, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { actions } = req.body;
-  if (!Array.isArray(actions)) return res.status(400).json({ error: 'actions array required' });
-  const results = [];
-  for (const action of actions) {
-    try {
-      await pool.query('INSERT INTO offline_sync_queue(tenant_id,user_email,action,entity_type,entity_id,data) VALUES($1,$2,$3,$4,$5,$6)', [t, req.session.user.email, action.action, action.entity_type, action.entity_id, JSON.stringify(action.data)]);
-      // Apply the action
-      if (action.action === 'create' && action.entity_type === 'attendance' && action.data) {
-        await pool.query('INSERT INTO attendance(tenant_id,student_id,date,status) VALUES($1,$2,$3,$4) ON CONFLICT(student_id,date) DO UPDATE SET status=$4', [t, action.data.student_id, action.data.date || new Date().toISOString().split('T')[0], action.data.status || 'present']);
-      } else if (action.action === 'create' && action.entity_type === 'marks' && action.data) {
-        await pool.query('INSERT INTO marks(tenant_id,student_id,subject,score,term,exam_type) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING', [t, action.data.student_id, action.data.subject, action.data.score, action.data.term||'Term 1', action.data.exam_type||'midterm']);
-      } else if (action.action === 'create' && action.entity_type === 'fees' && action.data) {
-        await pool.query('INSERT INTO fees(tenant_id,student_id,amount,payment_method,term) VALUES($1,$2,$3,$4,$5)', [t, action.data.student_id, action.data.amount, action.data.payment_method||'cash', action.data.term||'Term 1']);
-      } else if (action.action === 'create' && action.entity_type === 'shop_sales' && action.data) {
-        await pool.query('INSERT INTO school_shop_sales(tenant_id,item_id,quantity,total,buyer_type,buyer_name) VALUES($1,$2,$3,$4,$5,$6)', [t, action.data.item_id, action.data.quantity||1, action.data.total||0, action.data.buyer_type||'other', action.data.buyer_name||null]);
-      } else if (action.action === 'create' && action.entity_type === 'donations' && action.data) {
-        await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [action.data.campaign_id||null, action.data.donor_name||'Anonymous', action.data.amount||0, action.data.method||'cash', action.data.message||'']);
-      } else if (action.action === 'update' && action.entity_type === 'attendance' && action.data) {
-        await pool.query('UPDATE attendance SET status=$1 WHERE tenant_id=$2 AND student_id=$3 AND date=$4', [action.data.status, t, action.data.student_id, action.data.date]);
-      }
-      results.push({ id: action.id, status: 'synced' });
-    } catch(e) {
-      results.push({ id: action.id, status: 'error', error: e.message });
-    }
-  }
-  res.json({ synced: results.filter(r => r.status === 'synced').length, errors: results.filter(r => r.status === 'error').length, results });
-}));
+app.use('/api/sync', require('./src/routes/sync-api')(_routeSharedCtx));
 
-app.get('/api/sync/pull', requireAuth, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const since = req.query.since ? new Date(req.query.since) : new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const [students, fees, attendance, marks, shopSales, donations] = await Promise.all([
-    pool.query('SELECT * FROM students WHERE tenant_id=$1 AND (created_at > $2 OR updated_at > $2) AND deleted_at IS NULL', [t, since]),
-    pool.query('SELECT * FROM fees WHERE tenant_id=$1 AND created_at > $2', [t, since]),
-    pool.query('SELECT * FROM attendance WHERE tenant_id=$1 AND date > $2', [t, since]),
-    pool.query('SELECT * FROM marks WHERE tenant_id=$1 AND created_at > $2', [t, since]).catch(()=>({rows:[]})),
-    pool.query('SELECT * FROM school_shop_sales WHERE tenant_id=$1 AND created_at > $2', [t, since]).catch(()=>({rows:[]})),
-    pool.query('SELECT * FROM campaign_donations WHERE donated_at > $1', [since]).catch(()=>({rows:[]}))
-  ]);
-  res.json({ since: since.toISOString(), students: students.rows, fees: fees.rows, attendance: attendance.rows, marks: marks.rows, shop_sales: shopSales.rows, donations: donations.rows });
-}));
-
-// === DASHBOARD AUTO-REFRESH API ===
-app.get('/api/dashboard/stats', requireAuth, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const tenantType = req.session.user.tenant_type;
-  try {
-    let stats = {};
-    if (tenantType === 'school') {
-      const [students, fees, feePaid, exams, attendance] = await Promise.all([
-        pool.query('SELECT COUNT(*)::int as cnt FROM students WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query('SELECT COALESCE(SUM(amount),0)::int as total FROM fees WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ total: 0 }] })),
-        pool.query('SELECT COALESCE(SUM(paid),0)::int as total FROM fees WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ total: 0 }] })),
-        pool.query('SELECT COUNT(*)::int as cnt FROM exams WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query("SELECT COUNT(DISTINCT student_id)::int as cnt FROM attendance WHERE tenant_id=$1 AND date=CURRENT_DATE AND status='present'", [t]).catch(() => ({ rows: [{ cnt: 0 }] }))
-      ]);
-      stats = {
-        student_count: students.rows[0].cnt,
-        fee_total: fees.rows[0].total,
-        fee_collected: feePaid.rows[0].total,
-        exam_count: exams.rows[0].cnt,
-        attendance_today: attendance.rows[0].cnt
-      };
-    } else if (tenantType === 'church') {
-      const [members, tithes, sermons, prayers, events] = await Promise.all([
-        pool.query('SELECT COUNT(*)::int as cnt FROM members WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query("SELECT COALESCE(SUM(amount),0)::int as total FROM org_finance WHERE tenant_id=$1 AND type='income' AND description ILIKE '%tithe%'", [t]).catch(() => ({ rows: [{ total: 0 }] })),
-        pool.query('SELECT COUNT(*)::int as cnt FROM sermons WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query('SELECT COUNT(*)::int as cnt FROM prayer_requests WHERE tenant_id=$1 AND is_private=false', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query('SELECT COUNT(*)::int as cnt FROM events WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] }))
-      ]);
-      stats = {
-        member_count: members.rows[0].cnt,
-        tithe_total: tithes.rows[0].total,
-        sermon_count: sermons.rows[0].cnt,
-        prayer_count: prayers.rows[0].cnt,
-        event_count: events.rows[0].cnt
-      };
-    } else if (tenantType === 'organization') {
-      const [members, projects, events, budget, notices] = await Promise.all([
-        pool.query('SELECT COUNT(*)::int as cnt FROM members WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query('SELECT COUNT(*)::int as cnt FROM projects WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query('SELECT COUNT(*)::int as cnt FROM events WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query("SELECT COALESCE(SUM(amount),0)::int as total FROM org_finance WHERE tenant_id=$1 AND type='income'", [t]).catch(() => ({ rows: [{ total: 0 }] })),
-        pool.query('SELECT COUNT(*)::int as cnt FROM notice_board WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] }))
-      ]);
-      stats = {
-        member_count: members.rows[0].cnt,
-        project_count: projects.rows[0].cnt,
-        event_count: events.rows[0].cnt,
-        income_total: budget.rows[0].total,
-        notice_count: notices.rows[0].cnt
-      };
-    } else if (tenantType === 'health') {
-      const [patients, appointments, beds, staff, consults] = await Promise.all([
-        pool.query('SELECT COUNT(*)::int as cnt FROM clinic_patients WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query("SELECT COUNT(*)::int as cnt FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=CURRENT_DATE", [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query("SELECT COUNT(*)::int as total, COALESCE(SUM(CASE WHEN status='occupied' THEN 1 ELSE 0 END),0)::int as occupied FROM clinic_beds WHERE tenant_id=$1", [t]).catch(() => ({ rows: [{ total: 0, occupied: 0 }] })),
-        pool.query('SELECT COUNT(*)::int as cnt FROM clinic_staff WHERE tenant_id=$1 AND is_active=true', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query("SELECT COUNT(*)::int as cnt FROM consultations WHERE tenant_id=$1 AND created_at>DATE_TRUNC('day',NOW())", [t]).catch(() => ({ rows: [{ cnt: 0 }] }))
-      ]);
-      stats = {
-        patient_count: patients.rows[0].cnt,
-        appointment_today: appointments.rows[0].cnt,
-        bed_total: beds.rows[0].total,
-        bed_occupied: beds.rows[0].occupied,
-        active_staff: staff.rows[0].cnt,
-        consult_today: consults.rows[0].cnt
-      };
-    } else if (tenantType === 'business') {
-      const [sales, inventory, invoices, expenses, customers] = await Promise.all([
-        pool.query("SELECT COALESCE(SUM(total),0)::int as total FROM sales WHERE tenant_id=$1 AND created_at>DATE_TRUNC('month', NOW())", [t]).catch(() => ({ rows: [{ total: 0 }] })),
-        pool.query('SELECT COUNT(*)::int as cnt FROM inventory WHERE tenant_id=$1 AND quantity<5', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query("SELECT COUNT(*)::int as cnt FROM invoices WHERE tenant_id=$1 AND status='unpaid'", [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query("SELECT COALESCE(SUM(amount),0)::int as total FROM expenses WHERE tenant_id=$1 AND COALESCE(expense_date, created_at::date)>DATE_TRUNC('month', NOW())", [t]).catch(() => ({ rows: [{ total: 0 }] })),
-        pool.query('SELECT COUNT(*)::int as cnt FROM customers WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] }))
-      ]);
-      stats = {
-        revenue_total: sales.rows[0].total,
-        low_stock_count: inventory.rows[0].cnt,
-        unpaid_invoices: invoices.rows[0].cnt,
-        expense_total: expenses.rows[0].total,
-        customer_count: customers.rows[0].cnt,
-        net_profit: sales.rows[0].total - expenses.rows[0].total
-      };
-    } else if (tenantType === 'individual') {
-      const [goals, notes, budgetPlanned, budgetActual] = await Promise.all([
-        pool.query('SELECT COUNT(*)::int as cnt FROM goals WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query('SELECT COUNT(*)::int as cnt FROM personal_notes WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query('SELECT COALESCE(SUM(planned),0)::int as total FROM budget_items WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ total: 0 }] })),
-        pool.query('SELECT COALESCE(SUM(actual),0)::int as total FROM budget_items WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ total: 0 }] }))
-      ]);
-      stats = {
-        goal_count: goals.rows[0].cnt,
-        note_count: notes.rows[0].cnt,
-        budget_planned: budgetPlanned.rows[0].total,
-        budget_actual: budgetActual.rows[0].total
-      };
-    } else if (tenantType === 'public') {
-      const [pages, posts, shopItems] = await Promise.all([
-        pool.query('SELECT COUNT(*)::int as cnt FROM public_pages WHERE tenant_id=$1 AND is_published=true', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query('SELECT COUNT(*)::int as cnt FROM public_posts WHERE tenant_id=$1', [t]).catch(() => ({ rows: [{ cnt: 0 }] })),
-        pool.query('SELECT COUNT(*)::int as cnt FROM school_shop_items WHERE tenant_id=$1 AND (is_active=true OR is_active IS NULL)', [t]).catch(() => ({ rows: [{ cnt: 0 }] }))
-      ]);
-      stats = {
-        page_count: pages.rows[0].cnt,
-        post_count: posts.rows[0].cnt,
-        shop_item_count: shopItems.rows[0].cnt
-      };
-    } else {
-      stats = { message: 'No dashboard stats available for this tenant type' };
-    }
-    res.json({ success: true, tenant_type: tenantType, stats });
-  } catch (err) {
-    console.error('[Dashboard Stats API]', err.message);
-    res.status(500).json({ success: false, error: 'Failed to load dashboard stats' });
-  }
-}));
-
-app.get('/api/dashboard/chart-data', requireAuth, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const tenantType = req.session.user.tenant_type;
-  const chartType = req.query.type || 'revenue';
-  const days = parseInt(req.query.days) || 30;
-  try {
-    let labels = [];
-    let datasets = [];
-    if (tenantType === 'school') {
-      if (chartType === 'revenue') {
-        const rows = (await pool.query("SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day, COALESCE(SUM(paid),0)::int as total FROM fees WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '1 day' * $2 GROUP BY day ORDER BY day", [t, days])).rows;
-        labels = rows.map(r => r.day);
-        datasets = [{ label: 'Fees Collected', data: rows.map(r => r.total), borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.15)', fill: true }];
-      } else if (chartType === 'activity') {
-        const rows = (await pool.query("SELECT TO_CHAR(date, 'YYYY-MM-DD') as day, COUNT(*)::int as cnt FROM attendance WHERE tenant_id=$1 AND date > CURRENT_DATE - INTERVAL '1 day' * $2 GROUP BY day ORDER BY day", [t, days])).rows;
-        labels = rows.map(r => r.day);
-        datasets = [{ label: 'Attendance Records', data: rows.map(r => r.cnt), borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.15)', fill: true }];
-      }
-    } else if (tenantType === 'business') {
-      if (chartType === 'revenue') {
-        const rows = (await pool.query("SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day, COALESCE(SUM(total),0)::int as total FROM sales WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '1 day' * $2 GROUP BY day ORDER BY day", [t, days])).rows;
-        labels = rows.map(r => r.day);
-        datasets = [{ label: 'Daily Sales', data: rows.map(r => r.total), borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.15)', fill: true }];
-      }
-    } else if (tenantType === 'church') {
-      if (chartType === 'revenue') {
-        const rows = (await pool.query("SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day, COALESCE(SUM(amount),0)::int as total FROM org_finance WHERE tenant_id=$1 AND type='income' AND created_at > NOW() - INTERVAL '1 day' * $2 GROUP BY day ORDER BY day", [t, days])).rows;
-        labels = rows.map(r => r.day);
-        datasets = [{ label: 'Income', data: rows.map(r => r.total), borderColor: '#ea580c', backgroundColor: 'rgba(234,88,12,0.15)', fill: true }];
-      }
-    } else if (tenantType === 'health') {
-      if (chartType === 'activity') {
-        const rows = (await pool.query("SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day, COUNT(*)::int as cnt FROM consultations WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '1 day' * $2 GROUP BY day ORDER BY day", [t, days])).rows;
-        labels = rows.map(r => r.day);
-        datasets = [{ label: 'Consultations', data: rows.map(r => r.cnt), borderColor: '#14b8a6', backgroundColor: 'rgba(20,184,166,0.15)', fill: true }];
-      }
-    } else if (tenantType === 'organization') {
-      if (chartType === 'revenue') {
-        const rows = (await pool.query("SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day, COALESCE(SUM(amount),0)::int as total FROM org_finance WHERE tenant_id=$1 AND type='income' AND created_at > NOW() - INTERVAL '1 day' * $2 GROUP BY day ORDER BY day", [t, days])).rows;
-        labels = rows.map(r => r.day);
-        datasets = [{ label: 'Income', data: rows.map(r => r.total), borderColor: '#7c3aed', backgroundColor: 'rgba(124,58,237,0.15)', fill: true }];
-      }
-    }
-    if (datasets.length === 0) {
-      // Generate empty chart data for unsupported combos
-      const now = new Date();
-      labels = Array.from({ length: Math.min(days, 7) }, (_, i) => { const d = new Date(now); d.setDate(d.getDate() - i); return d.toISOString().split('T')[0]; }).reverse();
-      datasets = [{ label: 'No data', data: labels.map(() => 0), borderColor: '#94a3b8', backgroundColor: 'rgba(148,163,184,0.1)' }];
-    }
-    res.json({ success: true, type: chartType, labels, datasets });
-  } catch (err) {
-    console.error('[Dashboard Chart API]', err.message);
-    res.status(500).json({ success: false, error: 'Failed to load chart data' });
-  }
-}));
-
-// =============================================
-// DASHBOARD CUSTOMIZATION: Per-user prefs
-// =============================================
-// Get user's dashboard preferences
-app.get('/api/dashboard/prefs', requireAuth, ah(async (req, res) => {
-  const result = await pool.query(
-    'SELECT widgets, layout FROM user_dashboard_prefs WHERE user_id=$1 AND portal_type=$2',
-    [req.session.user.id, req.session.user.tenant_type || 'school']
-  );
-  res.json(result.rows[0] || { widgets: [], layout: 'default' });
-}));
-
-// Save user's dashboard preferences
-app.post('/api/dashboard/prefs', requireAuth, ah(async (req, res) => {
-  const { widgets, layout } = req.body;
-  await pool.query(
-    `INSERT INTO user_dashboard_prefs (user_id, portal_type, widgets, layout, updated_at)
-     VALUES ($1, $2, $3, $4, NOW())
-     ON CONFLICT (user_id, portal_type) DO UPDATE SET widgets=$3, layout=$4, updated_at=NOW()`,
-    [req.session.user.id, req.session.user.tenant_type || 'school', JSON.stringify(widgets || []), layout || 'default']
-  );
-  res.json({ success: true });
-}));
+// === Extracted dashboard API routes (Conservative refactor — Track 1) ===
+app.use('/api/dashboard', require('./src/routes/dashboard-api')(_routeSharedCtx));
 
 // =============================================
 // v8.0: DEEP LINKING
@@ -19789,43 +19479,8 @@ app.get('/install', (req, res) => {
 
 // =============================================
 // v6.0: OAUTH2 CALLBACK (Full Implementation)
+// → Extracted to src/routes/auth-oauth.js (mounted at /auth)
 // =============================================
-app.get('/auth/oauth/google/callback', ah(async (req, res) => {
-  const { code } = req.query;
-  if (!code) return res.redirect('/login');
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) return res.redirect('/login');
-  try {
-    const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ code, client_id: process.env.GOOGLE_CLIENT_ID, client_secret: process.env.GOOGLE_CLIENT_SECRET, redirect_uri: `${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/auth/oauth/google/callback`, grant_type: 'authorization_code' })
-    });
-    const tokens = await tokenResp.json();
-    if (tokens.id_token) {
-      const payload = JSON.parse(Buffer.from(tokens.id_token.split('.')[1], 'base64').toString());
-      const email = payload.email;
-      const name = payload.name || email.split('@')[0];
-      // Find or create user
-      let user = (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
-      if (!user) {
-        // Auto-register with first tenant or create new
-        const tenant = (await pool.query('SELECT * FROM tenants ORDER BY id LIMIT 1')).rows[0];
-        if (tenant) {
-          const pwd = crypto.randomBytes(16).toString('hex');
-          const hash = await bcrypt.hash(pwd, 12);
-          await pool.query('INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$4,$5,$6)', [tenant.id, email, pwd, hash, 'user', true]);
-          user = (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
-        }
-      }
-      if (user) {
-        req.session.user = { id: user.id, email: user.email, role: user.role, tenant_id: user.tenant_id, dark_mode: user.dark_mode, banned: user.banned };
-        await audit(email, 'oauth_login', 'Google', user?.tenant_id, req);
-        return res.redirect('/dashboard');
-      }
-    }
-  } catch(e) { console.warn('Google OAuth error:', e.message); }
-  res.redirect('/login');
-}));
 
 // =============================================
 // COMING SOON PAGE (for features not yet activated)
@@ -19850,13 +19505,8 @@ app.get('/coming-soon/:feature', requireAuth, ah(async (req, res) => {
 
 // =============================================
 // FEATURE STATUS API (for frontend to check)
+// → Extracted to src/routes/misc-api.js (mounted at /api)
 // =============================================
-app.get('/api/features', ah(async (req, res) => {
-  const features = (await pool.query('SELECT feature_key, is_active, name, description, version, category FROM feature_flags')).rows;
-  const featureMap = {};
-  features.forEach(f => { featureMap[f.feature_key] = { active: f.is_active, name: f.name, description: f.description, version: f.version, category: f.category }; });
-  res.json(featureMap);
-}));
 
 // =============================================
 // SCHOOL: TRANSPORT / BUS ROUTES
@@ -24735,8 +24385,13 @@ app.get('/shortcuts', requireAuth, requireFeature('keyboard_shortcuts'), (req, r
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`
   ];
-  for (const q of additionalMigrations) {
-    try { await migrateQuery(pool, 'v11-migration', q); } catch(e) { /* already exists OK */ }
+  // REFACTORED (audit F-02): these v11 tables are now created by `npm run migrate`
+  // (see migrations/000002_remaining_schema_raw.js). Disable by default; set
+  // RUN_MIGRATIONS_AT_BOOT=true to re-enable for emergency use.
+  if (process.env.RUN_MIGRATIONS_AT_BOOT === 'true') {
+    for (const q of additionalMigrations) {
+      try { await migrateQuery(pool, 'v11-migration', q); } catch(e) { /* already exists OK */ }
+    }
   }
   const additionalFlags = [
     ['student_portal','Student Portal','Students view their own grades, attendance, homework','3.0','core','None'],
@@ -30691,34 +30346,7 @@ app.get('/donations/recurring/:id/resume', requireAuth, requireNotBanned, requir
   res.redirect('/donations/recurring');
 }));
 
-app.post('/api/recurring-donations/process', requireAuth, ah(async (req, res) => {
-  // SECURITY: Require admin role to process recurring donations
-  const role = req.session.user?.role || 'staff';
-  if (role !== 'super_admin' && role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
-  }
-  // Process due recurring donations - called by cron/scheduler
-  const due = (await pool.query("SELECT * FROM recurring_donations WHERE next_date <= CURRENT_DATE AND status = 'active'")).rows;
-  let processed = 0, errors = 0;
-  for (const d of due) {
-    try {
-      // Record the donation
-      await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [d.campaign_id||null, d.donor_name, d.amount, d.payment_method||'cash', 'Recurring donation']);
-      // Calculate next date
-      let nextDate = new Date(d.next_date);
-      switch(d.schedule) {
-        case 'weekly': nextDate.setDate(nextDate.getDate()+7); break;
-        case 'monthly': nextDate.setMonth(nextDate.getMonth()+1); break;
-        case 'quarterly': nextDate.setMonth(nextDate.getMonth()+3); break;
-        case 'yearly': nextDate.setFullYear(nextDate.getFullYear()+1); break;
-        default: nextDate.setMonth(nextDate.getMonth()+1);
-      }
-      await pool.query('UPDATE recurring_donations SET last_processed=CURRENT_DATE, next_date=$1, total_donated=total_donated+$2, donation_count=donation_count+1 WHERE id=$3', [nextDate.toISOString().split('T')[0], d.amount, d.id]);
-      processed++;
-    } catch(e) { errors++; }
-  }
-  res.json({ processed, errors, total_due: due.length });
-}));
+// POST /api/recurring-donations/process → Extracted to src/routes/misc-api.js (mounted at /api)
 
 // ============================================================
 // === ENTERTAINMENT HUB (Logged-in enhanced version) ===
@@ -32361,7 +31989,14 @@ const phase2Tables = [
 ];
 
 // Create Phase 2 tables & seed data (async IIFE for top-level await compatibility)
+// REFACTORED (audit F-02): Phase 2 CREATE TABLE statements are now handled by
+// `npm run migrate` (node-pg-migrate). This IIFE is kept for emergency use only —
+// set RUN_MIGRATIONS_AT_BOOT=true to re-enable boot-time execution.
 (async () => {
+if (process.env.RUN_MIGRATIONS_AT_BOOT !== 'true') {
+  console.log('[Phase2 Migrations] SKIPPED — schema is managed by `npm run migrate` (node-pg-migrate).');
+  return;
+}
 try {
 for (const sql of phase2Tables) {
   try { await migrateQuery(pool, 'phase2-migration', sql); } catch (e) { /* table already exists is OK */ }
@@ -32697,39 +32332,25 @@ console.log('[Phase2] DB tables, indexes, drug interactions, and feature flags i
 })(); // End Phase 2 async IIFE
 
 // ============================================================
-// v13.0: COUNTRY-AWARE PAYMENT API ENDPOINTS
+// v13.0: COUNTRY-AWARE PAYMENT API ENDPOINTS (extracted — Track 1)
 // ============================================================
-
-// Get available payment methods for a country
-app.get('/api/payment-methods/:country', ah(async (req, res) => {
-  const country = (req.params.country || 'UG').toUpperCase();
-  const providers = getProvidersForCountry(country);
-  res.json(providers);
+// Mounts /api/payment-methods/* and /api/settings/country on the extracted
+// router. Note: the /pay/checkout-v2 UI route below remains inline.
+app.use('/api', require('./src/routes/payment-api')({
+  ..._routeSharedCtx,
+  COUNTRY_PAYMENT_CONFIG,
+  getProvidersForCountry,
+  getTenantCountry,
 }));
 
-// Get payment methods for current tenant (auto-detect country)
-app.get('/api/payment-methods', requireAuth, ah(async (req, res) => {
-  const country = await getTenantCountry(req.session.user.tenant_id);
-  const providers = getProvidersForCountry(country);
-  res.json({ ...providers, detectedCountry: country });
-}));
-
-// Set tenant country preference
-app.post('/api/settings/country', requireAuth, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { country_code, currency, preferred_payment, flutterwave_enabled } = req.body;
-  const cc = (country_code || 'UG').toUpperCase();
-  const cfg = COUNTRY_PAYMENT_CONFIG[cc];
-  if (!cfg) return res.status(400).json({ error: 'Unsupported country code' });
-  
-  await pool.query('UPDATE tenants SET country=$1, currency=$2 WHERE id=$3', [cc, currency || cfg.currency, t]);
-  await pool.query(`INSERT INTO tenant_country_settings(tenant_id, country_code, currency, preferred_payment, flutterwave_enabled, updated_at) 
-    VALUES($1,$2,$3,$4,$5,NOW()) ON CONFLICT(tenant_id) DO UPDATE SET country_code=$2, currency=$3, preferred_payment=$4, flutterwave_enabled=$5, updated_at=NOW()`,
-    [t, cc, currency || cfg.currency, preferred_payment || cfg.providers[0], flutterwave_enabled !== undefined ? flutterwave_enabled : cfg.flutterwave_supported]);
-  
-  await audit(req.session.user.email, 'country_settings_updated', { country: cc, currency }, req.session.user.tenant_id, req);
-  res.json({ success: true, country: cc, currency: currency || cfg.currency, availableProviders: cfg.providers });
-}));
+// ============================================================
+// MISCELLANEOUS /api/* ENDPOINTS (extracted — Track 1)
+// ============================================================
+// Mounts /api/subscription/status, /api/features,
+// /api/recurring-donations/process, /api/rate-limits on the extracted
+// router. Multiple /api mounts compose: each router only matches its own
+// paths and falls through to next() otherwise.
+app.use('/api', require('./src/routes/misc-api')(_routeSharedCtx));
 
 // Country-aware checkout (auto-selects payment methods based on tenant country)
 app.get('/pay/checkout-v2', requireAuth, ah(async (req, res) => {
@@ -34344,205 +33965,10 @@ app.get('/clinic/claims/:id/reject', requireAuth, requireNotBanned, requireFeatu
 }));
 
 // ============================================================
-// v13.0: CLINICAL DECISION SUPPORT (CDS)
+// v13.0: CLINICAL DECISION SUPPORT (CDS) — API extracted
+// (UI route /clinic/cds remains inline below.)
 // ============================================================
-
-// API: Check drug interactions for a list of medications
-app.get('/api/cds/interactions', requireAuth, ah(async (req, res) => {
-  const { medications } = req.query;
-  if (!medications) return res.json({ interactions: [] });
-  const meds = Array.isArray(medications) ? medications : [medications];
-  const interactions = [];
-  
-  for (let i = 0; i < meds.length; i++) {
-    for (let j = i + 1; j < meds.length; j++) {
-      const found = (await pool.query('SELECT * FROM drug_interactions WHERE (drug_a ILIKE $1 AND drug_b ILIKE $2) OR (drug_a ILIKE $2 AND drug_b ILIKE $1)',
-        [`%${meds[i]}%`, `%${meds[j]}%`])).rows;
-      interactions.push(...found.map(f => ({ drug_a: meds[i], drug_b: meds[j], ...f })));
-    }
-  }
-  res.json({ medications: meds, interactions, count: interactions.length });
-}));
-
-// API: Check patient allergies before prescribing
-app.get('/api/cds/allergy-check', requireAuth, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_type, patient_id, medication } = req.query;
-  if (!patient_id || !medication) return res.json({ alerts: [] });
-  
-  const allergies = (await pool.query('SELECT * FROM patient_allergies WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 AND is_active=true', [t, patient_type || 'student', patient_id])).rows;
-  const alerts = [];
-  
-  for (const allergy of allergies) {
-    const allergenLower = allergy.allergen.toLowerCase();
-    const medLower = medication.toLowerCase();
-    // Check if medication name contains the allergen or vice versa
-    if (medLower.includes(allergenLower) || allergenLower.includes(medLower.split(' ')[0])) {
-      alerts.push({
-        type: 'allergy_alert',
-        severity: allergy.severity,
-        allergen: allergy.allergen,
-        reaction: allergy.reaction,
-        medication: medication,
-        message: `WARNING: Patient has a ${allergy.severity} allergy to ${allergy.allergen}. ${medication} may trigger a reaction (${allergy.reaction || 'unknown reaction'}).`,
-        recommendation: allergy.severity === 'severe' ? 'DO NOT prescribe this medication. Find an alternative.' : 'Use with caution. Consider alternative medication.'
-      });
-    }
-    // Common cross-reactivity checks
-    const crossReactivity = {
-      'penicillin': ['amoxicillin', 'ampicillin', 'amoxil', 'augmentin', 'penicillin', 'benzylpenicillin'],
-      'sulfa': ['sulfamethoxazole', 'co-trimoxazole', 'trimethoprim', 'sulfasalazine', 'septrin'],
-      'aspirin': ['ibuprofen', 'diclofenac', 'naproxen', 'indomethacin', 'mefenamic'],
-      'latex': ['avocado', 'banana', 'kiwi', 'chestnut']
-    };
-    for (const [allergenGroup, crossReactive] of Object.entries(crossReactivity)) {
-      if (allergenLower.includes(allergenGroup) || allergenGroup.includes(allergenLower)) {
-        if (crossReactive.some(cr => medLower.includes(cr))) {
-          alerts.push({
-            type: 'cross_reactivity_alert',
-            severity: allergy.severity,
-            allergen: allergy.allergen,
-            medication: medication,
-            message: `CROSS-REACTIVITY WARNING: ${medication} may cross-react with ${allergy.allergen} allergy (${allergy.reaction || 'unknown reaction'}).`,
-            recommendation: 'Consider alternative medication. Monitor closely if prescribed.'
-          });
-        }
-      }
-    }
-  }
-  res.json({ patient_type, patient_id, medication, alerts, allergy_count: allergies.length });
-}));
-
-// API: Dosage check
-app.get('/api/cds/dosage-check', requireAuth, ah(async (req, res) => {
-  const { medication, dosage, age, weight } = req.query;
-  if (!medication || !dosage) return res.json({ warnings: [] });
-  
-  const warnings = [];
-  const dosageStr = dosage.toLowerCase();
-  const dosageNum = parseFloat(dosageStr);
-  const ageNum = parseInt(age);
-  const weightNum = parseFloat(weight);
-  
-  // Common pediatric/geriatric dosage warnings
-  if (ageNum && ageNum < 12) {
-    warnings.push({ type: 'pediatric_dose', message: `Pediatric patient (age ${ageNum}). Verify weight-based dosing. Standard adult doses may be unsafe.`, severity: 'high' });
-  }
-  if (ageNum && ageNum > 65) {
-    warnings.push({ type: 'geriatric_dose', message: `Elderly patient (age ${ageNum}). Consider reduced dosing due to decreased renal/hepatic clearance.`, severity: 'moderate' });
-  }
-  
-  // Medication-specific dosage checks (Uganda/Africa common medications)
-  const dosageChecks = [
-    { med: 'paracetamol', maxDailyAdult: 4000, maxDailyPediatric: 60, unit: 'mg', weightBased: true, weightDose: 15 },
-    { med: 'amoxicillin', maxDailyAdult: 3000, maxDailyPediatric: 90, unit: 'mg', weightBased: true, weightDose: 25 },
-    { med: 'metformin', maxDaily: 2550, unit: 'mg', minAge: 10 },
-    { med: 'artemether', maxDailyAdult: 640, unit: 'mg', weightBased: true, weightDose: 3.2 },
-    { med: 'ciprofloxacin', maxDaily: 1500, unit: 'mg', minAge: 18, pedWarning: 'Avoid in children under 18 due to cartilage damage risk' },
-    { med: 'doxycycline', maxDaily: 200, unit: 'mg', minAge: 8, pedWarning: 'Avoid in children under 8 - causes dental discoloration' },
-    { med: 'chloroquine', maxDaily: 600, unit: 'mg base', weightBased: true, weightDose: 10 },
-    { med: 'ibuprofen', maxDailyAdult: 2400, maxDailyPediatric: 40, unit: 'mg', weightBased: true, weightDose: 10 },
-    { med: 'diclofenac', maxDaily: 150, unit: 'mg', minAge: 14 }
-  ];
-  
-  for (const check of dosageChecks) {
-    if (dosageStr.includes(check.med)) {
-      if (check.minAge && ageNum && ageNum < check.minAge) {
-        warnings.push({ type: 'age_restriction', message: check.pedWarning || `${check.med} is not recommended for patients under ${check.minAge} years.`, severity: 'high' });
-      }
-      if (check.maxDaily && dosageNum > check.maxDaily) {
-        warnings.push({ type: 'overdose', message: `Dose of ${dosage} exceeds maximum daily dose of ${check.maxDaily}${check.unit} for ${check.med}.`, severity: 'high' });
-      }
-      if (check.weightBased && weightNum && dosageNum) {
-        const expectedDose = weightNum * check.weightDose;
-        if (dosageNum > expectedDose * 1.5) {
-          warnings.push({ type: 'weight_dose_mismatch', message: `Dose of ${dosageNum}${check.unit} seems high for patient weight of ${weightNum}kg. Expected ~${expectedDose.toFixed(0)}${check.unit} based on ${check.weightDose}${check.unit}/kg.`, severity: 'moderate' });
-        }
-      }
-    }
-  }
-  
-  res.json({ medication, dosage, age: ageNum, weight: weightNum, warnings });
-}));
-
-// API: Full CDS check (combines all checks for prescribing)
-app.post('/api/cds/full-check', requireAuth, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_type, patient_id, medications, age, weight } = req.body;
-  
-  if (!medications || !medications.length) return res.json({ alerts: [], interactions: [], warnings: [] });
-  
-  const allAlerts = [];
-  const allInteractions = [];
-  const allWarnings = [];
-  
-  // Check interactions between all medications
-  for (let i = 0; i < medications.length; i++) {
-    for (let j = i + 1; j < medications.length; j++) {
-      const found = (await pool.query('SELECT * FROM drug_interactions WHERE (drug_a ILIKE $1 AND drug_b ILIKE $2) OR (drug_a ILIKE $2 AND drug_b ILIKE $1)',
-        [`%${medications[i].name}%`, `%${medications[j].name}%`])).rows;
-      for (const f of found) {
-        allInteractions.push({ drug_a: medications[i].name, drug_b: medications[j].name, ...f });
-      }
-    }
-  }
-  
-  // Check allergies for each medication
-  if (patient_id) {
-    const allergies = (await pool.query('SELECT * FROM patient_allergies WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 AND is_active=true', [t, patient_type || 'student', patient_id])).rows;
-    for (const med of medications) {
-      for (const allergy of allergies) {
-        const allergenLower = allergy.allergen.toLowerCase();
-        const medLower = med.name.toLowerCase();
-        if (medLower.includes(allergenLower) || allergenLower.includes(medLower.split(' ')[0])) {
-          allAlerts.push({
-            type: 'allergy_alert', severity: allergy.severity, allergen: allergy.allergen, medication: med.name,
-            message: `ALLERGY ALERT: Patient has ${allergy.severity} allergy to ${allergy.allergen}. ${med.name} is contraindicated.`,
-            recommendation: allergy.severity === 'severe' ? 'DO NOT PRESCRIBE. Find alternative.' : 'Use with extreme caution.'
-          });
-        }
-        // Cross-reactivity
-        const crossReactivity = {
-          'penicillin': ['amoxicillin', 'ampicillin', 'amoxil', 'augmentin'],
-          'sulfa': ['sulfamethoxazole', 'co-trimoxazole', 'trimethoprim', 'septrin'],
-          'aspirin': ['ibuprofen', 'diclofenac', 'naproxen', 'mefenamic']
-        };
-        for (const [group, cross] of Object.entries(crossReactivity)) {
-          if (allergenLower.includes(group) && cross.some(c => medLower.includes(c))) {
-            allAlerts.push({ type: 'cross_reactivity', severity: 'high', allergen: allergy.allergen, medication: med.name, message: `Cross-reactivity: ${med.name} may react with ${allergy.allergen} allergy.` });
-          }
-        }
-      }
-    }
-    
-    // Check current medications for duplicate therapy
-    const currentMeds = (await pool.query('SELECT * FROM patient_medications WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 AND is_active=true', [t, patient_type || 'student', patient_id])).rows;
-    for (const med of medications) {
-      const duplicate = currentMeds.find(cm => cm.medication_name.toLowerCase().includes(med.name.toLowerCase()) || med.name.toLowerCase().includes(cm.medication_name.toLowerCase()));
-      if (duplicate) {
-        allWarnings.push({ type: 'duplicate_therapy', medication: med.name, existing: duplicate.medication_name, message: `Patient is already on ${duplicate.medication_name} (${duplicate.dosage} ${duplicate.frequency}). Adding ${med.name} may be duplicate therapy.` });
-      }
-    }
-  }
-  
-  // Dosage checks
-  for (const med of medications) {
-    if (med.dosage && age) {
-      const ageNum = parseInt(age);
-      if (ageNum < 12) allWarnings.push({ type: 'pediatric', medication: med.name, message: `Pediatric dosing for ${med.name} - verify weight-based dose.` });
-      if (ageNum > 65) allWarnings.push({ type: 'geriatric', medication: med.name, message: `Elderly dosing for ${med.name} - consider dose reduction.` });
-    }
-  }
-  
-  res.json({
-    patient_type, patient_id, medications: medications.map(m => m.name),
-    alerts: allAlerts,
-    interactions: allInteractions,
-    warnings: allWarnings,
-    total_issues: allAlerts.length + allInteractions.length + allWarnings.length,
-    has_critical: allAlerts.some(a => a.severity === 'severe') || allInteractions.some(i => i.severity === 'high')
-  });
-}));
+app.use('/api/cds', require('./src/routes/cds-api')(_routeSharedCtx));
 
 // CDS Dashboard (UI for checking interactions)
 app.get('/clinic/cds', requireAuth, requireNotBanned, requireFeature('clinical_decision_support'), ah(async (req, res) => {
@@ -40504,91 +39930,8 @@ app.get('/clinic-enhanced/reports', requireAuth, requireNotBanned, ah(async (req
 
 // ============================================================
 // FEATURE 6: OAUTH2 LOGIN (Google + Microsoft)
+// → Extracted to src/routes/auth-oauth.js (mounted at /auth)
 // ============================================================
-app.get('/auth/google', (req, res) => {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const redirectUri = (process.env.BASE_URL || '') + '/auth/google/callback';
-  if (!clientId) return res.send(renderPage('OAuth2', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2>Google Login Not Configured</h2><p class="muted">Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET env vars to enable Google OAuth2 login.</p><a href="/login" class="btn">Back to Login</a></div>', null));
-  const scope = 'openid email profile';
-  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=select_account`;
-  res.redirect(url);
-});
-
-app.get('/auth/google/callback', ah(async (req, res) => {
-  const { code, error } = req.query;
-  if (error) return res.send(renderPage('OAuth2 Error', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Google Login Error</h2><p>${esc(error)}</p><a href="/login" class="btn">Back to Login</a></div>`, null));
-  if (!code || !process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) return res.redirect('/login');
-  try {
-    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `code=${code}&client_id=${process.env.GOOGLE_CLIENT_ID}&client_secret=${process.env.GOOGLE_CLIENT_SECRET}&redirect_uri=${encodeURIComponent((process.env.BASE_URL||'')+'/auth/google/callback')}&grant_type=authorization_code`
-    });
-    const tokens = await tokenRes.json();
-    if (!tokens.access_token) return res.send(renderPage('OAuth2 Error', '<div class="card" style="max-width:500px;margin:40px auto"><h2>Token Error</h2><p>Could not obtain access token from Google.</p><a href="/login" class="btn">Back to Login</a></div>', null));
-    const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
-    const profile = await profileRes.json();
-    let u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [profile.email])).rows[0];
-    if (!u) {
-      // Auto-create account via OAuth2
-      const googleSubdomain = 'google-' + Math.floor(Math.random() * 9999);
-      const tenantResult = await pool.query('INSERT INTO tenants (name, type, email, verified, approved, subdomain) VALUES ($1, $2, $3, true, true, $4) RETURNING id', [profile.name || 'Google User', 'individual', profile.email, googleSubdomain]);
-      const tenantId = tenantResult.rows[0].id;
-      const hash = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 12);
-      u = (await pool.query('INSERT INTO users (tenant_id, email, password, role, approved) VALUES ($1, $2, $3, $4, true) RETURNING id, tenant_id, email, role, approved, dark_mode, created_at', [tenantId, profile.email, hash, 'admin'])).rows[0];
-      await pool.query('INSERT INTO subscriptions (tenant_id, plan, status, expires_at) VALUES ($1, \'starter\', \'active\', NOW() + INTERVAL \'30 days\')', [tenantId]);
-      u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [profile.email])).rows[0];
-    }
-    if (u.banned) return res.send(renderPage('Banned', '<div class="card"><div class="alert alert-error">Account banned</div><a href="/login" class="btn">Back</a></div>', null));
-    req.session.user = u;
-    audit(u.email, 'oauth2_google_login', 'Google OAuth2 login');
-    res.redirect('/dashboard');
-  } catch (e) {
-    res.send(renderPage('OAuth2 Error', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Error</h2><p>${esc(e.message)}</p><a href="/login" class="btn">Back to Login</a></div>`, null));
-  }
-}));
-
-app.get('/auth/microsoft', (req, res) => {
-  const clientId = process.env.MS_CLIENT_ID;
-  const redirectUri = (process.env.BASE_URL || '') + '/auth/microsoft/callback';
-  if (!clientId) return res.send(renderPage('OAuth2', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2>Microsoft Login Not Configured</h2><p class="muted">Set MS_CLIENT_ID and MS_CLIENT_SECRET env vars to enable Microsoft OAuth2 login.</p><a href="/login" class="btn">Back to Login</a></div>', null));
-  const scope = 'openid email profile User.Read';
-  const url = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}`;
-  res.redirect(url);
-});
-
-app.get('/auth/microsoft/callback', ah(async (req, res) => {
-  const { code, error } = req.query;
-  if (error) return res.send(renderPage('OAuth2 Error', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Microsoft Login Error</h2><p>${esc(error)}</p><a href="/login" class="btn">Back to Login</a></div>`, null));
-  if (!code || !process.env.MS_CLIENT_ID || !process.env.MS_CLIENT_SECRET) return res.redirect('/login');
-  try {
-    const tokenRes = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
-      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `code=${code}&client_id=${process.env.MS_CLIENT_ID}&client_secret=${process.env.MS_CLIENT_SECRET}&redirect_uri=${encodeURIComponent((process.env.BASE_URL||'')+'/auth/microsoft/callback')}&grant_type=authorization_code&scope=openid email profile`
-    });
-    const tokens = await tokenRes.json();
-    if (!tokens.access_token) return res.send(renderPage('OAuth2 Error', '<div class="card" style="max-width:500px;margin:40px auto"><h2>Token Error</h2><p>Could not obtain access token from Microsoft.</p><a href="/login" class="btn">Back to Login</a></div>', null));
-    const profileRes = await fetch('https://graph.microsoft.com/v1.0/me', { headers: { Authorization: 'Bearer ' + tokens.access_token } });
-    const profile = await profileRes.json();
-    const email = profile.mail || profile.userPrincipalName;
-    if (!email) return res.redirect('/login');
-    let u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
-    if (!u) {
-      const msSubdomain = 'ms-' + Math.floor(Math.random() * 9999);
-      const tenantResult = await pool.query('INSERT INTO tenants (name, type, email, verified, approved, subdomain) VALUES ($1, $2, $3, true, true, $4) RETURNING id', [profile.displayName || 'Microsoft User', 'individual', email, msSubdomain]);
-      const tenantId = tenantResult.rows[0].id;
-      const hash = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 12);
-      u = (await pool.query('INSERT INTO users (tenant_id, email, password, role, approved) VALUES ($1, $2, $3, $4, true) RETURNING id, tenant_id, email, role, approved, dark_mode, created_at', [tenantId, email, hash, 'admin'])).rows[0];
-      await pool.query('INSERT INTO subscriptions (tenant_id, plan, status, expires_at) VALUES ($1, \'starter\', \'active\', NOW() + INTERVAL \'30 days\')', [tenantId]);
-      u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
-    }
-    if (u.banned) return res.send(renderPage('Banned', '<div class="card"><div class="alert alert-error">Account banned</div><a href="/login" class="btn">Back</a></div>', null));
-    req.session.user = u;
-    audit(u.email, 'oauth2_microsoft_login', 'Microsoft OAuth2 login');
-    res.redirect('/dashboard');
-  } catch (e) {
-    res.send(renderPage('OAuth2 Error', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Error</h2><p>${esc(e.message)}</p><a href="/login" class="btn">Back to Login</a></div>`, null));
-  }
-}));
 
 // ============================================================
 // FEATURE 7: DEEP LINKING (URL Shortener)
@@ -41899,7 +41242,10 @@ try {
     // Telehealth / Video Consultation Booking
     `CREATE TABLE IF NOT EXISTS telehealth_consultations (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_name VARCHAR(255) NOT NULL, patient_id INTEGER, patient_phone VARCHAR(20), doctor_id INTEGER REFERENCES clinic_staff(id), doctor_name VARCHAR(255), scheduled_date DATE, scheduled_time TIME, duration_minutes INTEGER DEFAULT 30, meeting_link TEXT, meeting_id VARCHAR(255) UNIQUE, status VARCHAR(20) DEFAULT 'scheduled', subjective TEXT, objective TEXT, assessment TEXT, plan TEXT, started_at TIMESTAMPTZ, ended_at TIMESTAMPTZ, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`
   ];
-  for (const sql of tables) { try { await migrateQuery(pool, 'clinic-migration', sql); } catch(e) { /* table may already exist */ } }
+  // REFACTORED (audit F-02): clinic tables are now created by `npm run migrate`.
+  if (process.env.RUN_MIGRATIONS_AT_BOOT === 'true') {
+    for (const sql of tables) { try { await migrateQuery(pool, 'clinic-migration', sql); } catch(e) { /* table may already exist */ } }
+  }
 
   // Add missing columns to insurance_claims (table may already exist)
   const claimAlters = [
@@ -41914,7 +41260,10 @@ try {
     `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)`,
     `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`
   ];
-  for (const sql of claimAlters) { try { await migrateQuery(pool, 'clinic-alters', sql); } catch(e) { /* column may already exist */ } }
+  // REFACTORED (audit F-02): clinic alters are now created by `npm run migrate`.
+  if (process.env.RUN_MIGRATIONS_AT_BOOT === 'true') {
+    for (const sql of claimAlters) { try { await migrateQuery(pool, 'clinic-alters', sql); } catch(e) { /* column may already exist */ } }
+  }
 
   console.log('[Migrations] All new tables ready');
 
@@ -43732,33 +43081,7 @@ app.post('/settings/domains/verify', requireAuth, requireNotBanned, ah(async (re
 // Already implemented inline in apiAuth middleware (lines 12620-12641)
 // Enhancement: Add per-key custom rate limit override and usage dashboard
 
-// API rate limit settings per key
-app.get('/api/rate-limits', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const keys = (await pool.query('SELECT id, name, key_prefix, last_used, is_active, created_at FROM api_keys WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
-  res.send(renderPage('API Rate Limits', `
-    <div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626)"><h1>API Rate Limiting</h1><p>Monitor and manage API key rate limits</p></div>
-    <div class="card"><h2>Default Rate Limits by Plan</h2>
-      <table><tr><th>Plan</th><th>Requests/Minute</th></tr>
-      <tr><td>Free</td><td>60</td></tr><tr><td>Basic</td><td>200</td></tr><tr><td>Pro</td><td>500</td></tr><tr><td>Enterprise</td><td>2,000</td></tr></table>
-      <p class="muted">Rate limit headers are included in every API response: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset</p>
-    </div>
-    <div class="card"><h2>Your API Keys</h2>
-      <table><tr><th>Name</th><th>Prefix</th><th>Active</th><th>Last Used</th><th>Created</th></tr>
-      ${keys.map(k => `<tr><td>${esc(k.name)}</td><td><code>${esc(k.key_prefix||'...')}</code></td><td>${k.is_active!==false?'<span class="tag" style="background:#d1fae5;color:#065f46">Active</span>':'<span class="tag" style="background:#fee2e2;color:#991b1b">Revoked</span>'}</td><td>${k.last_used?new Date(k.last_used).toLocaleString():'Never'}</td><td>${new Date(k.created_at).toLocaleDateString()}</td></tr>`).join('')}
-      </table>
-    </div>
-    <div class="card"><h2>Rate Limit Response (429)</h2>
-      <pre style="background:#1e1e1e;color:#d4d4d4;padding:15px;border-radius:8px;overflow-x:auto"><code>{
-  "error": "Rate limit exceeded",
-  "limit": 500,
-  "remaining": 0,
-  "reset_at": "2026-05-20T12:00:00.000Z"
-}</code></pre>
-    </div>
-    <div class="card"><a href="/api-keys" class="btn" style="width:100%">Manage API Keys</a></div>
-  `, req.session.user));
-}));
+// API rate limit settings per key → Extracted to src/routes/misc-api.js (mounted at /api)
 
 // ============================================================
 // Task 2.8: Webhook Retry + Delivery Dashboard
@@ -44052,100 +43375,15 @@ app.get('/settings/sso/:id/delete', requireAuth, requireNotBanned, ah(async (req
   res.redirect('/settings/sso');
 }));
 
-// SAML SSO login (replaces placeholder)
-app.get('/auth/saml/:tenantId', ah(async (req, res) => {
-  const config = (await pool.query('SELECT * FROM sso_configs WHERE tenant_id=$1 AND active=true AND protocol=$2', [req.params.tenantId, 'saml'])).rows[0];
-  if (!config) return res.status(404).send('No active SAML configuration found for this tenant.');
-  // Redirect to IdP SSO URL
-  if (config.entry_point) {
-    // In production, this would build a proper SAML AuthnRequest
-    // For now, redirect to the entry point with relay state
-    const relayState = Buffer.from(JSON.stringify({ tenant_id: req.params.tenantId })).toString('base64');
-    return res.redirect(`${config.entry_point}?SAMLRequest=...&RelayState=${relayState}`);
-  }
-  res.send(renderPage('SSO Login', '<div class="card alert alert-info"><h2>SSO Configuration Found</h2><p>Your SAML identity provider is configured. SAML request generation requires the @boxyhq/saml-jackson library for production use.</p></div>', null));
-}));
+// SAML SSO + OIDC SSO routes (extracted — Track 1)
+// Routes: /auth/saml/:tenantId, /auth/saml/callback,
+//         /auth/oidc/:configId, /auth/oidc/callback
+app.use('/auth', require('./src/routes/auth-saml-oidc')(_routeSharedCtx));
 
-app.post('/auth/saml/callback', ah(async (req, res) => {
-  // Process SAML assertion (simplified — production uses @boxyhq/saml-jackson or passport-saml)
-  const relayState = req.body.RelayState;
-  try {
-    const state = JSON.parse(Buffer.from(relayState || '', 'base64').toString());
-    // In production: validate SAML response, extract email, find/create user, set session
-    res.redirect('/dashboard');
-  } catch (e) {
-    res.redirect('/login');
-  }
-}));
-
-// ============================================================
-// Task 3.2: OIDC Support (Auth0, Okta, etc.)
-// ============================================================
-// OIDC authorization flow
-app.get('/auth/oidc/:configId', ah(async (req, res) => {
-  const config = (await pool.query('SELECT * FROM sso_configs WHERE id=$1 AND active=true AND protocol=$2', [req.params.configId, 'oidc'])).rows[0];
-  if (!config) return res.status(404).send('No active OIDC configuration found.');
-  if (!config.auth_endpoint || !config.client_id) return res.status(400).send('OIDC configuration incomplete. Missing auth endpoint or client ID.');
-  // Build OIDC authorization URL
-  const redirectUri = `${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/auth/oidc/callback`;
-  const state = crypto.randomBytes(16).toString('hex');
-  const authUrl = new URL(config.auth_endpoint);
-  authUrl.searchParams.set('response_type', 'code');
-  authUrl.searchParams.set('client_id', config.client_id);
-  authUrl.searchParams.set('redirect_uri', redirectUri);
-  authUrl.searchParams.set('scope', 'openid email profile');
-  authUrl.searchParams.set('state', state);
-  // Store state in session for CSRF protection
-  req.session.oidcState = state;
-  req.session.oidcConfigId = config.id;
-  res.redirect(authUrl.toString());
-}));
-
-// OIDC callback
-app.get('/auth/oidc/callback', ah(async (req, res) => {
-  const { code, state } = req.query;
-  // Verify state to prevent CSRF
-  if (!state || state !== req.session.oidcState) {
-    return res.status(400).send('Invalid OAuth state parameter. Possible CSRF attack.');
-  }
-  const config = (await pool.query('SELECT * FROM sso_configs WHERE id=$1', [req.session.oidcConfigId])).rows[0];
-  if (!config) return res.status(404).send('SSO configuration not found.');
-  try {
-    // Exchange code for tokens
-    const redirectUri = `${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/auth/oidc/callback`;
-    const tokenResponse = await fetch(config.token_endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: config.client_id, client_secret: config.client_secret_encrypted || '' })
-    });
-    const tokens = await tokenResponse.json();
-    if (!tokens.access_token && !tokens.id_token) {
-      return res.status(400).send('Failed to obtain tokens from identity provider.');
-    }
-    // Decode JWT id_token to get user info (without external library)
-    const idToken = tokens.id_token;
-    const payloadB64 = idToken.split('.')[1];
-    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
-    const email = payload.email || payload.preferred_username;
-    if (!email) return res.status(400).send('Email not found in OIDC response.');
-    // Find or create user
-    let user = (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
-    if (user) {
-      if (user.banned) return res.redirect('/login?error=Account+banned');
-      req.session.user = { id: user.id, email: user.email, name: user.name, role: user.role, tenant_id: user.tenant_id };
-    } else {
-      // Auto-create user under the SSO config's tenant (if applicable)
-      return res.redirect('/login?error=No+account+found.+Please+contact+your+administrator.');
-    }
-    delete req.session.oidcState;
-    delete req.session.oidcConfigId;
-    await audit(email, 'oidc_login', `OIDC login via ${config.provider_name}`, user?.tenant_id, req);
-    res.redirect('/dashboard');
-  } catch (e) {
-    console.error('[OIDC Error]', e.message);
-    res.redirect('/login?error=SSO+authentication+failed');
-  }
-}));
+// OAuth2 (Google + Microsoft) routes (extracted — Track 1)
+// Routes: /auth/oauth/google, /auth/oauth/microsoft, /auth/oauth/google/callback,
+//         /auth/google, /auth/google/callback, /auth/microsoft, /auth/microsoft/callback
+app.use('/auth', require('./src/routes/auth-oauth')(_routeSharedCtx));
 
 // ============================================================
 // Task 3.3: Visual Drag-and-Drop Automation Workflow Builder
@@ -46208,7 +45446,14 @@ console.log('[Invitations] Email-based user invitation routes registered — /te
 // ============================================================
 
 // --- Auto-migrate: add status, message, rejected_at columns if missing ---
+// REFACTORED (audit F-02): these ALTER TABLE statements are now handled by
+// `npm run migrate` (node-pg-migrate). This IIFE is kept for emergency use only —
+// set RUN_MIGRATIONS_AT_BOOT=true to re-enable boot-time execution.
 (async () => {
+  if (process.env.RUN_MIGRATIONS_AT_BOOT !== 'true') {
+    console.log('[Invitations Migration] SKIPPED — schema is managed by `npm run migrate` (node-pg-migrate).');
+    return;
+  }
   try {
     const cols = (await migrateQuery(pool, 'invitations-migration', `
       SELECT column_name FROM information_schema.columns WHERE table_name='user_invitations'
@@ -46704,119 +45949,14 @@ pool.query(`
   .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_saved_filters_page ON saved_filters(tenant_id, user_id, page)`))
   .catch(() => {});
 
-// POST /api/filters/save — Save a filter combination
-app.post('/api/filters/save', requireAuth, ah(async (req, res) => {
-  const { name, page, filters, is_default } = req.body;
-  const tenantId = req.session.user.tenant_id;
-  const userId = req.session.user.id;
-  if (!name || !page || !filters) return res.status(400).json({ error: 'name, page, and filters are required' });
-  if (name.length > 100) return res.status(400).json({ error: 'name must be 100 characters or less' });
-  if (page.length > 100) return res.status(400).json({ error: 'page must be 100 characters or less' });
-  // If setting as default, clear any existing default for this page
-  if (is_default) {
-    await pool.query('UPDATE saved_filters SET is_default = false WHERE tenant_id = $1 AND user_id = $2 AND page = $3 AND is_default = true', [tenantId, userId, page]);
-  }
-  const result = await pool.query(
-    'INSERT INTO saved_filters(tenant_id, user_id, name, page, filters, is_default) VALUES($1, $2, $3, $4, $5, $6) RETURNING id, name, page, filters, is_default, created_at',
-    [tenantId, userId, name, page, JSON.stringify(filters), is_default || false]
-  );
-  res.json({ success: true, filter: result.rows[0] });
-}));
-
-// GET /api/filters/list?page=X — Get saved filters for current user + page
-app.get('/api/filters/list', requireAuth, ah(async (req, res) => {
-  const { page } = req.query;
-  const tenantId = req.session.user.tenant_id;
-  const userId = req.session.user.id;
-  let query = 'SELECT id, name, page, filters, is_default, created_at, updated_at FROM saved_filters WHERE tenant_id = $1 AND user_id = $2';
-  const params = [tenantId, userId];
-  if (page) { query += ' AND page = $3'; params.push(page); }
-  query += ' ORDER BY is_default DESC, created_at DESC';
-  const result = await pool.query(query, params);
-  res.json({ success: true, filters: result.rows });
-}));
-
-// POST /api/filters/apply/:id — Get a specific filter by ID
-app.post('/api/filters/apply/:id', requireAuth, ah(async (req, res) => {
-  const filterId = parseInt(req.params.id);
-  const tenantId = req.session.user.tenant_id;
-  const userId = req.session.user.id;
-  const result = await pool.query('SELECT id, name, page, filters, is_default FROM saved_filters WHERE id = $1 AND tenant_id = $2 AND user_id = $3', [filterId, tenantId, userId]);
-  if (!result.rows.length) return res.status(404).json({ error: 'Filter not found' });
-  res.json({ success: true, filter: result.rows[0] });
-}));
-
-// POST /api/filters/delete/:id — Delete a saved filter
-app.post('/api/filters/delete/:id', requireAuth, ah(async (req, res) => {
-  const filterId = parseInt(req.params.id);
-  const tenantId = req.session.user.tenant_id;
-  const userId = req.session.user.id;
-  const result = await pool.query('DELETE FROM saved_filters WHERE id = $1 AND tenant_id = $2 AND user_id = $3 RETURNING id', [filterId, tenantId, userId]);
-  if (!result.rows.length) return res.status(404).json({ error: 'Filter not found' });
-  res.json({ success: true });
-}));
-
-// POST /api/filters/default/:id — Set a filter as default for that page
-app.post('/api/filters/default/:id', requireAuth, ah(async (req, res) => {
-  const filterId = parseInt(req.params.id);
-  const tenantId = req.session.user.tenant_id;
-  const userId = req.session.user.id;
-  // Get the filter to find its page
-  const filter = await pool.query('SELECT page FROM saved_filters WHERE id = $1 AND tenant_id = $2 AND user_id = $3', [filterId, tenantId, userId]);
-  if (!filter.rows.length) return res.status(404).json({ error: 'Filter not found' });
-  const page = filter.rows[0].page;
-  // Clear existing default
-  await pool.query('UPDATE saved_filters SET is_default = false WHERE tenant_id = $1 AND user_id = $2 AND page = $3 AND is_default = true', [tenantId, userId, page]);
-  // Set new default
-  await pool.query('UPDATE saved_filters SET is_default = true, updated_at = NOW() WHERE id = $1 AND tenant_id = $2 AND user_id = $3', [filterId, tenantId, userId]);
-  res.json({ success: true });
-}));
-
+// Saved filter preferences API — /api/filters/*
+app.use('/api/filters', require('./src/routes/filters')(_routeSharedCtx));
 console.log('[SavedFilters] API routes registered — /api/filters/*');
 
 // ============================================================
-// SETTINGS SEARCH
+// SETTINGS SEARCH (extracted — Track 1)
 // ============================================================
-
-const SETTINGS_INDEX = [
-  { title: 'Profile', desc: 'Name, email, password, avatar', link: '/settings/profile', keywords: 'profile name email password avatar account personal' },
-  { title: 'Organization', desc: 'Name, logo, branding, favicon, colors', link: '/settings/branding', keywords: 'organization logo branding favicon colors theme custom css font' },
-  { title: 'Team & Invitations', desc: 'Users, invitations, roles, permissions, RBAC', link: '/settings/team', keywords: 'team users invitations roles permissions rbac access invite member staff' },
-  { title: 'Payments', desc: 'MTN MoMo, Airtel, DPO, API keys, mobile money', link: '/settings/payments', keywords: 'payments mtn momo airtel dpo api keys mobile money flutterwave pay' },
-  { title: 'Billing & Plans', desc: 'Invoices, subscriptions, plans, trial', link: '/billing', keywords: 'billing invoices subscriptions plans trial upgrade pricing payment' },
-  { title: 'Security & 2FA', desc: 'Two-factor auth, password, sessions, CSRF', link: '/settings/2fa', keywords: 'security 2fa two-factor authentication password sessions csrf totp authenticator' },
-  { title: 'Notifications', desc: 'Email, SMS, WhatsApp, alerts', link: '/settings/branding', keywords: 'notifications email sms whatsapp alerts notify reminders' },
-  { title: 'Integrations', desc: 'Webhooks, API, CSV, export', link: '/integrations', keywords: 'integrations webhooks api csv export third-party connect' },
-  { title: 'API Keys', desc: 'API access & webhooks management', link: '/api-keys', keywords: 'api keys webhooks access token developer endpoint' },
-  { title: 'Data & Backup', desc: 'Backup, import, export, privacy', link: '/settings/backup', keywords: 'data backup import export privacy download restore archive compliance gdpr' },
-  { title: 'School Settings', desc: 'Students, fees, classes, exams, timetable', link: '/school/students', keywords: 'school students fees classes exams timetable grades subjects curriculum' },
-  { title: 'Church Settings', desc: 'Members, tithes, sermons, groups', link: '/church/members', keywords: 'church members tithes sermons groups offerings donations service cell' },
-  { title: 'Currency', desc: 'UGX, KES, TZS, RWF settings', link: '/settings/currency', keywords: 'currency ugx kes tzs rwf money exchange rate symbol' },
-  { title: 'Language', desc: 'Translations & locale settings', link: '/settings/translations', keywords: 'language translations locale i18n luganda swahili french english' },
-  { title: 'Theme & Appearance', desc: 'Colors, fonts, CSS, dark mode', link: '/settings/theme', keywords: 'theme colors fonts css dark mode light appearance style customize design' },
-  { title: 'Switch Portal', desc: 'School, Church, Clinic, Business & more', link: '/switch-portal', keywords: 'portal switch school church clinic business organization type category' },
-  { title: 'Compliance & Audit', desc: 'Audit logs & data protection', link: '/compliance', keywords: 'compliance audit log data protection gdpr privacy regulation policy' },
-  { title: 'Status Page', desc: 'Platform health monitoring', link: '/status', keywords: 'status health monitoring uptime performance system page' },
-  { title: 'Custom Domains', desc: 'Custom domain & DNS settings', link: '/settings/domains', keywords: 'domains dns custom subdomain cname url website' },
-  { title: 'SSO & Authentication', desc: 'SAML, OIDC, single sign-on', link: '/settings/sso', keywords: 'sso saml oidc authentication single sign-on login federation' },
-  { title: 'CDN & Performance', desc: 'Content delivery & caching', link: '/settings/cdn', keywords: 'cdn performance caching content delivery speed optimize' },
-  { title: 'Email Branding', desc: 'Email templates & whitelabeling', link: '/settings/email-branding', keywords: 'email branding templates whitelabel custom footer signature' },
-  { title: 'Dashboard Customization', desc: 'Dashboard layout & widgets', link: '/settings/dashboard', keywords: 'dashboard customization layout widgets arrange preferences' },
-  { title: 'Password', desc: 'Change your password', link: '/settings/password', keywords: 'password change reset update security login' },
-];
-
-// GET /settings/search?q=term — Search across all settings
-app.get('/settings/search', requireAuth, ah(async (req, res) => {
-  const q = (req.query.q || '').toLowerCase().trim();
-  if (!q || q.length < 2) return res.json({ success: true, results: [], query: q });
-  const queryWords = q.split(/\s+/).filter(Boolean);
-  const results = SETTINGS_INDEX.filter(item => {
-    const searchText = (item.title + ' ' + item.desc + ' ' + item.keywords).toLowerCase();
-    return queryWords.every(w => searchText.includes(w));
-  }).map(item => ({ title: item.title, description: item.desc, link: item.link }));
-  res.json({ success: true, results, query: q });
-}));
-
+app.use('/settings', require('./src/routes/settings-search')(_routeSharedCtx));
 console.log('[SettingsSearch] API route registered — /settings/search');
 
 // ============================================================
@@ -46865,6 +46005,9 @@ server.listen(PORT, () => {
   finishStartupMigrations();
 
   // Brief settle time for in-flight migrateQuery jobs (reduced from 3s)
+  // REFACTORED (audit F-02): with boot-time migrations disabled, the migrateQuery
+  // queue should always be empty here. The 1s settle is kept as a safety margin
+  // in case any module still issues an async migration query.
   await new Promise(r => setTimeout(r, 1000));
 
   // OPEN THE GATE

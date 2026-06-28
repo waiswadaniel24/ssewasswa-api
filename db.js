@@ -170,6 +170,14 @@ function staggerMigration(fn, maxDelay = 5000) {
  * @param {string} sql - SQL to execute
  * @param {any[]} params - Optional query parameters
  * @returns {Promise<QueryResult>}
+ *
+ * @deprecated since v9.1 (audit finding F-02): boot-time migrations are now
+ *   disabled. Schema is managed by node-pg-migrate via `npm run migrate` at
+ *   deploy time (see migrations/ directory). This function is kept for
+ *   emergency use (set RUN_MIGRATIONS_AT_BOOT=true to re-enable the call sites
+ *   in server.js) and to avoid breaking other modules that may still call it.
+ *   Do NOT add new call sites — add a new migration file under migrations/
+ *   instead.
  */
 let _migrateQueue = [];
 let _migrateRunning = 0;
@@ -178,6 +186,9 @@ let _migrateCompleted = 0;
 let _migrateFailed = 0;
 
 async function migrateQuery(pool, moduleName, sql, params = []) {
+  if (process.env.MIGRATE_VERBOSE || process.env.NODE_ENV !== 'production') {
+    console.warn(`[DEPRECATED] db.migrateQuery() called by ${moduleName} — boot-time migrations are disabled. Use \`npm run migrate\` instead. (sql: ${sql.substring(0, 80)}...)`);
+  }
   return new Promise((resolve, reject) => {
     _migrateQueue.push({ pool, moduleName, sql, params, resolve, reject });
     _drainMigrateQueue();
@@ -214,14 +225,21 @@ async function _runMigrateJob(job) {
         err.message.includes('cannot acquire')
       );
       if (!isRetryable || attempt > maxRetries) {
-        // "already exists" / "does not exist" are expected for migrations
-        if (err.message.includes('already exists') || err.message.includes('does not exist') || err.message.includes('ON CONFLICT') || err.message.includes('duplicate') || err.message.includes('relation')) {
+        // "already exists" is the only truly expected case for CREATE TABLE IF NOT EXISTS.
+        // The previous version also suppressed "does not exist", "relation", "duplicate", and "ON CONFLICT" —
+        // these are NOT always benign (e.g. a SELECT after a failed CREATE returns "relation does not exist",
+        // which is a real error, not a migration no-op). Tightened here so real failures surface in logs.
+        if (err.message.includes('already exists')) {
           _migrateCompleted++;
           return resolve({ rows: [] });
         }
         _migrateFailed++;
-        console.warn(`[Migration] ${moduleName}: ${err.message}`);
-        return resolve({ rows: [] }); // Don't crash on migration errors
+        // FIX (F-07 in audit report): previously this swallowed ALL non-retryable errors silently.
+        // Now we log them prominently so the operator can see why the schema didn't get created.
+        // We still resolve (don't crash the app) but the failure is now visible in Render logs.
+        console.error(`[MIGRATION FAILED] ${moduleName}: ${err.message}`);
+        console.error(`[MIGRATION FAILED] SQL was: ${sql.substring(0, 200)}${sql.length > 200 ? '...' : ''}`);
+        return resolve({ rows: [] }); // Don't crash on migration errors — but log loudly.
       }
       // Longer delay with jitter to spread retry storms
       const delay = 3000 * attempt + Math.floor(Math.random() * 2000);
@@ -234,6 +252,10 @@ async function _runMigrateJob(job) {
 /**
  * Returns a promise that resolves when the migrateQuery queue is fully drained.
  * Used during startup to wait for all module migrations to finish before accepting requests.
+ *
+ * @deprecated since v9.1 (audit finding F-02): with boot-time migrations disabled,
+ *   this queue should always be empty. Kept for backward compatibility with any
+ *   module that still calls it.
  */
 function waitForMigrateDrain(timeoutMs = 60000) {
   return new Promise(resolve => {

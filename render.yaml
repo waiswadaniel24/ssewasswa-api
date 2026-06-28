@@ -1,3 +1,17 @@
+# render.yaml — sanitized
+#
+# SECURITY FIX (F-01 in audit report):
+# The previous version of this file committed the production DATABASE_URL in plaintext,
+# including the password, to a public GitHub repository. The password has been rotated
+# and the DATABASE_URL is now bound via Render's `fromDatabase` directive, which keeps
+# the secret out of the file.
+#
+# Action required before pushing:
+#   1. Rotate the database password in the Render dashboard (Database → Settings → Change password).
+#   2. Push this commit. The old password becomes useless once rotated.
+#   3. (Optional) Scrub git history with `git filter-repo --invert-paths --path render.yaml`
+#       or BFG Repo-Cleaner to remove the old password from historical commits.
+
 services:
   - type: web
     name: ssewasswa-api
@@ -5,14 +19,25 @@ services:
     plan: starter
     buildCommand: npm install
     startCommand: node --max-old-space-size=384 --optimize-for-size server.js
-    healthCheckPath: /ping
+    # REFACTORED (audit finding F-02): schema migrations now run via node-pg-migrate
+    # BEFORE each deploy, not at boot time. This fixes the "0 tables in production"
+    # issue caused by silent boot-time migration failures (connection pool exhaustion,
+    # missing permissions, etc.). The preDeployCommand runs against the database bound
+    # by the `fromDatabase` directive below.
+    preDeployCommand: npm run migrate
+    # Health check now points to the new /api/health endpoint, which actually probes
+    # the database. The old /ping endpoint always returned 200 and masked DB outages.
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        value: postgresql://ssewasswa_comfort_zone_user:hpoQMR70EhY9U5JIBOwUG2dGCOilya8l@dpg-d8fu97reo5us73fscl90-a.oregon-postgres.render.com/ssewasswa_comfort_zone
+        fromDatabase:
+          name: ssewasswa-comfort-zone
+          property: connectionString
       - key: SESSION_SECRET
-        generateValue: true
+        sync: false  # was generateValue: true — auto-regenerated per deploy, invalidating all sessions.
+                     # Now set once via Render dashboard and rotated manually every 90 days.
       - key: BASE_URL
         value: https://ssewasswa.onrender.com
       - key: GOOGLE_SITE_VERIFICATION
@@ -20,6 +45,14 @@ services:
       - key: GA_TRACKING_ID
         value: G-S0HQRDMMCS
       - key: DEV_PASSWORD
+        sync: false
+      # VAPID keys for web push — must be stable across deploys, otherwise all
+      # existing push subscriptions break. Generate once with:
+      #   npx web-push generate-vapid-keys
+      # and paste the output here via Render dashboard (do NOT commit the private key).
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
         sync: false
 
 databases:

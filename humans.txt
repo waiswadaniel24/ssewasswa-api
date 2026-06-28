@@ -1,0 +1,15 @@
+/* TEAM */
+Founder & Developer: Daniel Waiswa
+Site: https://ssewasswa.onrender.com
+Location: Kampala, Uganda
+
+/* THANKS */
+Africa's Talking (SMS gateway)
+Render (hosting)
+Cloudinary (image CDN)
+
+/* SITE */
+Last update: 2026-06-28
+Standards: HTML5, CSS3, JavaScript ES2022
+Components: Node.js, Express, PostgreSQL, Redis, WebSocket
+Software: Visual Studio Code, Git
