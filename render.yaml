@@ -54,6 +54,30 @@ services:
         sync: false
       - key: VAPID_PRIVATE_KEY
         sync: false
+      # === Stripe (Track B) — tokenized card payments + fundraising ===
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      # === PayPal (Track B) — alternative for overseas donors ===
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      # === Platform fee configuration (Track B) — 0.5% fundraising, 3% POS, 1% school fees ===
+      - key: PLATFORM_FEE_PERCENT_FUNDRAISING
+        value: "0.5"
+      - key: PLATFORM_FEE_PERCENT_POS
+        value: "3.0"
+      - key: PLATFORM_FEE_PERCENT_SCHOOL_FEES
+        value: "1.0"
+      # === HIPAA PHI encryption (Track A) — separate key for patient data ===
+      - key: PHI_ENCRYPTION_KEY
+        sync: false
 
 databases:
   - name: ssewasswa-comfort-zone

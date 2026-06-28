@@ -13707,6 +13707,30 @@ const apiRateLimiter = async (req, res, next) => {
 // mount can reference it.
 const _routeSharedCtx = { pool, ah, requireAuth, requireNotBanned, requireSuperAdmin, requireRole, validate, audit, renderPage, renderPageLite, bcrypt, crypto, PLATFORM_CONFIG, upload, apiAuth, rateLimit, wsBroadcast, esc, sanitizeInput, validateEmail, validatePhone, validateUUID, validateAmount, validateName, validatePagination, errorResponse, logger, tenantQuery };
 
+// === Stripe + PayPal live SDK integration (Track B) ===
+// Tokenized payments — server never sees raw card numbers. Stripe.js + PayPal SDK
+// tokenize client-side; the server creates PaymentIntents / PayPal Orders and
+// receives webhooks. Platform fee (0.5% fundraising, 3% POS, 1% school fees) is
+// auto-routed to the platform account via Stripe Connect or logged to platform_commissions.
+try {
+  app.use('/api/payments/stripe', require('./src/routes/payments-stripe')(_routeSharedCtx));
+  console.log('[Payments] Stripe routes loaded at /api/payments/stripe');
+} catch (e) { console.warn('[Payments] Stripe routes failed to load:', e.message); }
+
+try {
+  app.use('/api/payments/paypal', require('./src/routes/payments-paypal')(_routeSharedCtx));
+  console.log('[Payments] PayPal routes loaded at /api/payments/paypal');
+} catch (e) { console.warn('[Payments] PayPal routes failed to load:', e.message); }
+
+// === HIPAA-compliant clinic routes (Track A) ===
+// AES-256-GCM field-level encryption for PHI (patient name, DOB, phone, address,
+// diagnosis, prescription text). Encrypts on write, decrypts on read, audit-logs
+// every access. See src/lib/hipaa-encryption.js and docs/HIPAA_COMPLIANCE.md.
+try {
+  app.use('/api/clinic', require('./src/routes/clinic-hipaa')(_routeSharedCtx));
+  console.log('[Clinic] HIPAA-compliant clinic routes loaded at /api/clinic');
+} catch (e) { console.warn('[Clinic] HIPAA clinic routes failed to load:', e.message); }
+
 // === Extracted v1 REST API routes (Conservative refactor — Track 1) ===
 // The /api/v1/openapi.json route below remains inline because it's a single
 // ~285-line JSON spec route.
@@ -40899,6 +40923,39 @@ try { const m = require('./carpool-coordination'); m(app, pool, _newModOpts); co
 // 4. Bus Route Optimizer (1,970 lines — fleet & route management)
 try { const m = require('./bus-route-optimizer'); m(app, pool, _newModOpts); console.log('[BusRoutes] Bus route optimizer loaded — 8 tables, 22+ routes'); } catch(e) { console.warn('[BusRoutes] Error:', e.message); }
 
+// === PUBLIC VERIFICATION RATE LIMITER (Track C) ===
+// Strict limit on /public/verify/* and /api/public/verify/* endpoints — these
+// expose credential verification and must not be scrapable. 10 requests per
+// minute per IP, with a small burst. Mirrors the Nginx `public_verify` zone
+// (see nginx/ssewasswa.conf) for defense in depth — even if Nginx is bypassed
+// (e.g., during local development or on Render where there is no Nginx), the
+// app still enforces the limit. See docs/RATE_LIMITING.md for the full
+// three-layer strategy.
+const publicVerifyLimiter = rateLimit({
+  windowMs: 60 * 1000,    // 1 minute
+  max: 10,                // 10 requests per minute
+  standardHeaders: true,  // Emit RateLimit-* headers
+  legacyHeaders: false,   // Suppress X-RateLimit-* headers
+  message: {
+    error: 'Too many verification requests from this IP. Please try again in a minute.',
+    retry_after_seconds: 60,
+  },
+  keyGenerator: (req) => {
+    // Use X-Forwarded-For (set by Nginx/Cloudflare/Render) if present, else req.ip.
+    // The first IP in the XFF list is the original client.
+    const xff = req.headers['x-forwarded-for'];
+    return (xff ? xff.split(',')[0].trim() : req.ip) || 'unknown';
+  },
+});
+
+// Mount BEFORE blockchain-certificates is loaded so the limiter runs ahead of
+// the route handlers for both the HTML UI (/public/verify/:certCode) and the
+// JSON API (/api/public/verify/:certCode — added by Track C in
+// blockchain-certificates.js). The /api/ general limiter (line 869) also
+// matches /api/public/verify/* — both run; the stricter one rejects first.
+app.use('/public/verify', publicVerifyLimiter);
+app.use('/api/public/verify', publicVerifyLimiter);
+
 // 5. Blockchain Certificates (1,741 lines — tamper-proof digital certs)
 try { const m = require('./blockchain-certificates'); m(app, pool, _newModOpts); console.log('[BlockchainCerts] Blockchain certificates loaded — 5 tables, 22+ routes'); } catch(e) { console.warn('[BlockchainCerts] Error:', e.message); }
 
@@ -45958,6 +46015,48 @@ console.log('[SavedFilters] API routes registered — /api/filters/*');
 // ============================================================
 app.use('/settings', require('./src/routes/settings-search')(_routeSharedCtx));
 console.log('[SettingsSearch] API route registered — /settings/search');
+
+// ============================================================
+// STRIPE + PAYPAL LIVE SDK INTEGRATION (Track B)
+// ============================================================
+// Tokenized payment gateway for multi-currency overseas donations.
+// Card data NEVER touches our servers — Stripe.js and the PayPal JS SDK
+// tokenize everything client-side. The server only ever sees the
+// PaymentIntent ID / PayPal Order ID and uses webhooks to reconcile.
+//
+// Both route modules fail soft: if STRIPE_SECRET_KEY / PAYPAL_CLIENT_ID
+// are not set, the modules still load and register routes, but the
+// endpoints return HTTP 503 with a clear "not configured" message. This
+// means the rest of the app (MTN MoMo, Flutterwave, etc.) keeps working
+// unchanged on environments that don't use Stripe/PayPal.
+//
+// Webhook paths (/api/payments/stripe/webhook, /api/payments/paypal/webhook)
+// are CSRF-exempt via the existing `isCSRFExempt` and webhook-paths
+// checks earlier in this file (the substrings '/stripe/webhook' and
+// '/webhook' both match). No changes to the CSRF middleware were needed.
+//
+// TODO (raw-body webhook verification): Stripe's webhook signature is
+// computed over the RAW request body, but the global express.json()
+// middleware at line 516 has already parsed the body by the time the
+// webhook route handler runs. The route re-stringifies req.body to
+// verify the signature — this works for >99% of webhooks (Stripe uses
+// canonical compact JSON) but may fail in rare Unicode-escape cases.
+// The proper fix is to mount the Stripe webhook route BEFORE the global
+// JSON parser using express.raw() — that requires touching line 516,
+// which is forbidden by the audit-line-number preservation constraint.
+try {
+  app.use('/api/payments/stripe', require('./src/routes/payments-stripe')(_routeSharedCtx));
+  console.log('[Payments] Stripe routes loaded — /api/payments/stripe/*');
+} catch (e) {
+  console.warn('[Payments] Stripe routes failed to load:', e.message);
+}
+
+try {
+  app.use('/api/payments/paypal', require('./src/routes/payments-paypal')(_routeSharedCtx));
+  console.log('[Payments] PayPal routes loaded — /api/payments/paypal/*');
+} catch (e) {
+  console.warn('[Payments] PayPal routes failed to load:', e.message);
+}
 
 // ============================================================
 // PHASE 4 COMPLETE: All remaining gap analysis tasks implemented

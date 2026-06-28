@@ -1200,6 +1200,95 @@ module.exports = function(app, pool, opts) {
   }));
 
   // ============================================================
+  // ROUTE 13b: GET /api/public/verify/:certCode — JSON API for external integrators
+  // (Track C — sponsors, NGOs, employers verify graduations/licenses programmatically)
+  //
+  // Rate-limited at 10 req/min per IP via the publicVerifyLimiter mounted in
+  // server.js (mounted at /api/public/verify BEFORE this module loads). The
+  // general /api/ limiter (server.js line 869) also runs; the stricter one
+  // rejects first.
+  //
+  // Looks up the cert across ALL tenants — public verification should not
+  // require the caller to know which tenant issued the credential.
+  // ============================================================
+  app.get('/api/public/verify/:certCode', ah(async (req, res) => {
+    const certCode = req.params.certCode;
+    const r = await pool.query(
+      `SELECT bc.id, bc.tenant_id, bc.student_id, bc.template_id, bc.cert_code,
+              bc.title, bc.description, bc.issue_date, bc.expiry_date,
+              bc.status, bc.revoked_at, bc.revoke_reason, bc.created_at,
+              ten.name   AS tenant_name,
+              ten.subdomain AS tenant_subdomain,
+              ten.custom_domain AS tenant_custom_domain,
+              tpl.name   AS template_name,
+              tpl.category AS template_category,
+              bl.block_number, bl.cert_hash, bl.previous_hash,
+              bl.timestamp AS mined_at, bl.miner
+         FROM blockchain_certificates bc
+         JOIN tenants        ten ON ten.id = bc.tenant_id
+    LEFT JOIN cert_templates   tpl ON tpl.id = bc.template_id
+    LEFT JOIN blockchain_ledger bl ON bl.cert_id = bc.id
+        WHERE bc.cert_code = $1
+        LIMIT 1`,
+      [certCode]
+    );
+
+    if (!r.rows.length) {
+      return res.status(404).json({
+        verified: false,
+        cert_code: certCode,
+        error: 'Certificate not found',
+      });
+    }
+
+    const c = r.rows[0];
+    // Log the verification attempt (best-effort — log table may not exist for
+    // every tenant). Mirrors the HTML route's logging at line 1082.
+    try {
+      await pool.query(
+        'INSERT INTO cert_verification_log (tenant_id, cert_id, verifier_ip, is_valid) VALUES ($1,$2,$3,$4)',
+        [c.tenant_id, c.id, req.ip || 'unknown', c.status === 'issued' ? 1 : 0]
+      );
+    } catch (e) { /* log table may not exist for this tenant */ }
+
+    // Build the canonical verification URL — prefer the tenant's custom
+    // domain if set, else fall back to the subdomain on the platform host.
+    const platformHost = req.get('host') || 'ssewasswa.onrender.com';
+    const issuerHost = c.tenant_custom_domain
+      || (c.tenant_subdomain ? `${c.tenant_subdomain}.ssewasswa.com` : platformHost);
+    const verificationUrl = `${req.protocol}://${issuerHost}/public/verify/${c.cert_code}`;
+
+    return res.json({
+      verified: c.status === 'issued',
+      status: c.status,                                   // 'issued' | 'revoked' | 'draft' | ...
+      revoked: c.status === 'revoked',
+      cert_code: c.cert_code,
+      title: c.title,
+      description: c.description || null,
+      issue_date: c.issue_date,                           // DATE (ISO yyyy-mm-dd)
+      expiry_date: c.expiry_date || null,
+      template_name: c.template_name || null,
+      template_category: c.template_category || null,
+      issuer_name: c.tenant_name,                         // tenant.name
+      issuer_subdomain: c.tenant_subdomain || null,
+      issuer_custom_domain: c.tenant_custom_domain || null,
+      blockchain: c.block_number ? {
+        block_number: c.block_number,
+        cert_hash: c.cert_hash,                           // SHA-256 hash of the cert payload
+        previous_hash: c.previous_hash,
+        mined_at: c.mined_at,                             // ISO timestamp
+        miner: c.miner || 'system',
+      } : null,
+      revocation: c.revoked_at ? {
+        revoked_at: c.revoked_at,
+        reason: c.revoke_reason || null,
+      } : null,
+      verification_url: verificationUrl,
+      retrieved_at: new Date().toISOString(),
+    });
+  }));
+
+  // ============================================================
   // ROUTE 14: GET /school/blockchain-certs/gallery — Student Gallery
   // ============================================================
   app.get('/school/blockchain-certs/gallery', requireAuth, ah(async (req, res) => {
