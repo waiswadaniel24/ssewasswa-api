@@ -25,7 +25,7 @@
     "@aws-sdk/client-kms": "^3.1075.0",
     "@paypal/checkout-server-sdk": "^1.0.3",
     "@sentry/node": "^10.52.0",
-    "africastalking": "^0.7.0",
+    "africastalking": "^0.8.0",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.7.0",
     "cloudinary": "^2.2.0",
