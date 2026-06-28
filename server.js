@@ -157,11 +157,16 @@ app.use((req, res, next) => {
 // Validate CSRF token on ALL state-changing requests
 // Skip only: webhook callbacks, API endpoints (use API key auth), USSD, opt-out, payment callbacks
 const CSRF_SKIP_PREFIXES = ['/webhook', '/api/', '/ussd', '/opt-out', '/pay/', '/momo/'];
+const CSRF_SKIP_PATHS = ['/login', '/register', '/forgot-password'];
 app.use((req, res, next) => {
   if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
     const path = req.path;
     // Skip for known external callback endpoints
     if (CSRF_SKIP_PREFIXES.some(p => path.startsWith(p))) {
+      return next();
+    }
+    // Skip for public auth routes (no authenticated session to validate against)
+    if (CSRF_SKIP_PATHS.includes(path)) {
       return next();
     }
     // Skip CSRF validation if session is not available yet
@@ -1820,11 +1825,13 @@ const uniqueConstraintMigrations = [
       for (const [name, display, desc, price, cycle, features, maxUsers, maxStudents, active, sort] of planSeeds) {
         const planKey = name.toLowerCase();
         try {
-          await pool.query('INSERT INTO subscription_plans(plan_key,name,display_name,description,price,currency,billing_cycle,features,max_users,max_students,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(name) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,price=EXCLUDED.price,features=EXCLUDED.features,max_users=EXCLUDED.max_users,max_students=EXCLUDED.max_students,is_active=EXCLUDED.is_active,sort_order=EXCLUDED.sort_order,plan_key=EXCLUDED.plan_key', [planKey, name, display, desc, price, 'UGX', cycle, features, maxUsers, maxStudents, active, sort]);
+          await pool.query('INSERT INTO subscription_plans(plan_key,name,display_name,description,price,currency,billing_cycle,features,max_users,max_students,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(name) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,price=EXCLUDED.price,features=EXCLUDED.features,max_users=EXCLUDED.max_users,max_students=EXCLUDED.max_students,is_active=EXCLUDED.is_active,sort_order=EXCLUDED.sort_order', [planKey, name, display, desc, price, 'UGX', cycle, features, maxUsers, maxStudents, active, sort]);
         } catch (planErr) {
           // UNIQUE constraint on name may not exist yet on older DBs - try plain INSERT
           if (planErr.message.includes('ON CONFLICT')) {
             try { await pool.query('INSERT INTO subscription_plans(plan_key,name,display_name,description,price,currency,billing_cycle,features,max_users,max_students,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [planKey, name, display, desc, price, 'UGX', cycle, features, maxUsers, maxStudents, active, sort]); } catch(e2) { /* duplicate OK */ }
+          } else if (planErr.message.includes('plan_key')) {
+            /* plan_key unique constraint conflict on UPDATE - ignore */
           } else throw planErr;
         }
       }
@@ -6289,7 +6296,7 @@ app.get('/dev/plans', requireAuth, requireSuperAdmin, ah(async (req, res) => {
 app.post('/dev/plans/save', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const { name, display_name, description, price, billing_cycle, features, max_users, max_students } = req.body;
   const planKey = (name || '').toLowerCase().replace(/\s+/g, '_');
-  await pool.query('INSERT INTO subscription_plans(plan_key,name,display_name,description,price,billing_cycle,features,max_users,max_students) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(name) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,price=EXCLUDED.price,features=EXCLUDED.features,max_users=EXCLUDED.max_users,max_students=EXCLUDED.max_students,plan_key=EXCLUDED.plan_key',
+  await pool.query('INSERT INTO subscription_plans(plan_key,name,display_name,description,price,billing_cycle,features,max_users,max_students) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(name) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,price=EXCLUDED.price,features=EXCLUDED.features,max_users=EXCLUDED.max_users,max_students=EXCLUDED.max_students',
     [planKey, name, display_name || name, description || '', parseInt(price) || 0, billing_cycle || 'monthly', features || '', parseInt(max_users) || 5, parseInt(max_students) || 100]);
   await audit(req.session.user.email, 'create_plan', `Plan: ${name} @ UGX ${price}`);
   req.session.flash = { type: 'success', msg: 'Plan saved!' };
